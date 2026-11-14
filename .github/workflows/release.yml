@@ -48,7 +48,7 @@ jobs:
       # The same Node as the Dockerfile's, kept so by Renovate's node group.
       - uses: actions/setup-node@v7
         with:
-          node-version: 24.22.2
+          node-version: 24.22.3
           cache: npm
       - run: make test
 

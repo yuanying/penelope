@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/root/go/pkg/mod \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
     go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/sentinel ./cmd/sentinel
 
-FROM --platform=$BUILDPLATFORM node:24.22.2-trixie-slim AS ts-build
+FROM --platform=$BUILDPLATFORM node:24.22.3-trixie-slim AS ts-build
 WORKDIR /src
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages ./packages
@@ -43,7 +43,7 @@ ENTRYPOINT ["/sentinel"]
 # The TypeScript images carry the package's package.json (it makes dist/ ES
 # modules) and what tsc wrote. The packages have no runtime dependencies yet;
 # the one that gets the first installs it here with npm ci --omit=dev.
-FROM node:24.22.2-trixie-slim AS backend
+FROM node:24.22.3-trixie-slim AS backend
 ARG VERSION
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
@@ -52,7 +52,7 @@ COPY --from=ts-build /src/packages/backend/dist ./dist
 USER node
 ENTRYPOINT ["node", "/app/dist/main.js"]
 
-FROM node:24.22.2-trixie-slim AS receivers
+FROM node:24.22.3-trixie-slim AS receivers
 ARG VERSION
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
@@ -64,7 +64,7 @@ ENTRYPOINT ["node", "/app/dist/main.js"]
 # Only the runner for now. The development tools, the Sentinel's CA and the
 # generic user and HOME (ADR-0011) come with the sandbox image's own work;
 # until then it runs as the node image's user, UID 1000.
-FROM node:24.22.2-trixie-slim AS sandbox
+FROM node:24.22.3-trixie-slim AS sandbox
 ARG VERSION
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /opt/penelope/runner
