@@ -92,9 +92,9 @@ export async function openSession(
 ): Promise<AgentSession> {
   const { config, modelRuntime } = setup;
   const settingsManager = setup.settings();
-  // Pi keeps the first skill of a name, so the owner's come first.
+  // Pi keeps the first skill of a name: the owner's, then her own, then the image's (ADR-0035).
   const skillPaths = [];
-  for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills")]) {
+  for (const dir of [config.ownerSkillsDir, join(config.memoryDir, "skills"), config.imageSkillsDir]) {
     if (dir && (await exists(dir))) skillPaths.push(dir);
   }
   const resourceLoader = new DefaultResourceLoader({

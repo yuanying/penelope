@@ -218,6 +218,12 @@ COPY --from=ts-build /src/packages/slack/dist ./node_modules/@penelope/slack/dis
 COPY --from=ts-build /src/packages/slack/package.json /opt/penelope/slack/
 COPY --from=ts-build /src/packages/slack/dist /opt/penelope/slack/dist
 COPY packages/slack/bin/slackctl /usr/local/bin/slackctl
+# What comes with the image whatever the deployment (ADR-0035): the
+# connectors' documents on the use of the tools, the skills, and the avatars,
+# whose appearance.yaml and sdctl-params.yaml the runner points the shell at.
+COPY packages/runner/image/connectors /opt/penelope/connectors
+COPY packages/runner/image/skills /opt/penelope/skills
+COPY assets/avatars /opt/penelope/avatars
 ENV NODE_ENV=production PENELOPE_VERSION=${VERSION} \
     HOME=/home/agent USER=agent \
     PATH=/home/agent/.local/bin:/home/agent/go/bin:/usr/local/go/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \

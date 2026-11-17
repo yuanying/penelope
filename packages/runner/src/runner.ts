@@ -18,7 +18,7 @@ import type { Activity, ControlPayload, DeliveredEvent } from "@penelope/contrac
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
-import { type Connector, readConnectors } from "./connectors.ts";
+import { type ConnectorList, listConnectors } from "./connectors.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
@@ -140,6 +140,7 @@ export class Runner {
       sources: options.config.sourcesDir,
       home: options.config.home,
       ...(options.config.ownerSkillsDir ? { ownerSkills: options.config.ownerSkillsDir } : {}),
+      imageSkills: options.config.imageSkillsDir,
     };
   }
 
@@ -164,13 +165,11 @@ export class Runner {
     }
   }
 
-  /** The connectors' documents as they are now; none without a directory. */
-  private async connectors(): Promise<{ dir: string; list: Connector[] } | undefined> {
-    const dir = this.config.connectorsDir;
-    if (!dir) return undefined;
-    const { connectors: list, skipped } = await readConnectors(dir);
+  /** The connectors' documents as they are now: the image's and the deployment's (ADR-0035). */
+  private async connectors(): Promise<ConnectorList> {
+    const { connectors, skipped } = await listConnectors(this.config.imageConnectorsDir, this.config.connectorsDir);
     for (const { path, reason } of skipped) this.log(`connector left out: ${path} ${reason}`);
-    return { dir, list };
+    return connectors;
   }
 
   private async mainPrompt(): Promise<string> {
@@ -179,7 +178,7 @@ export class Runner {
     return systemPrompt(this.config.identity, this.places, files, {
       folding: this.config.turnFold,
       slackSources: this.config.slack.sources,
-      ...(connectors ? { connectors } : {}),
+      connectors,
     });
   }
 

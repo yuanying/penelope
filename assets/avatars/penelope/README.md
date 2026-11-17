@@ -7,9 +7,13 @@ backend の設定で `PENELOPE_AVATAR=penelope` を選ぶと、Web UI の名前�
 | `avatar.json` | ID・表示名と、表情ごとのアイコンと Slack 用の PNG の場所 |
 | `icons/<表情>.webp` | 顔を切り出した 512×512 の WebP。Web UI が使う。neutral・happy・laughing・surprised・thinking・worried・sad・sleepy・angry の 9 種 |
 | `slack/<表情>.png` | 同じ 9 種の 256×256 の PNG。Slack の投稿のアイコンに使う |
+| `appearance.yaml` | 絵に描くときの姿（体・服・残す特徴・場面の例）。sandbox の skill `self-portrait` が読む（[docs/pod.md](../../../docs/pod.md) の「姿の素材」） |
+| `sdctl-params.yaml` | この姿を描く sdctl の既定の params（モデル・サンプラー・大きさなど）。sandbox の `SDCTL_PARAMS` の既定になる |
 
 ## 出どころ
 
 [yuanying/natsumi](https://github.com/yuanying/natsumi)（MIT）の `assets/avatars/penelope/` から、コミット `69ad229a1b7afd677a89f75c6e0c20e378078705` の `avatar.json` と `icons/*.webp` をそのまま写した。`slack/*.png` は、コミット `0187c41eafef444a89667ded34d4895f139a2a48` から同じくそのまま写し、その場所（`pngIcons`）を `avatar.json` に足した。生成の手順と設定は、写し元の README にある。
 
-生成元の PNG、`appearance.yaml`、`sdctl-params.yaml`、`personality.md` は写していない（性格は記憶の側で持つ）。
+`appearance.yaml` と `sdctl-params.yaml` は、同じ写し元のコミット `87532297c6c66f0e421ac216b283cd2cdf68c392` からそのまま写した。
+
+生成元の PNG と `personality.md` は写していない（性格は記憶の側で持つ）。

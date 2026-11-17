@@ -112,6 +112,23 @@ test("the owner's skills are listed beside the memory's, and the owner's wins a 
   assert.ok(prompt.includes("Her own diary."), "the memory's skills are still listed");
 });
 
+test("the image's skills are listed, and a name the owner or the memory also has is theirs", async () => {
+  const { fake, start, calls, config } = await world({ ownerSkills: true });
+  await skills(config.imageSkillsDir, { goals: "Goals of the image.", portrait: "Portrait of the image.", drawing: "Drawing of the image." });
+  await skills(config.ownerSkillsDir!, { goals: "Goals of the owner." });
+  await skills(join(config.memoryDir, "skills"), { portrait: "Her own portrait." });
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  const prompt = calls[0]!.systemPrompt;
+  // Guards against: the image's skills not reaching her, or taking the place of a copy a deployment still gives or she wrote.
+  assert.ok(prompt.includes("Drawing of the image."));
+  assert.ok(prompt.includes("Goals of the owner."));
+  assert.ok(!prompt.includes("Goals of the image."));
+  assert.ok(prompt.includes("Her own portrait."));
+  assert.ok(!prompt.includes("Portrait of the image."));
+});
+
 test("a read-only directory of the owner's skills is read and left as it was", async () => {
   const { fake, start, calls, config } = await world({ ownerSkills: true });
   const dir = config.ownerSkillsDir!;
@@ -159,6 +176,21 @@ test("the connectors' documents are listed in her system prompt, and a broken on
   assert.ok(prompt.includes(join(dir, "github.md")));
   assert.ok(!prompt.includes(join(dir, "broken.md")));
   assert.ok(logs.some((line) => line.includes(join(dir, "broken.md"))), "the broken one is logged");
+});
+
+test("the image's connectors are listed beside the deployment's", async () => {
+  const { fake, start, calls, config } = await world({ connectors: true });
+  await mkdir(config.imageConnectorsDir, { recursive: true });
+  await writeFile(join(config.imageConnectorsDir, "a2a.md"), "---\nname: a2a\ndescription: How the a2a CLI is used.\n---\n");
+  await mkdir(config.connectorsDir!, { recursive: true });
+  await writeFile(join(config.connectorsDir!, "vmapi.md"), "---\nname: vmapi\ndescription: The VM API.\nhosts: [vm.example.com]\n---\n");
+  await start(replying);
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+  const prompt = calls[0]!.systemPrompt;
+  // Guards against: one of the two places of documents not reaching her.
+  assert.ok(prompt.includes(join(config.imageConnectorsDir, "a2a.md")));
+  assert.ok(prompt.includes(join(config.connectorsDir!, "vmapi.md")));
 });
 
 test("a directory of connectors that is not there is passed over", async () => {
@@ -247,7 +279,7 @@ test("a batch that comes during a turn follows it", async () => {
   assert.deepEqual(acked(fake).sort(), [1, 2, 3]);
 });
 
-const placesOf = (config: Config): Places => ({ memory: config.memoryDir, sources: config.sourcesDir, home: config.home });
+const placesOf = (config: Config): Places => ({ memory: config.memoryDir, sources: config.sourcesDir, home: config.home, imageSkills: config.imageSkillsDir });
 
 // The calls of the night are told apart by the prompts the runner gives, so that
 // a change of their wording does not change which call is which.

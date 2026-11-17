@@ -23,7 +23,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0017 | [ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする](0017-turn-input-as-json-lines-in-events.md) | Accepted |
 | 0018 | [A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) | Accepted |
 | 0019 | [ssh は別のコンテナの ssh-agent の socket で行い、鍵は sandbox に見せない](0019-ssh-through-an-agent-socket-keys-kept-out-of-the-sandbox.md) | Superseded by ADR-0021 |
-| 0020 | [コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す](0020-connectors-with-a-usage-document-listed-in-the-prompt.md) | Accepted |
+| 0020 | [コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す](0020-connectors-with-a-usage-document-listed-in-the-prompt.md) | Accepted（一部を ADR-0035 で置き換え） |
 | 0021 | [自分で作った VM への ssh の鍵は、エージェントが自分で HOME に作る](0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md) | Accepted |
 | 0022 | [サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする](0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) | Accepted |
 | 0023 | [receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける](0023-receivers-plugins-in-the-repository-and-alertmanager-first.md) | Accepted |
@@ -38,3 +38,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0032 | [返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md) | Accepted |
 | 0033 | [Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す](0033-slack-posts-through-slackctl-with-the-token-stand-in.md) | Accepted |
 | 0034 | [オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md) | Accepted |
+| 0035 | [道具の使い方の文書・共通の skill・姿の素材は sandbox の image に入れ、配置の文書は同じ名前で重ねる](0035-tool-usage-connectors-skills-and-avatars-in-the-image.md) | Accepted |

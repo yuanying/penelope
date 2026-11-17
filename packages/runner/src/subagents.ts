@@ -21,7 +21,7 @@ import { type Activity, isSubAgentName, type SubAgentNotice, type SubAgentStopRe
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
-import type { Connector } from "./connectors.ts";
+import type { ConnectorList } from "./connectors.ts";
 import { newSessionFileIn, openSession, type PiSetup } from "./pi.ts";
 import { type Places, subAgentSystemPrompt } from "./prompts.ts";
 
@@ -73,7 +73,7 @@ export interface SubAgentsOptions {
   setup: PiSetup;
   /** The main agent's client of the backend; each sub-agent calls it as itself. */
   backend: Backend;
-  connectors: () => Promise<{ dir: string; list: Connector[] } | undefined>;
+  connectors: () => Promise<ConnectorList>;
   log: (line: string) => void;
   /** The first wait before a notice is sent again; it doubles up to 30 seconds. */
   retryMs: number;
@@ -148,6 +148,7 @@ export class SubAgents {
       sources: options.config.sourcesDir,
       home: options.config.home,
       ...(options.config.ownerSkillsDir ? { ownerSkills: options.config.ownerSkillsDir } : {}),
+      imageSkills: options.config.imageSkillsDir,
     };
   }
 
@@ -349,7 +350,7 @@ export class SubAgents {
       this.config.identity,
       this.places,
       { name: record.name, purpose: record.purpose, cwd: record.cwd, ...(role ? { role } : {}) },
-      connectors ? { connectors } : {},
+      { connectors },
     );
     const dir = join(this.config.subAgentDir, record.name);
     return openSession(this.setup, prompt, SessionManager.open(record.session, dir, record.cwd), record.cwd);

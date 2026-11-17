@@ -3,8 +3,9 @@ import { mkdir, mkdtemp, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { readConnectors } from "../src/connectors.ts";
+import { listConnectors, readConnectors } from "../src/connectors.ts";
 
 async function dir(files: Record<string, string>): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "connectors-"));
@@ -76,4 +77,31 @@ test("a document mounted as a link, the way a ConfigMap is, is read", async () =
     ["github"],
   );
   assert.deepEqual(skipped, []);
+});
+
+test("a connector in both the image and the deployment is listed once, with the deployment's description and hosts and both documents", async () => {
+  // Guards against: a deployment that still has a full document of a connector the image has, listed twice or without its hosts.
+  const image = await dir({ "slack.md": "---\nname: slack\ndescription: How slackctl is used.\n---\n" });
+  const deployment = await dir({ "slack.md": doc("slack", "Slack of this deployment.", ["slack.com"]) });
+  const { connectors, skipped } = await listConnectors(image, deployment);
+  assert.deepEqual(connectors.list, [
+    { name: "slack", description: "Slack of this deployment.", hosts: ["slack.com"], documents: [join(deployment, "slack.md"), join(image, "slack.md")] },
+  ]);
+  assert.deepEqual(skipped, []);
+});
+
+test("a document of the image needs no hosts, and is listed without them", async () => {
+  // Guards against: the image's documents, which name no host of any deployment, being left out where the deployment has none.
+  const image = await dir({ "a2a.md": "---\nname: a2a\ndescription: How the a2a CLI is used.\nhosts: [ignored.example.com]\n---\n" });
+  const { connectors, skipped } = await listConnectors(image);
+  assert.deepEqual(connectors, { image, list: [{ name: "a2a", description: "How the a2a CLI is used.", hosts: [], documents: [join(image, "a2a.md")] }] });
+  assert.deepEqual(skipped, []);
+});
+
+test("every document the image carries is listed", async () => {
+  // Guards against: a document in packages/runner/image/connectors that the runner silently leaves out of every deployment.
+  const image = fileURLToPath(new URL("../image/connectors", import.meta.url));
+  const { connectors, skipped } = await listConnectors(image);
+  assert.deepEqual(skipped, []);
+  assert.ok(connectors.list.length > 0);
 });

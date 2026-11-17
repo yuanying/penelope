@@ -8,7 +8,7 @@ import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Identity } from "./config.ts";
-import type { Connector } from "./connectors.ts";
+import type { ConnectorList } from "./connectors.ts";
 
 export interface Places {
   memory: string;
@@ -16,6 +16,8 @@ export interface Places {
   home: string;
   /** The owner's skills, read-only; left out when there are none. */
   ownerSkills?: string;
+  /** The skills that come with the image (ADR-0035); left out, none are named. */
+  imageSkills?: string;
 }
 
 /** The memory files the system prompt carries, in this order. */
@@ -48,19 +50,27 @@ export async function readPromptFiles(memoryDir: string, maxBytes: number): Prom
 }
 
 /** `owner` is how the prompt names the owner: "your owner" for her, the name for the curator. */
-const MEMORY_SHAPE = ({ memory, ownerSkills }: Places, owner: string) => `- personality.md: the personality and the way of talking.
+const MEMORY_SHAPE = (places: Places, owner: string) => `- personality.md: the personality and the way of talking.
 - always.md: what is kept in mind at all times.
 - handoff.md: what one session leaves for the next.
 - INDEX.md: the index of the memory.
 - diary/YYYY-MM-DD.md: what happened on each day.
 - archive/: older facts, in summaries.
-- skills/<name>/SKILL.md: skills. Those in ${memory}/skills/ are listed at the end of the system prompt of each new session.${
-  ownerSkills
-    ? ` So are ${owner}'s skills, in ${ownerSkills}/, which is read-only; where a name is in both, the one listed is ${owner}'s.`
-    : ""
-}
+- skills/<name>/SKILL.md: skills. Those in ${places.memory}/skills/ are listed at the end of the system prompt of each new session.${otherSkills(places, owner)}
 - agents/<role>.md: the roles of sub-agents, one file each, with \`name\` and \`description\` in its front matter. When a sub-agent is started with a role, the body of its file follows the sub-agent's system prompt; without one, the body of agents/default.md does.
 - Any other file: one topic each.`;
+
+/** The skills listed beside the memory's, and which one of a name is listed (pi.ts keeps that order). */
+function otherSkills({ ownerSkills, imageSkills }: Places, owner: string): string {
+  const others = [
+    ...(ownerSkills ? [`${owner}'s skills, in ${ownerSkills}/, which is read-only`] : []),
+    ...(imageSkills ? [`the skills that come with the image, in ${imageSkills}/`] : []),
+  ];
+  if (others.length === 0) return "";
+  const order = [...(ownerSkills ? [`${owner}'s`] : []), "the memory's", ...(imageSkills ? ["the image's"] : [])];
+  const which = others.length === 1 ? `where a name is in both, the one listed is ${order[0]}` : `where a name is in more than one, the one listed is ${order.join(", then ")}`;
+  return ` So are ${others.join(", and ")}; ${which}.`;
+}
 
 function appended(files: PromptFile[]): string {
   return files
@@ -79,16 +89,25 @@ export const FOLDING =
 const escapeXml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
 
-/** The connectors, in the shape Pi lists skills in; nothing when there are none (ADR-0020). */
-function connectorsSection(connectors: { dir: string; list: Connector[] } | undefined): string {
+/** The connectors, in the shape Pi lists skills in; nothing when there are none (ADR-0020, ADR-0035). */
+function connectorsSection(connectors: ConnectorList | undefined): string {
   if (!connectors || connectors.list.length === 0) return "";
-  const entries = connectors.list.map(
-    (c) =>
-      `  <connector>\n    <name>${escapeXml(c.name)}</name>\n    <description>${escapeXml(c.description)}</description>\n    <hosts>${c.hosts.map(escapeXml).join(" ")}</hosts>\n    <location>${escapeXml(c.path)}</location>\n  </connector>`,
+  const entries = connectors.list.map((c) =>
+    [
+      "  <connector>",
+      `    <name>${escapeXml(c.name)}</name>`,
+      `    <description>${escapeXml(c.description)}</description>`,
+      ...(c.hosts.length > 0 ? [`    <hosts>${c.hosts.map(escapeXml).join(" ")}</hosts>`] : []),
+      ...c.documents.map((path) => `    <location>${escapeXml(path)}</location>`),
+      "  </connector>",
+    ].join("\n"),
   );
+  const deployment = connectors.deployment
+    ? ` Those in ${connectors.deployment} are the deployment's: its hosts, the environment variables that hold the stand-ins, and what holds only here. A connector in both has the deployment's document first, and where the two differ, the deployment's holds.`
+    : "";
   return `\n\n# Connectors
 
-A connector is a set of hosts for which the Sentinel puts the real credential in place of the stand-in, with a document on its use: the environment variables that hold the stand-ins, the tools, and what to mind. The documents are in ${connectors.dir}, one file each, as the deployment put them; this list is as it was when this session started.
+A connector is a service reached through the Sentinel, with documents on its use. Its hosts are those for which the Sentinel puts the real credential in place of the stand-in; a connector listed without hosts has none registered by this deployment. The documents in ${connectors.image} come with the image and say how its tools are used wherever it runs.${deployment} This list is as it was when this session started.
 
 <connectors>
 ${entries.join("\n")}
@@ -112,7 +131,7 @@ export function systemPrompt(
   identity: Identity,
   places: Places,
   files: PromptFile[],
-  options: { folding?: boolean; connectors?: { dir: string; list: Connector[] }; slackSources?: readonly string[] } = {},
+  options: { folding?: boolean; connectors?: ConnectorList; slackSources?: readonly string[] } = {},
 ): string {
   const { memory, sources, home } = places;
   const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
@@ -197,10 +216,11 @@ export function subAgentSystemPrompt(
   identity: Identity,
   places: Places,
   agent: SubAgentPlace,
-  options: { connectors?: { dir: string; list: Connector[] } } = {},
+  options: { connectors?: ConnectorList } = {},
 ): string {
   const { name } = identity;
-  const skills = places.ownerSkills ? `${places.memory}/skills/ and ${places.ownerSkills}/` : `${places.memory}/skills/`;
+  const dirs = [`${places.memory}/skills/`, ...(places.ownerSkills ? [`${places.ownerSkills}/`] : []), ...(places.imageSkills ? [`${places.imageSkills}/`] : [])];
+  const skills = dirs.length === 1 ? dirs[0] : `${dirs.slice(0, -1).join(", ")} and ${dirs.at(-1)}`;
   const prompt = `You are a sub-agent of ${name}, ${identity.role}, whose owner is ${identity.owner}. ${name} started you, named \`${agent.name}\`, for this purpose: ${agent.purpose}
 
 Your requests come from ${name} alone: the first one when you were started, and more words when ${name} sends them after you have stopped. You stop when you answer without calling a tool. Then the text of that last answer reaches ${name} in full, as an event; nothing else of your run reaches ${name}, and nothing of it reaches ${identity.owner}. You can stop with a question; ${name}'s answer comes as more words, and you go on in this session.

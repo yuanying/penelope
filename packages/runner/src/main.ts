@@ -3,10 +3,12 @@
 //
 //   runner run      run until SIGTERM or SIGINT
 //   runner version  print the version
+import { existsSync } from "node:fs";
 import process from "node:process";
 
 import { ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
 
+import { avatarEnv } from "./avatar.ts";
 import { Backend } from "./backend.ts";
 import { ConfigError, readConfig } from "./config.ts";
 import { Runner } from "./runner.ts";
@@ -39,6 +41,8 @@ async function serve(env: Readonly<Record<string, string | undefined>>): Promise
     }
     throw error;
   }
+  // The shell and the jobs inherit these: where her figure is, and sdctl's params.
+  Object.assign(process.env, avatarEnv(env, existsSync));
   const modelRuntime = await ModelRuntime.create({
     authPath: `${config.agentDir}/auth.json`,
     modelsPath: `${config.agentDir}/models.json`,

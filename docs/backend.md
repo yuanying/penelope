@@ -40,7 +40,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
 | `PENELOPE_AVATAR` | なし | UI に出すアバターの名前。`PENELOPE_AVATARS_DIR` の下の、この名前のディレクトリを読む（[ui-api.md](ui-api.md) の「エージェント」）。image に入っているのは `penelope`・`natsumi`・`myao`・`aki` |
-| `PENELOPE_AVATARS_DIR` | `/app/avatars` | アバターの置き場所。image にはリポジトリの `assets/avatars/` が入っている |
+| `PENELOPE_AVATARS_DIR` | `/app/avatars` | アバターの置き場所。image にはリポジトリの `assets/avatars/` が入っている。sandbox も同じ名前の 2 つの設定で、同じアバターの姿の素材を読む（[pod.md](pod.md) の「姿の素材」） |
 | `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。アバターの `avatar.json` の名前より優先する |
 | `PENELOPE_WEB_DIR` | `/app/web` | Web UI の build の場所。image ではここに入っている |
 | `PENELOPE_A2A_SENDERS` | なし | A2A の送り手の allow-list。ServiceAccount を `<名前空間>/<名前>` で `,` で区切る。無ければ A2A の受け口は閉じる |

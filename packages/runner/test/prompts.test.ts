@@ -162,6 +162,15 @@ test("the owner's skills are named with their place, which she cannot change", a
   }
 });
 
+test("the skills of the image are named with their place, after the owner's and the memory's", async () => {
+  // Guards against: skills she finds listed without knowing where they come from, or which copy of a name is listed.
+  const places = { ...(await memory({})), ownerSkills: "/skills", imageSkills: "/opt/penelope/skills" };
+  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
+  const line = prompt.split("\n").find((l) => l.includes("/opt/penelope/skills/"));
+  assert.ok(line, "a line names the image's skills");
+  assert.match(line, /then the memory's, then the image's/);
+});
+
 test("without the owner's skills, the prompt names none", async () => {
   const places = await memory({});
   const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
@@ -172,28 +181,42 @@ const github = {
   name: "github",
   description: "GitHub through gh & git.",
   hosts: ["api.github.com", "github.com"],
-  path: "/etc/penelope/connectors/github.md",
+  documents: ["/etc/penelope/connectors/github.md", "/opt/penelope/connectors/github.md"],
 };
+const image = "/opt/penelope/connectors";
 
 test("the connectors are listed with their hosts and where their documents are", async () => {
   // Guards against: a stand-in she holds without knowing which host takes it, or a document she cannot find.
   const places = await memory({});
   const files = await readPromptFiles(places.memory, 1000);
-  const prompt = systemPrompt(identity, places, files, { connectors: { dir: "/etc/penelope/connectors", list: [github] } });
+  const prompt = systemPrompt(identity, places, files, { connectors: { image, deployment: "/etc/penelope/connectors", list: [github] } });
   assert.ok(prompt.includes("/etc/penelope/connectors"));
   assert.ok(prompt.includes("<name>github</name>"));
   assert.ok(prompt.includes("GitHub through gh &amp; git."), "the description, escaped");
   assert.ok(prompt.includes("api.github.com"));
   assert.ok(prompt.includes("github.com"));
   assert.ok(prompt.includes("<location>/etc/penelope/connectors/github.md</location>"));
+  assert.ok(prompt.includes("<location>/opt/penelope/connectors/github.md</location>"), "the image's document too");
+  assert.ok(prompt.includes(image), "the image's place is named");
   assert.ok(prompt.indexOf("<connectors>") < prompt.indexOf("# Memory"), "before her memory files");
+});
+
+test("a connector of the image alone is listed without hosts, and the deployment's place is not named", async () => {
+  // Guards against: a connector shown with hosts the deployment never registered, or a directory the deployment did not give.
+  const places = await memory({});
+  const files = await readPromptFiles(places.memory, 1000);
+  const a2a = { name: "a2a", description: "The a2a CLI.", hosts: [], documents: [`${image}/a2a.md`] };
+  const prompt = systemPrompt(identity, places, files, { connectors: { image, list: [a2a] } });
+  assert.ok(prompt.includes("<name>a2a</name>"));
+  assert.ok(!prompt.includes("<hosts>"));
+  assert.ok(!prompt.includes("/etc/penelope/connectors"));
 });
 
 test("without connectors the prompt has no section for them", async () => {
   // Guards against: a section that names a directory the deployment did not give, or an empty list.
   const places = await memory({});
   const files = await readPromptFiles(places.memory, 1000);
-  for (const options of [{}, { connectors: { dir: "/etc/penelope/connectors", list: [] } }]) {
+  for (const options of [{}, { connectors: { image, deployment: "/etc/penelope/connectors", list: [] } }]) {
     const prompt = systemPrompt(identity, places, files, options);
     assert.ok(!prompt.includes("# Connectors"));
     assert.ok(!prompt.includes("<connectors>"));

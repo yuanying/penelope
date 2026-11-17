@@ -57,6 +57,8 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
     pollWaitSeconds: 1,
     turnFold: options.turnFold ?? true,
     slack: { sources: options.slackSources ?? [], maxChars: 6000 },
+    imageConnectorsDir: join(root, "image", "connectors"),
+    imageSkillsDir: join(root, "image", "skills"),
     ...(options.ownerSkills ? { ownerSkillsDir: join(root, "skills") } : {}),
     ...(options.connectors ? { connectorsDir: join(root, "connectors") } : {}),
   };
