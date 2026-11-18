@@ -184,7 +184,7 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 
 ## skill
 
-image に入っている skill（道具の使い方の `slack`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
+image に入っている skill（道具の使い方の `slack`・`signal`・`sd-webui`・`a2a`・`github`・`avatar` と、`self-portrait`・`goals`）は、配置の設定なしで効く。init container `skills`（`base/init/skills.sh`）が置くのは、その配置だけの skill である。同じ名前があれば、配置の skill が image の skill より先に一覧に載る（[docs/pod.md](../../docs/pod.md) の「volume」）。
 
 - ConfigMap `penelope-skills` の `<名前>.SKILL.md` は `/skills/<名前>/SKILL.md` になる。
 - `skills.list` の 1 行は `<git の URL> <枝> <skill>...` で、そのリポジトリの `skills/<skill>/` を写す。リポジトリは public であること（向け直しの前に、鍵なしで取る）。

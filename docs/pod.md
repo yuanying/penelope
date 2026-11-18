@@ -33,6 +33,7 @@
 | Sentinel の CA の公開の証明書（`/etc/penelope/ca/`） | 読み取り | — | — | — |
 | projected の ServiceAccount の token | — | 読み取り | 読み取り | — |
 | 受信の鍵の Secret | — | — | — | 読み取り |
+| Signal の送り口の socket（emptyDir、Signal のプラグインを使う配置だけ。[receivers.md](receivers.md) の「Signal のプラグイン」） | — | — | 読み書き | 読み書き |
 | オーナーの skill（例 `/skills`、配置が置く） | 読み取り | — | — | — |
 | コネクタの文書（`/etc/penelope/connectors/`、配置が置く） | 読み取り | — | — | — |
 | 配置のアバターの置き場（`PENELOPE_AVATARS_DIR`、任意） | — | 読み取り | — | — |
@@ -46,7 +47,7 @@
 | 2 | 記憶の `skills/` | エージェント |
 | 3 | `/opt/penelope/skills/`（sandbox の image の中。リポジトリの `packages/runner/image/skills/`）。配置は設定しない | このリポジトリ |
 
-- image の skill は、image の道具の使い方（`slack`・`sd-webui`・`a2a`・`github`）と、どの配置にも同じ skill（`self-portrait`・`goals`）である。配置の値は持たず、それは配置のコネクタの文書にある。image の skill とコネクタは名前で突き合わせない。
+- image の skill は、image の道具の使い方（`slack`・`signal`・`sd-webui`・`a2a`・`github`）と、どの配置にも同じ skill（`self-portrait`・`goals`）である。配置の値は持たず、それは配置のコネクタの文書にある。image の skill とコネクタは名前で突き合わせない。
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
 - 自分で作った VM への ssh の鍵は、エージェントが HOME に自分で作る（[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)）。配置は ssh の鍵も ssh-agent も置かない。ssh の接続は、ほかの外向きと同じく Sentinel へ向け直され、既定の扱いに従う。
 - `/memory` の `.git` は sandbox からは読むだけである。backend がターンの終わりにコミットする（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。
@@ -76,7 +77,7 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 | --- | --- | --- |
 | backend | 取り込み口、sandbox 向けの口 | Pod の外から呼ばれる口（UI 向けの API と A2A の受け口） |
 | Sentinel | 管理口 | 向け直しの受け口（直に届いた通信は断る） |
-| receivers | なし | Pod の外から呼ばれる口（webhook の受け口。[receivers.md](receivers.md) の「HTTP の口」） |
+| receivers | Signal の送り口（使う配置だけ） | Pod の外から呼ばれる口（webhook の受け口。[receivers.md](receivers.md) の「HTTP の口」） |
 | sandbox | — | sandbox の自由（loopback は止めない） |
 
 - TCP で待ち受ける Pod の外から呼ばれる口は、Pod の外から届くのと同じ確かめ（ログインのセッション、ServiceAccount の token、webhook の署名）を通す。sandbox からも loopback で届くが、扱いは外から届くのと同じである。
