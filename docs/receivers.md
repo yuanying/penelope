@@ -77,6 +77,7 @@ GitHub の webhook も受けるなら、前の形から引き継いだ URL `/v1/
 | --- | --- | --- |
 | `alertmanager` | webhook | 下の「Alertmanager のプラグイン」 |
 | `github` | webhook | 下の「GitHub のプラグイン」 |
+| `signal` | 接続 | 下の「Signal のプラグイン」 |
 | `slack` | 接続 | 下の「Slack のプラグイン」 |
 
 ## HTTP の口
@@ -548,6 +549,102 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 - 出力は、投稿した順に 1 行ずつ、タブで区切る。本文は `message <チャンネルの ID> <ts> <permalink>`（permalink は `chat.getPermalink` で取り、取れなければ省く）、画像は `file <ファイルの ID> <名前>`。
 - 終了コードは、投稿し終えたら 0、Slack が断った・届かない・サロゲートの環境変数が無い・画像が読めない・表情やチャンネルが無いときは 1、書き方の誤りは 2。標準エラーに理由を書く（Slack が断ったときは `<メソッド>: <Slack のエラー>`）。
 - 環境変数・画像・表情・チャンネルは、何かを投稿する前にすべて確かめる。本文を投稿した後に画像で失敗したときは、投稿した分を出力に残して 1 で終わる。
+
+## Signal のプラグイン
+
+Signal の 1 対 1 の会話で、許した相手の発言・ファイル・リアクションを受け、エージェントが返す道を持つ（[ADR-0040](adr/0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md)）。`plugin` は `signal`、種類は接続。Signal には bot の API が無いので、配置がエージェントの番号で登録した [signal-cli](https://github.com/AsamK/signal-cli) を daemon として同じ Pod に置き、その JSON-RPC を Unix socket で使う。実装は `packages/receivers/src/plugins/signal.ts` にある。
+
+### 設定
+
+| `settings` の欄 | 既定 | 中身 |
+| --- | --- | --- |
+| `socket` | なし（必須） | signal-cli の JSON-RPC の Unix socket（`signal-cli daemon --socket <場所>`）。絶対パス |
+| `account` | なし（必須） | エージェントの番号（E.164、`+81…`）。JSON-RPC の呼び出しごとに `account` として渡す（daemon が複数の番号を持つ形でも動く） |
+| `senders` | なし（必須） | 受ける相手で、送ってよい相手。番号（E.164）か Signal の UUID の一覧。1 つ以上 |
+| `send_socket` | なし | 送り口（下の「送り口」）を待ち受ける Unix socket。省けば送り口を持たない |
+| `max_file_bytes` | `20971520`（20 MiB） | 取ってくるファイル 1 つの大きさの上限。1〜62914560（60 MiB）の整数 |
+| `rpc_timeout_seconds` | `30` | JSON-RPC の 1 回の呼び出しを待つ秒数 |
+
+- signal-cli の daemon は `--receive-mode on-connection` で動かす。receivers がつないでいる間だけ受け、最後の接続が閉じると受けるのをやめる。receivers との間が切れている間の発言は Signal のサーバーに残り、つなぎ直したときに受ける。取りこぼしうるのは、signal-cli が受けて `receive` の知らせを押し出した後に、取り込み口が受けなかった出来事である（下の「接続」）。
+- signal-cli の socket は、signal-cli と receivers のコンテナだけが mount する volume に置く。sandbox は mount しない（[ADR-0014](adr/0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md)）。signal-cli の文書は JSON-RPC の口に認証を書いておらず、届けば番号の操作（送信・グループの操作・端末の追加など）を呼べるためである。同じ理由で `--http`・`--tcp` では待ち受けない（loopback から sandbox が届く）。
+
+### 接続
+
+- `socket` へつなぎ、1 行 1 つの JSON-RPC を話す。daemon が受けた発言は `receive` の知らせ（`params.envelope`）で届く。
+- 切れた・つなげないときは、待ってからつなぎ直す。待ちは Slack の接続と同じく 1 秒から倍にし、5 分を上限にする。つながったら 1 秒に戻す。
+- signal-cli の `receive` の知らせには、受けたと返す手順が無く、文書は送り直す仕組みを書いていない。取り込み口が受けなかった出来事は、受けるまで同じ待ちで送り直す。30 分送り直しても受けなければ、ログに書いて捨てる（既読も返さない）。
+- 止めている間に届いた知らせも、1 回は取り込み口へ送る。止めるときに送れていなければ、ログに書いて捨てる。
+- 取り込み口が発言を受けたら、相手に既読（`sendReceipt`、`type: read`）を送る。signal-cli は既定では配達の確認しか返さないためである。
+
+### 出来事にするもの
+
+| envelope | 出来事 |
+| --- | --- |
+| `dataMessage` の本文かファイルのあるもの | 発言 |
+| `dataMessage.reaction` | リアクションの付け外し |
+| ほか（`groupInfo` のある発言、`senders` にない相手、既読・入力中・`syncMessage`、本文もファイルも無いもの） | 捨てる |
+
+相手は `sourceNumber` か `sourceUuid` が `senders` にあるかで見る（`sourceUuid` が `null` で届くことがあるため両方を見る）。
+
+| 欄 | 作り方 |
+| --- | --- |
+| `id` | `<相手の番号（無ければ UUID）>/<発言の timestamp>`。リアクションはリアクションの発言の timestamp |
+| `occurred_at` | 発言の timestamp の時刻 |
+| `stream` | `dm.<番号の + を除いたもの>`（無ければ UUID）を「`stream` の写し方」で写したもの |
+| `delivery` | 発言は `now`、リアクションは `batch` |
+| `summary` | `Signal <名前>: <本文>`（ファイルがあれば後ろに `(<数> file(s))`）、リアクションは `Signal <名前> reacted <絵文字>`（外したら `took off`）。`<名前>` は相手のプロフィールの名前、無ければ番号。改行と 200 文字の扱いは Alertmanager と同じ |
+
+`payload`（型は `SignalPayload`）:
+
+| 欄 | 中身 |
+| --- | --- |
+| `type` | `message` か `reaction` |
+| `from` | `number`・`uuid`・`name`（あるものだけ） |
+| `timestamp` | Signal の発言の時刻（ミリ秒）。リアクションと引用はこれで指す |
+| `text` | 本文（あるときだけ） |
+| `quote` | 引用した返事のとき、引用元の `timestamp` と `text` |
+| `files` | 付いたファイル。1 件は `name`・`mimetype`・`size`・`attached` |
+| `reaction` | `emoji`・`target_timestamp`・`removed` |
+
+- 発言は `payload.text` を持つので、配置がこの有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` に書けば、本文がそのままターンに載る（[events.md](events.md) の「`inline`」）。添付の画像も画像として載る。
+- ファイルは `getAttachment` で取り、出来事の添付として送る。上限を超えるもの、合わせて 60 MiB を超えるもの、取れなかったものは `attached` を `false` にする。種類は問わない。
+
+### 送り口
+
+`send_socket` があれば、そこで HTTP を待ち受ける。sandbox は mount せず、Sentinel が登録の `upstream: unix://<send_socket>` で届ける（backend の sandbox 向けの口と同じ形。[sentinel-config.md](sentinel-config.md) の「上流」）。sandbox からの要求は Sentinel を通り、記録に残る。
+
+| 要求 | 中身 |
+| --- | --- |
+| `POST /v1/send` | form（`multipart/form-data` か urlencoded）。`text`、`to`（省けば `senders` の最初）、`file`（何度でも）。上限 64 MiB |
+
+| 応答 | 意味 |
+| --- | --- |
+| `200` | `{"timestamp": <送った発言の Signal の時刻>}` |
+| `400` | form でない、本文もファイルも無い |
+| `403` | `to` が `senders` に無い |
+| `502` | signal-cli が断った、Signal が受けなかった（`results` に `SUCCESS` でないものがある） |
+| `503` | signal-cli につながっていない |
+
+- 本文は末尾の空白と改行を除いて `send` の `message` に、ファイルは `data:<種類>;filename=<名前>;base64,…` の形で `attachments` に入れる。
+  - `<名前>` はパーセントエンコードする（`encodeURIComponent`）。signal-cli は data URI の引数の値を URL デコードするので、そのままだと `%` は壊れ、`+` は空白になる。
+  - `<種類>` は form のファイルの `Content-Type` の `type/subtype`（`;` から後の引数は落とす）。それが無いか `application/octet-stream` なら、名前の拡張子（`png`・`jpg`・`jpeg`・`gif`・`webp`・`mp4`・`mov`・`m4a`・`ogg`・`pdf`）から決め、どれでもなければ `application/octet-stream` のまま。curl の `-F file=@x.webp` は WebP や MP4 を `application/octet-stream` で送り、そのまま渡すと Signal は画像や動画でなくファイルとして見せるためである。
+- 応答の body は `{error}` の JSON。ログは `send status=<番号>` だけで、本文と宛先は書かない。
+- 使い方は sandbox の image の skill `signal` にある。
+
+### ログ
+
+前に `receivers: connection=<name> ` が付く。本文・番号・名前は書かない。
+
+| 行 | いつ |
+| --- | --- |
+| `connected`・`connection error (<code>)`・`connecting again in <秒>s` | つないだ・切れた |
+| `envelope events=<数> dropped=<数>`（受けたら `taken=true`、止めるときに送れなければ `taken=false (stopping)`、30 分受けられずに捨てたら `dropped=1 taken=false (refused for 30 minutes, <回数> tries)`） | envelope 1 つごと |
+| `cannot fetch a file (…)`・`cannot send a read receipt (…)` | JSON-RPC が断られた |
+| `send status=<番号>` | 送り口の要求 1 つごと |
+
+### 未決
+
+- グループ、入力中の表示、エージェントからのリアクション、編集・削除の扱い。
 
 ## 後に足すプラグイン
 
