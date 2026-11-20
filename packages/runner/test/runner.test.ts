@@ -6,6 +6,7 @@ import { test } from "node:test";
 import type { DeliveredEvent, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
 
 import type { Config } from "../src/config.ts";
+import { newSessionFile, writeState } from "../src/pi.ts";
 import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, verifierSystemPrompt } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
 import { MODEL, OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
@@ -489,6 +490,24 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name.endsWith(".jsonl")).length, 1, "one new record");
 });
 
+test("the verifier receives the full source time window after missed nights", async () => {
+  const { fake, start, calls, config } = await world();
+  const began = new Date(Date.now() - 3 * 86_400_000).toISOString();
+  const file = await newSessionFile(config);
+  const header = JSON.parse(await readFile(file, "utf8"));
+  await writeFile(file, `${JSON.stringify({ ...header, timestamp: began })}\n`);
+  await writeState(config, { file });
+  await start(() => ({ text: "ok" }));
+  const beforeNight = Date.now();
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+
+  const input = calls.find((call) => isVerifier(config, call))!.userTexts[0]!;
+  const times: string[] = input.match(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g) ?? [];
+  assert.ok(times.includes(began));
+  assert.ok(times.some((time) => Date.parse(time) >= beforeNight && Date.parse(time) <= Date.now()));
+});
+
 test("night workers can read event originals but cannot rewrite them or use shell and backend tools", async () => {
   const { fake, start, calls, config } = await world();
   await mkdir(join(config.sourcesDir, "ui"), { recursive: true });
@@ -511,7 +530,7 @@ test("night workers can read event originals but cannot rewrite them or use shel
   assert.ok(JSON.stringify(verifier.messages).includes("original event"));
   assert.equal(await readFile(original, "utf8"), "original event\n");
   for (const worker of [verifier, calls.find((c) => isCurator(config, c))!]) {
-    assert.ok(worker.tools.length > 0 && worker.tools.every((tool) => ["read", "write", "edit", "ls", "move", "remove"].includes(tool)));
+    assert.ok(worker.tools.length > 0 && worker.tools.every((tool) => ["read", "write", "edit", "ls", "grep", "find", "move", "remove"].includes(tool)));
   }
 });
 

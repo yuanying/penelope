@@ -11,7 +11,7 @@
 
 import { randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { join } from "node:path";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -112,9 +112,6 @@ const failure = (error: unknown) => (error instanceof Error ? error.message : St
 /** A turn of the night as its step: a turn the runner cut is a step that did not get done. */
 const stageOf = ({ result, reason }: Outcome): NightStage =>
   result === "done" ? { result } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? "") };
-
-/** YYYY-MM-DD in the runner's time zone. */
-const today = () => new Date().toLocaleDateString("sv-SE");
 
 export class Runner {
   private readonly config: Config;
@@ -494,9 +491,7 @@ export class Runner {
     }
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
-    // The backend names source files in its own time zone.
-    const day = basename(event.appended.path, ".jsonl");
-    const stages = made ? undefined : await this.nightly(event.seq, /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : today());
+    const stages = made ? undefined : await this.nightly(event.seq);
     await this.backend
       .rotated({ seq: event.seq, ...(stages ? { stages } : {}) })
       .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
@@ -509,7 +504,8 @@ export class Runner {
   }
 
   /** Each step is attempted even if one before it failed (ADR-0044). */
-  private async nightly(seq: number, day: string): Promise<NightStages> {
+  private async nightly(seq: number): Promise<NightStages> {
+    const nightStarted = new Date().toISOString();
     const { memoryDir, identity } = this.config;
     const before = this.state?.nightMemory;
     const reflection = await this.nightStage("reflection", async () => {
@@ -527,13 +523,14 @@ export class Runner {
       const records = await this.subAgents.recordsSince(Date.parse(header.timestamp));
       const memory = await memorySnapshot(memoryDir);
       return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places),
-        verifierInput(this.places, day, main, records, memoryChanges(before, memory), before !== undefined),
+        verifierInput(this.places, { started: header.timestamp, ended: nightStarted, main, subAgents: records },
+          memoryChanges(before, memory), before !== undefined),
         nightTools(this.config, [main, ...records]));
     });
     const curator = await this.nightStage("curator", async () => {
       const memory = await memorySnapshot(memoryDir);
       return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places),
-        curatorInput(day, memory, memoryChanges(before, memory), before !== undefined),
+        curatorInput(memory, memoryChanges(before, memory), before !== undefined),
         nightTools(this.config));
     });
     let session: NightStage;

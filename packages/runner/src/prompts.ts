@@ -212,15 +212,20 @@ function changesInput(changed: string[], haveBaseline: boolean): string {
 }
 
 export function verifierInput(
-  places: Places, day: string, main: string, subAgents: string[], changed: string[], haveBaseline: boolean,
+  places: Places,
+  period: { started: string; ended: string; main: string; subAgents: string[] },
+  changed: string[],
+  haveBaseline: boolean,
 ): string {
-  return `It is the night of ${day}. The day's unfolded session record, including tool outputs, is ${JSON.stringify(main)}. The sub-agent records touched since that session began are ${JSON.stringify(subAgents)}. The event originals are in ${places.sources}/<source>[/<stream>]/${day}.jsonl; the session record also points to the source lines and attachments of its events.
+  return `The session began at ${period.started}; the nightly switch began at ${period.ended}. The unfolded session record, including tool outputs, is ${JSON.stringify(period.main)}. Sub-agent records touched since the session began: ${JSON.stringify(period.subAgents)}.
+
+Event originals are in ${places.sources}/<source>[/<stream>]/<YYYY-MM-DD>.jsonl. Filenames use the date the backend received the event, in its configured time zone. This session's events can span every date from session start to the nightly switch, not just the date of the switch. The session record also points to source lines and attachments.
 
 ${changesInput(changed, haveBaseline)}`;
 }
 
-export function curatorInput(day: string, memory: MemoryFile[], changed: string[], haveBaseline: boolean): string {
-  return `It is the night of ${day}. Reflection and verification have been attempted; the next session starts from the memory you leave.
+export function curatorInput(memory: MemoryFile[], changed: string[], haveBaseline: boolean): string {
+  return `Reflection and verification have been attempted; the next session starts from the memory you leave.
 
 ${changesInput(changed, haveBaseline)} Current sizes: ${promptSizes((name) => memory.find((file) => file.path === name)?.bytes)}. Total memory: ${memory.reduce((bytes, file) => bytes + file.bytes, 0)} bytes.`;
 }
