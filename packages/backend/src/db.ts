@@ -289,6 +289,33 @@ export const MIGRATIONS: readonly string[] = [
     thinking  TEXT NOT NULL
   );
   `,
+  `
+  -- Widen the nightly stage check, preserving previous turns and their indexes.
+  CREATE TABLE turns_next (
+    turn_id       TEXT PRIMARY KEY,
+    agent         TEXT NOT NULL,
+    started_at    TEXT,
+    ended_at      TEXT,
+    result        TEXT CHECK (result IN ('done', 'failed', 'stopped')),
+    reason        TEXT,
+    recorded_at   TEXT,
+    triggers      TEXT NOT NULL DEFAULT '[]',
+    trigger_count INTEGER NOT NULL DEFAULT 0,
+    tools         INTEGER NOT NULL DEFAULT 0,
+    night_seq     INTEGER,
+    stage         TEXT CHECK (stage IN ('reflection', 'verifier', 'curator')),
+    at            TEXT NOT NULL
+  );
+  INSERT INTO turns_next SELECT turn_id, agent, started_at, ended_at, result, reason,
+    recorded_at, triggers, trigger_count, tools, night_seq, stage, at FROM turns;
+  DROP TABLE turns;
+  ALTER TABLE turns_next RENAME TO turns;
+  CREATE INDEX turns_at ON turns (at);
+  CREATE INDEX turns_agent ON turns (agent, at);
+  CREATE INDEX turns_open ON turns (agent) WHERE ended_at IS NULL AND result IS NULL;
+  CREATE INDEX turns_night ON turns (night_seq, stage) WHERE night_seq IS NOT NULL;
+  CREATE INDEX turns_failed ON turns (recorded_at) WHERE result = 'failed';
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

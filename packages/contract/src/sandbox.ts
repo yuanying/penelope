@@ -166,7 +166,7 @@ export type ActivityRequest = FromAgent & { activities: Activity[] };
 export type TurnResult = "done" | "failed" | "stopped";
 
 /** The steps of the nightly switch that are turns (ADR-0007). */
-export type NightTurnStage = "reflection" | "curator";
+export type NightTurnStage = "reflection" | "verifier" | "curator";
 
 /**
  * `POST /v1/turns/end`: the turn is over; the backend commits /memory. The
@@ -204,7 +204,7 @@ export type NightStage = {
 };
 
 /** The three steps of a night, in order (ADR-0007). */
-export type NightStages = { reflection: NightStage; curator: NightStage; session: NightStage };
+export type NightStages = { reflection: NightStage; verifier: NightStage; curator: NightStage; session: NightStage };
 
 /**
  * `POST /v1/sessions/rotated`: the runner went through the nightly switch of

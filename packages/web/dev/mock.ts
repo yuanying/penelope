@@ -347,10 +347,9 @@ function record(w: World, method: string, url: URL): RecordAnswer | undefined {
   if (parts[0] === "nights" && parts.length === 2) {
     const night = w.record.find((row) => row.kind === "night" && row.id === parts[1]);
     if (night?.kind !== "night") return undefined;
-    const stage = (name: "reflection" | "curator") => turns.find((t) => t.night?.id === night.id && t.night.stage === name);
-    const reflection = stage("reflection");
-    const curator = stage("curator");
-    return { night, turns: { ...(reflection ? { reflection } : {}), ...(curator ? { curator } : {}) } };
+    return { night, turns: Object.fromEntries(turns.flatMap((turn) =>
+      turn.night?.id === night.id ? [[turn.night.stage, turn]] : [],
+    )) };
   }
   if (parts[0] === "sub-agents" && parts.length === 2) {
     const name = parts[1]!;
@@ -406,7 +405,7 @@ const COMMANDS = ["cat /memory/always.md", "ls /sources/ui", "rg -n 予定 /memo
 function flowOf(turn: RecordTurn): RecordFlowItem[] {
   const start = Date.parse(turn.started_at ?? turn.at);
   const at = (i: number) => new Date(start + i * 3000).toISOString();
-  const what = turn.triggers[0]?.summary ?? (turn.night ? `夜の${turn.night.stage === "reflection" ? "振り返り" : "整理"}をする` : "頼まれたことを進める");
+  const what = turn.triggers[0]?.summary ?? (turn.night ? `夜の${{ reflection: "振り返り", verifier: "照合", curator: "整理" }[turn.night.stage]}をする` : "頼まれたことを進める");
   const flow: RecordFlowItem[] = [{ kind: "thinking", at: at(0), turn_id: turn.id, text: `${what.slice(0, 60)}${what.length > 60 ? "…" : ""}\n\nまず手もとの記録を確かめる。` }];
   for (let i = 1; i <= turn.tools; i++) {
     const call_id = `call-${i}`;

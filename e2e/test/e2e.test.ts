@@ -927,7 +927,7 @@ describe("the Pod end to end", () => {
   }));
 
   // Last, as from here on a night comes every 20 seconds.
-  it("switches the session at night: reflection, curator, a new session, and handoff.md committed", track(async () => {
+  it("switches the session at night: reflection, verifier, curator, a new session, and handoff.md committed", track(async () => {
     // Guards against: the nightly switch not running through, or the new session not starting from handoff.md.
     // The backend is made again with a night every 20 seconds, so that the test waits for the next one
     // whatever time it is and however long the start took.
@@ -955,7 +955,7 @@ describe("the Pod end to end", () => {
     const night = await eventually("the night in the activity record", () =>
       browser.json<RecordDayResponse>("/api/record?kind=night").body.rows.find((row): row is RecordNight => row.kind === "night"),
     );
-    assert.deepEqual(night.stages, { reflection: { result: "done" }, curator: { result: "done" }, session: { result: "done" } });
+    assert.deepEqual(night.stages, { reflection: { result: "done" }, verifier: { result: "done" }, curator: { result: "done" }, session: { result: "done" } });
 
     stream = new Stream();
     await stream.open(browser.cookie!);

@@ -463,7 +463,7 @@ describe("the sandbox's API", () => {
 
     it("keeps the steps of the night for the record", async (t) => {
       const { call, record, clock } = await setup(t);
-      const stages = { reflection: { result: "done" }, curator: { result: "failed", reason: "no context left" }, session: { result: "done" } };
+      const stages = { reflection: { result: "done" }, verifier: { result: "failed", reason: "no context left" }, curator: { result: "done" }, session: { result: "done" } };
       assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages } })).status, 204);
       const [night] = record.day({ day: new Date(clock.now()).toISOString().slice(0, 10), kind: "night" }).rows;
       assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
@@ -473,7 +473,7 @@ describe("the sandbox's API", () => {
       const { call } = await setup(t);
       const ok = { result: "done" };
       for (const body of [
-        { seq: 7, stages: { reflection: ok, curator: { result: "maybe" }, session: ok } },
+        { seq: 7, stages: { reflection: ok, verifier: { result: "maybe" }, curator: ok, session: ok } },
         { seq: 7, stages: { reflection: ok, curator: ok } },
         { stages: { reflection: ok, curator: ok, session: ok } },
         { seq: "7" },

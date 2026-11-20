@@ -71,20 +71,20 @@ export function turnNote(turn: RecordTurn): string | undefined {
 export type Stage = { key: keyof RecordNight["stages"]; name: string; result: RecordNightStage["result"]; reason?: string };
 
 export function stagesOf(night: RecordNight): Stage[] {
-  return (["reflection", "curator", "session"] as const).map((key) => {
+  return (["reflection", "verifier", "curator", "session"] as const).map((key) => {
     const stage = night.stages[key];
     return { key, name: w.stages[key], result: stage.result, ...(stage.reason === undefined ? {} : { reason: stage.reason }) };
   });
 }
 
-/** The step a night stopped at: the first that failed. */
+/** The first failed step, even if the night went on. */
 export function failedStageOf(night: RecordNight): Stage | undefined {
   return stagesOf(night).find((stage) => stage.result === "failed");
 }
 
 export function nightNote(night: RecordNight): string | undefined {
   const stage = failedStageOf(night);
-  return stage === undefined ? undefined : join([w.stoppedAt(stage.name), stage.reason]);
+  return stage === undefined ? undefined : join([w.stageFailed(stage.name), stage.reason]);
 }
 
 /** A job is a failure when it ended with an exit code other than 0, by its time limit, or by a signal. */

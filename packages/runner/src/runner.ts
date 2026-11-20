@@ -10,7 +10,8 @@
 // hands over one that is not acked yet, is dropped by its seq.
 
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { stat } from "node:fs/promises";
+import { basename, join } from "node:path";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
 import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
@@ -33,8 +34,10 @@ import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
 import { TurnModels } from "./model-settings.ts";
+import { memoryChanges, memorySnapshot } from "./night-memory.ts";
+import { nightTools } from "./night-tools.ts";
 import {
-  curatorManager,
+  nightManager,
   lastAssistant,
   newSessionFile,
   openFile,
@@ -50,9 +53,13 @@ import {
   curatorSystemPrompt,
   foldAskInput,
   type Places,
+  PROMPT_FILES,
   readPromptFiles,
   reflectionInput,
   systemPrompt,
+  VERIFIER,
+  verifierInput,
+  verifierSystemPrompt,
 } from "./prompts.ts";
 import { SubAgents } from "./subagents.ts";
 import { backendTools, jobTools, subAgentTools } from "./tools.ts";
@@ -340,8 +347,7 @@ export class Runner {
    * join it, and when it ends it is marked so that it is folded from then on
    * (ADR-0015). One that ended without any text of hers is first asked, once,
    * for what she wants to keep, unless it was a heartbeat's alone and called
-   * no tool, so that nothing happened in it (ADR-0031). The nightly reflection and the curator's turn
-   * are not ordinary.
+   * no tool, so that nothing happened in it (ADR-0031). The nightly turns are not ordinary.
    */
   private async turnOf(session: AgentSession, input: string, options: TurnOptions = {}): Promise<Outcome> {
     const { night, images } = options;
@@ -488,7 +494,9 @@ export class Runner {
     }
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
-    const stages = made ? undefined : await this.nightly(event.seq);
+    // The backend names source files in its own time zone.
+    const day = basename(event.appended.path, ".jsonl");
+    const stages = made ? undefined : await this.nightly(event.seq, /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : today());
     await this.backend
       .rotated({ seq: event.seq, ...(stages ? { stages } : {}) })
       .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
@@ -500,15 +508,41 @@ export class Runner {
     await this.ack([event.seq]);
   }
 
-  /** Her reflection, the curator's turn, then a new session (ADR-0007); how each step went. */
-  private async nightly(seq: number): Promise<NightStages> {
-    const reflection = stageOf(await this.turnOf(this.session!.session, reflectionInput(this.places), { night: { seq, stage: "reflection" } }));
-    // A curator that fails is recorded and passed over: the next night can
-    // tidy again, and the day's session does not go on (docs/sandbox-api.md).
-    const curator = await this.curator(seq);
+  /** Each step is attempted even if one before it failed (ADR-0044). */
+  private async nightly(seq: number, day: string): Promise<NightStages> {
+    const { memoryDir, identity } = this.config;
+    const before = this.state?.nightMemory;
+    const reflection = await this.nightStage("reflection", async () => {
+      const sizes: Partial<Record<string, number>> = {};
+      for (const name of PROMPT_FILES) {
+        const info = await stat(join(memoryDir, name)).catch(() => undefined);
+        if (info?.isFile()) sizes[name] = info.size;
+      }
+      return stageOf(await this.turnOf(this.session!.session, reflectionInput(this.places, sizes), { night: { seq, stage: "reflection" } }));
+    });
+    const verifier = await this.nightStage(VERIFIER, async () => {
+      const main = this.state!.file;
+      const header = this.session!.session.sessionManager.getHeader();
+      if (!header) throw new Error("The daytime session has no header.");
+      const records = await this.subAgents.recordsSince(Date.parse(header.timestamp));
+      const memory = await memorySnapshot(memoryDir);
+      return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places),
+        verifierInput(this.places, day, main, records, memoryChanges(before, memory), before !== undefined),
+        nightTools(this.config, [main, ...records]));
+    });
+    const curator = await this.nightStage("curator", async () => {
+      const memory = await memorySnapshot(memoryDir);
+      return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places),
+        curatorInput(day, memory, memoryChanges(before, memory), before !== undefined),
+        nightTools(this.config));
+    });
     let session: NightStage;
     try {
-      const state = { file: await newSessionFile(this.config), nightly: seq };
+      const nightMemory = await memorySnapshot(memoryDir).catch((error: unknown) => {
+        this.log(`night memory baseline not kept: ${failure(error)}`);
+        return undefined;
+      });
+      const state: SessionState = { file: await newSessionFile(this.config), nightly: seq, ...(nightMemory ? { nightMemory } : {}) };
       const next = await this.openMainSession(state.file);
       try {
         await writeState(this.config, state);
@@ -524,26 +558,30 @@ export class Runner {
       this.log(`the new session could not start: ${failure(error)}`);
       session = { result: "failed", reason: `The new session could not start: ${failure(error)}` };
     }
-    return { reflection, curator, session };
+    return { reflection, verifier, curator, session };
   }
 
-  /** The curator's turn, in a session that starts empty; a failed step when the session cannot be opened. */
-  private async curator(seq: number): Promise<NightStage> {
-    let curator: AgentSession;
+  private async nightStage(stage: NightTurnStage, run: () => Promise<NightStage>): Promise<NightStage> {
     try {
-      ({ session: curator } = await openSession(
-        { ...this.setup, tools: [], extensions: [] },
-        curatorSystemPrompt(this.config.identity, this.places),
-        curatorManager(this.config),
-      ));
+      return await run();
     } catch (error) {
-      this.log(`the curator could not start: ${failure(error)}`);
-      return { result: "failed", reason: `The curator could not start: ${failure(error)}` };
+      const reason = `The ${stage} could not run: ${failure(error)}`;
+      this.log(reason);
+      return { result: "failed", reason };
     }
+  }
+
+  private async nightWorker(
+    seq: number, stage: Exclude<NightTurnStage, "reflection">, system: string, input: string, tools: PiSetup["tools"],
+  ): Promise<NightStage> {
+    const { session } = await openSession(
+      { ...this.setup, tools, extensions: [], fileOnly: true }, system,
+      nightManager(this.config, stage), this.config.memoryDir,
+    );
     try {
-      return stageOf(await this.turnOf(curator, curatorInput(this.places, today()), { night: { seq, stage: "curator" } }));
+      return stageOf(await this.turnOf(session, input, { night: { seq, stage } }));
     } finally {
-      curator.dispose();
+      session.dispose();
     }
   }
 }

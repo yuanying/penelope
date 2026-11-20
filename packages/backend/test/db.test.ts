@@ -83,6 +83,19 @@ describe("the database", () => {
     db.close();
   });
 
+  it("keeps the result of a recorded nightly turn while widening its stage constraint", (t) => {
+    const file = path.join(tempDir(t), "a.sqlite");
+    const raw = new DatabaseSync(file);
+    for (const migration of MIGRATIONS.slice(0, 8)) raw.exec(migration);
+    raw.exec("PRAGMA user_version = 8");
+    raw.exec("INSERT INTO turns (turn_id, agent, result, night_seq, stage, at) VALUES ('c-1', 'main', 'done', 42, 'curator', '2026-11-20T04:00:00Z')");
+    raw.close();
+
+    const db = openDatabase(file);
+    t.after(() => db.close());
+    assert.deepEqual({ ...db.prepare("SELECT stage, result FROM turns WHERE night_seq = 42").get() }, { stage: "curator", result: "done" });
+  });
+
   it("is opened again without migrating twice", (t) => {
     const file = path.join(tempDir(t), "a.sqlite");
     openDatabase(file).close();

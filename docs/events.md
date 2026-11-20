@@ -48,7 +48,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 ### 制御の出来事
 
 - `source` は `control`。runner が受けて手順を回し、エージェントのターンには入らない。
-- 最初は夜の切り替えだけである。backend が夜の時刻に `payload` が `{kind: "nightly"}` の出来事を列に入れ、runner が振り返り → 整理係 → 新しいセッションを回す（[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)）。終わったら runner が知らせる（[sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」）。
+- 最初は夜の切り替えだけである。backend が夜の時刻に `payload` が `{kind: "nightly"}` の出来事を列に入れ、runner が振り返り → 照合係 → 整理係 → 新しいセッションを回す（[ADR-0044](adr/0044-check-memory-against-records-before-nightly-organization.md)）。終わったら runner が知らせる（[sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」）。
 
 ### 予約の出来事
 

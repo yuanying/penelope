@@ -9,6 +9,7 @@ import {
   type Activity,
   type AgentId,
   type JobEnd,
+  type NightStage,
   type NightStages,
   type NightTurnStage,
   RECORD_COMMAND_MAX,
@@ -318,7 +319,7 @@ export class ActivityRecord {
     if (row === undefined) throw new RecordQueryError(404, "no such night");
     const turns: RecordNightResponse["turns"] = {};
     if (row.seq !== null) {
-      for (const stage of ["reflection", "curator"] as const) {
+      for (const stage of ["reflection", "verifier", "curator"] as const) {
         const turn = this.db.prepare(`${TURN_SELECT} WHERE t.night_seq = ? AND t.stage = ? ORDER BY t.at DESC LIMIT 1`).get(row.seq, stage) as TurnRow | undefined;
         if (turn !== undefined) turns[stage] = turnOf(turn);
       }
@@ -601,7 +602,10 @@ const UNKNOWN: RecordNightStage = { result: "unknown" };
 
 function nightOf(row: NightRow): RecordNight {
   // A report with no steps still says the switch was made.
-  const stages = row.stages === null ? { reflection: UNKNOWN, curator: UNKNOWN, session: { result: "done" as const } } : (JSON.parse(row.stages) as NightStages);
+  const stored = row.stages === null ? undefined : JSON.parse(row.stages) as Omit<NightStages, "verifier"> & { verifier?: NightStage };
+  const stages: RecordNight["stages"] = stored === undefined
+    ? { reflection: UNKNOWN, verifier: UNKNOWN, curator: UNKNOWN, session: { result: "done" } }
+    : { ...stored, verifier: stored.verifier ?? { result: "skipped" } };
   const started = row.started_at ?? row.at;
   return {
     kind: "night",
@@ -650,7 +654,7 @@ function subAgentOf(row: SubAgentRow): RecordSubAgent {
 /** The steps as kept: each reason as one line. */
 function stagesKept(stages: NightStages): NightStages {
   const stage = ({ result, reason }: NightStages[keyof NightStages]) => ({ result, ...(reason === undefined ? {} : { reason: oneLine(reason) }) });
-  return { reflection: stage(stages.reflection), curator: stage(stages.curator), session: stage(stages.session) };
+  return { reflection: stage(stages.reflection), verifier: stage(stages.verifier), curator: stage(stages.curator), session: stage(stages.session) };
 }
 
 /** The first line, cut to the limit. */

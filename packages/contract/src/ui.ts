@@ -226,7 +226,7 @@ export type RecordNight = RecordRowBase & {
   ended_at: string;
   seconds: number;
   result: "done" | "failed" | "unknown";
-  stages: { reflection: RecordNightStage; curator: RecordNightStage; session: RecordNightStage };
+  stages: { reflection: RecordNightStage; verifier: RecordNightStage; curator: RecordNightStage; session: RecordNightStage };
 };
 
 /** A night that was due and was not switched (ADR-0038). It has no page of its own. `at` is when it was due. */
@@ -324,7 +324,7 @@ export type RecordResultResponse = { output: string };
 /** `GET /api/record/nights/<id>`: the night, and the last turn of each of its steps that had one. */
 export type RecordNightResponse = {
   night: RecordNight;
-  turns: { reflection?: RecordTurn; curator?: RecordTurn };
+  turns: Partial<Record<NightTurnStage, RecordTurn>>;
 };
 
 /** `GET /api/record/sub-agents/<name>?before=`: the sub-agent and its turns, newest first, in pages. */

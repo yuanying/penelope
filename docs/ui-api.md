@@ -230,7 +230,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 - ターンの `result` は `done`・`failed`・`stopped`（runner の言ったもの）、`running`（まだ終わっていない）、`unknown`（終わったが runner が結果を言わなかった。結果を送らない runner のターンと、記録より前のターン）。`reason` は runner が言ったときだけある。
 - ターンの `triggers` は、渡した出来事を渡した順に、`RECORD_TRIGGERS_MAX`（20）件まで並べたもの。1 件は `{seq, source, stream?, summary}`（型は `RecordTrigger`）。`trigger_count` は全部の数。サブエージェントのターン（頼みは本体から来る）、夜の切り替えのターン、出来事の分からないターンでは空で、`trigger_count` は 0 である。
-- 夜の `result` は、段のどれかが失敗なら `failed`、そうでなければ `done`、段の結果が知らされていなければ `unknown`。`stages` は `{reflection, curator, session}` で、1 つの段は `{result, reason?}`。`result` は `done`・`failed`・`skipped`（行われなかった）・`unknown`。段の結果が知らされていない夜は、`session` が `done` で、ほかの 2 つは `unknown` である（切り替えの知らせは新しいセッションに切り替えてから来るため）。
+- 夜の `result` は、段のどれかが失敗なら `failed`、そうでなければ `done`、段の結果が知らされていなければ `unknown`。`stages` は `{reflection, verifier, curator, session}`（振り返り、照合係、整理係、新しいセッション） で、1 つの段は `{result, reason?}`。`result` は `done`・`failed`・`skipped`（行われなかった）・`unknown`。段の結果が知らされていない夜は、`session` が `done` で、ほかは `unknown` である。照合係を持たない旧 runner から段の結果が知らされた夜は、`verifier` が `skipped` になる。
 - **逃した夜** は、記録が始まった後の予定の夜の時刻（backend の `PENELOPE_NIGHTLY_CRON`、今の設定で数える）のうち、次のどちらかのものである。夜の出来事が、その時刻から 1 分たっても列に無い（backend が止まっていた）。夜の出来事はあるが、次の夜の時刻までに切り替えの知らせが来なかった。`failed_at` はそれが決まった時刻（1 分後か、次の夜の時刻）。後から知らせが来れば、逃した夜ではなくなる。
 - 閉じたサブエージェントの `turns` と `failed_turns` は、記録に残っているそのサブエージェントのターンと、うち失敗の数。
 
@@ -242,7 +242,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
   - `expired` は、30 日を過ぎて流れが消えたとき `true`（そのとき `flow` は空）。
   - `replies` は、そのターンで出した返事の `{id, at, text, history_before}`（型は `RecordReply`）の並び。`history_before` は `GET /api/history?before=` に渡すと、その返事から始まるページが返る値である。Web UI は「会話でこの返事を見る」で、会話を開いてそのページを読み、`id` の返事の位置へ移る。
 - `GET /api/record/turns/<id>/results/<call_id>` は `{output}`（型は `RecordResultResponse`）。そのツールの結果の本文の全部（runner が切った 16,000 文字まで）。流れが消えたもの、無いものは `404`。
-- `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, curator?}` で、その段の最後のターン（一覧の `turn` の行と同じ形）。手順を回し直した夜は、最後に回したもの。
+- `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, verifier?, curator?}` で、その段の最後のターン（一覧の `turn` の行と同じ形）。手順を回し直した夜は、最後に回したもの。
 - `GET /api/record/sub-agents/<name>?before=` は `{sub_agent, turns, before?}`（型は `RecordSubAgentResponse`）。`sub_agent` は一覧の行と同じ形（閉じていなければ `closed_at` が無い）。`turns` はそのサブエージェントのターンの新しい順で、1 ページ 20 件。`before` は次のページの不透明な cursor で、最後のページには無い。backend の渡していない `before` は `400`。
 - 無い `id`・名前は `404`。どの口も GET のほかの method は `405`。
 

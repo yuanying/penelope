@@ -5,12 +5,10 @@ import { join } from "node:path";
 import { test } from "node:test";
 
 import {
-  curatorInput,
   curatorSystemPrompt,
   FOLDING,
   foldAskInput,
   readPromptFiles,
-  reflectionInput,
   subAgentSystemPrompt,
   systemPrompt,
   type Places,
@@ -96,12 +94,6 @@ test("the curator has no personality and is told whose memory it is", async () =
   assert.ok(prompt.includes(places.memory));
 });
 
-test("the reflection and the curator's input name the places", async () => {
-  const places = await memory({});
-  assert.ok(reflectionInput(places).includes(join(places.memory, "handoff.md")));
-  assert.ok(curatorInput(places, "2026-11-14").includes("2026-11-14"));
-});
-
 test("with folding on, the system prompt says what folding leaves", async () => {
   const places = await memory({});
   const files = await readPromptFiles(places.memory, 1000);
@@ -149,17 +141,11 @@ test("the owner's skills are named with their place, which she cannot change", a
   // Guards against: skills she finds listed without knowing where they are, or taking them for hers to edit.
   const places = { ...(await memory({})), ownerSkills: "/skills" };
   const files = await readPromptFiles(places.memory, 1000);
-  const prompts: [string, string][] = [
-    [systemPrompt(identity, places, files), "your owner's skills"],
-    [curatorSystemPrompt(identity, places), `${identity.owner}'s skills`],
-  ];
-  for (const [prompt, whose] of prompts) {
-    const line = prompt.split("\n").find((l) => l.includes("/skills/"));
-    assert.ok(line, "a line names /skills/");
-    assert.match(line, /read-only/);
-    assert.ok(line.includes(`${places.memory}/skills/`), "beside the skills of the memory");
-    assert.ok(line.includes(whose), whose);
-  }
+  const line = systemPrompt(identity, places, files).split("\n").find((l) => l.includes("/skills/"));
+  assert.ok(line, "a line names /skills/");
+  assert.match(line, /read-only/);
+  assert.ok(line.includes(`${places.memory}/skills/`), "beside the skills of the memory");
+  assert.ok(line.includes("your owner's skills"));
 });
 
 test("the image's skills are named with their place, and which of a name is listed", async () => {

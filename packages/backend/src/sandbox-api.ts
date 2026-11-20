@@ -234,7 +234,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         if (stages !== undefined && seq === undefined) throw new HttpError(400, "stages come with the seq of their night");
         const steps = stages === undefined ? undefined : nightStages(stages);
         keep(() => record.nightReported({ ...(seq === undefined ? {} : { seq: seq as number }), ...(steps === undefined ? {} : { stages: steps }) }));
-        log(`session: the nightly switch${seq === undefined ? "" : ` of ${String(seq)}`} was reported${steps === undefined ? "" : ` (${steps.reflection.result}, ${steps.curator.result}, ${steps.session.result})`}`);
+        log(`session: the nightly switch${seq === undefined ? "" : ` of ${String(seq)}`} was reported${steps === undefined ? "" : ` (${steps.reflection.result}, ${steps.verifier.result}, ${steps.curator.result}, ${steps.session.result})`}`);
         sendEmpty(response, 204);
         return;
       }
@@ -368,7 +368,7 @@ function turnEnd(body: Record<string, unknown>): TurnEnd {
   if (night !== undefined) {
     const { seq, stage } = object(night);
     if (!Number.isSafeInteger(seq)) throw new HttpError(400, "night needs the seq of its control event");
-    if (stage !== "reflection" && stage !== "curator") throw new HttpError(400, "night's stage must be reflection or curator");
+    if (stage !== "reflection" && stage !== "verifier" && stage !== "curator") throw new HttpError(400, "night's stage must be reflection, verifier or curator");
     step = { seq: seq as number, stage };
   }
   return {
@@ -380,7 +380,7 @@ function turnEnd(body: Record<string, unknown>): TurnEnd {
   };
 }
 
-/** The three steps of a night, each done, failed or skipped, with an optional reason. */
+/** The steps of a night; older runners do not have a verifier. */
 function nightStages(value: unknown): NightStages {
   const stages = object(value);
   const stage = (name: keyof NightStages): NightStage => {
@@ -389,5 +389,10 @@ function nightStages(value: unknown): NightStages {
     if (reason !== undefined && typeof reason !== "string") throw new HttpError(400, `stages.${name}.reason must be a string`);
     return { result, ...(reason === undefined ? {} : { reason }) };
   };
-  return { reflection: stage("reflection"), curator: stage("curator"), session: stage("session") };
+  return {
+    reflection: stage("reflection"),
+    verifier: stages.verifier === undefined ? { result: "skipped" } : stage("verifier"),
+    curator: stage("curator"),
+    session: stage("session"),
+  };
 }

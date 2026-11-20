@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, readdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
 import type { DeliveredEvent, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
 
 import type { Config } from "../src/config.ts";
-import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, reflectionInput } from "../src/prompts.ts";
+import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, verifierSystemPrompt } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
 import { MODEL, OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
 import { acked, activities, closers, ui, world } from "./world.ts";
@@ -423,8 +423,9 @@ const placesOf = (config: Config): Places => ({ memory: config.memoryDir, source
 // a change of their wording does not change which call is which.
 const isCurator = (config: Config, call: Call) =>
   call.systemPrompt.includes(curatorSystemPrompt(config.identity, placesOf(config)).trimEnd());
-const isReflection = (config: Config, call: Call) =>
-  !isCurator(config, call) && call.userTexts.at(-1)!.includes(reflectionInput(placesOf(config)));
+const isVerifier = (config: Config, call: Call) =>
+  call.systemPrompt.includes(verifierSystemPrompt(config.identity, placesOf(config)).trimEnd());
+const isReflection = (call: Call) => call.userTexts.at(-1)!.startsWith("This session ends now.");
 
 /** The curator writes INDEX.md, the reflection writes handoff.md, and any other turn answers. */
 const nightWrites =
@@ -434,13 +435,13 @@ const nightWrites =
     if (isCurator(config, call)) {
       return { calls: [{ tool: "write", args: { path: join(config.memoryDir, "INDEX.md"), content: "# index\n" } }] };
     }
-    if (isReflection(config, call)) {
+    if (isReflection(call)) {
       return { calls: [{ tool: "write", args: { path: join(config.memoryDir, "handoff.md"), content: "明日は版上げ。\n" } }] };
     }
     return { text: "answered" };
   };
 
-test("the nightly event runs the reflection, the curator and a new session", async () => {
+test("the nightly event runs reflection, verifier and curator in separate contexts before starting the new session", async () => {
   const { fake, start, calls, config } = await world();
   await start(nightWrites(config));
   fake.push(ui(1, "a day's talk"));
@@ -452,24 +453,28 @@ test("the nightly event runs the reflection, the curator and a new session", asy
   assert.equal(await readFile(join(config.memoryDir, "handoff.md"), "utf8"), "明日は版上げ。\n");
   assert.equal(await readFile(join(config.memoryDir, "INDEX.md"), "utf8"), "# index\n");
 
-  const reflection = calls.find((c) => isReflection(config, c))!;
+  const reflection = calls.find(isReflection)!;
   assert.ok(reflection.userTexts.some((text) => text.includes("a day's talk")), "the reflection is in the day's session");
+  const verifier = calls.find((c) => isVerifier(config, c))!;
+  assert.equal(verifier.userTexts.length, 1, "the verifier starts from an empty context");
+  assert.ok(verifier.userTexts[0]!.includes(join(config.sessionDir, sessionsBefore.find((name) => name.endsWith(".jsonl"))!)));
   const curator = calls.find((c) => isCurator(config, c))!;
   assert.equal(curator.userTexts.length, 1, "the curator starts from an empty context");
 
-  // Three turns were committed: the day's, the reflection and the curator's, each told as the turn it was.
+  // Each turn, including the day's original turn, is reported separately.
   assert.deepEqual(
     (fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map(({ result, seqs, night }) => ({ result, seqs, night })),
     [
       { result: "done", seqs: [1], night: undefined },
       { result: "done", seqs: undefined, night: { seq: 2, stage: "reflection" } },
+      { result: "done", seqs: undefined, night: { seq: 2, stage: "verifier" } },
       { result: "done", seqs: undefined, night: { seq: 2, stage: "curator" } },
     ],
   );
   const order = fake.order().filter((r) => r === "POST /v1/sessions/rotated" || r === "POST /v1/events/ack");
   assert.deepEqual(order, ["POST /v1/events/ack", "POST /v1/sessions/rotated", "POST /v1/events/ack"]);
   assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [
-    { agent: "main", seq: 2, stages: { reflection: { result: "done" }, curator: { result: "done" }, session: { result: "done" } } },
+    { agent: "main", seq: 2, stages: { reflection: { result: "done" }, verifier: { result: "done" }, curator: { result: "done" }, session: { result: "done" } } },
   ]);
 
   // The new session starts empty, with the handoff in its system prompt.
@@ -481,7 +486,52 @@ test("the nightly event runs the reflection, the curator and a new session", asy
   // Guards against: the day's record written over by the new session. Pi names the files; only their number is ours.
   const sessionsAfter = await readdir(config.sessionDir);
   assert.ok(sessionsBefore.every((name) => sessionsAfter.includes(name)), "the day's record is kept");
-  assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name !== "curator").length, 1, "one new record");
+  assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name.endsWith(".jsonl")).length, 1, "one new record");
+});
+
+test("night workers can read event originals but cannot rewrite them or use shell and backend tools", async () => {
+  const { fake, start, calls, config } = await world();
+  await mkdir(join(config.sourcesDir, "ui"), { recursive: true });
+  const original = join(config.sourcesDir, "ui", "2026-11-14.jsonl");
+  await writeFile(original, "original event\n");
+  const alias = join(config.memoryDir, "alias.md");
+  await symlink(original, alias);
+  await start((call) => {
+    if (!isVerifier(config, call) || call.lastRole !== "user") return { text: "ok" };
+    return { calls: [
+      { tool: "read", args: { path: original } },
+      { tool: "write", args: { path: original, content: "overwritten" } },
+      { tool: "write", args: { path: alias, content: "overwritten" } },
+    ] };
+  });
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+
+  const verifier = calls.find((c) => isVerifier(config, c) && c.lastRole === "toolResult")!;
+  assert.ok(JSON.stringify(verifier.messages).includes("original event"));
+  assert.equal(await readFile(original, "utf8"), "original event\n");
+  for (const worker of [verifier, calls.find((c) => isCurator(config, c))!]) {
+    assert.ok(worker.tools.length > 0 && worker.tools.every((tool) => ["read", "write", "edit", "ls", "move", "remove"].includes(tool)));
+  }
+});
+
+test("the curator sees changes since the previous night across a runner restart", async () => {
+  const { fake, start, calls, config } = await world();
+  await writeFile(join(config.memoryDir, "removed.md"), "old");
+  await writeFile(join(config.memoryDir, "unchanged.md"), "unchanged");
+  const stop = await start(() => ({ text: "ok" }));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  await stop();
+
+  await unlink(join(config.memoryDir, "removed.md"));
+  await start((call) => isVerifier(config, call) && call.lastRole === "user"
+    ? { calls: [{ tool: "write", args: { path: "verified.md", content: "verified" } }] }
+    : { text: "ok" });
+  fake.push(nightly(2));
+  await until(() => acked(fake).includes(2));
+  const curator = calls.filter((c) => isCurator(config, c)).at(-1)!;
+  assert.match(curator.userTexts[0]!, /\["removed.md","verified.md"\]/);
 });
 
 test("a nightly event that comes again after the switch only tells and acks", async () => {
@@ -500,6 +550,16 @@ test("a nightly event that comes again after the switch only tells and acks", as
   assert.equal(calls.length, made);
   // Guards against: the steps of the night told again as if it had been run again.
   assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated")[1], { agent: "main", seq: 1 });
+});
+
+test("a verifier's turn that fails is recorded without skipping the curator or new session", async () => {
+  const { fake, start, config } = await world();
+  await start((call) => isVerifier(config, call) ? { error: "the model is away" } : nightWrites(config)(call));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  const stages = (fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[])[0]?.stages;
+  assert.equal(stages?.verifier.result, "failed");
+  assert.deepEqual([stages?.curator, stages?.session], [{ result: "done" }, { result: "done" }]);
 });
 
 test("a curator's turn that fails is told as its step, and the night goes on to a new session", async () => {
@@ -804,7 +864,7 @@ test("the reflection of the night is not asked", async () => {
   const { fake, start, calls, config } = await world();
   await start((call) => {
     // The reflection writes and then stops without a word of its own.
-    if (isReflection(config, call)) {
+    if (isReflection(call)) {
       if (call.lastRole === "user") return { calls: [{ tool: "write", args: { path: join(config.memoryDir, "handoff.md"), content: "明日。\n" } }] };
       return {};
     }

@@ -48,7 +48,7 @@
 | 3 | `/opt/penelope/skills/`（sandbox の image の中。リポジトリの `packages/runner/image/skills/`）。配置は `PENELOPE_IMAGE_SKILLS` で一覧に載せるものを選べる | このリポジトリ |
 
 - sandbox の `PENELOPE_IMAGE_SKILLS` が未設定なら、image の skill はすべて一覧の対象になる。設定する場合は `goals,self-portrait` のように名前（`SKILL.md` が入っているディレクトリ名）をカンマで区切る。名前の前後の空白と空の項目は無視し、空の値なら image の skill を 1 つも載せない。image にない名前は runner のログに出して飛ばす。
-- この選択は本人・サブエージェント・夜の整理係のセッションに適用し、拡張の読み直し後も保つ。オーナーと記憶の skill は絞らない。一覧に載らない skill も image の中に残り、ファイルは読める（[ADR-0042](adr/0042-select-image-skills-per-deployment.md)）。
+- この選択は本人・サブエージェントのセッションに適用し、拡張の読み直し後も保つ。照合係・整理係は skill を読み込まない。オーナーと記憶の skill は絞らない。一覧に載らない skill も image の中に残り、ファイルは読める（[ADR-0042](adr/0042-select-image-skills-per-deployment.md)）。
 - image の skill は、image の道具の使い方（`slack`・`sd-webui`・`a2a`・`github`）と、どの配置にも同じ skill（`self-portrait`・`goals`）である。配置の値は持たず、それは配置のコネクタの文書にある。image の skill とコネクタは名前で突き合わせない。
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
 - 自分で作った VM への ssh の鍵は、エージェントが HOME に自分で作る（[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)）。配置は ssh の鍵も ssh-agent も置かない。ssh の接続は、ほかの外向きと同じく Sentinel へ向け直され、既定の扱いに従う。
@@ -69,7 +69,7 @@ runner は本人のセッションを開くときと、置き場が変わって�
 | 2 | `/memory/extensions/`。無ければ読み込まない | エージェント |
 
 - 各置き場は Pi のローカル拡張ソースとして扱う。単独の拡張なら直下の `index.ts` に置く。複数なら、配下の `extensions/` に各 `.ts` ファイルか `index.ts` を持つサブディレクトリを置く。たとえば記憶で複数の拡張を使うときは `/memory/extensions/extensions/greet.ts` に置く。詳しい規則は sandbox の `/opt/penelope/runner/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md` にある。
-- HOME や作業ディレクトリからは拡張を自動検出しない。サブエージェントと夜の整理係のセッションには読み込まない。runner は対話 UI を起動しない。
+- HOME や作業ディレクトリからは拡張を自動検出しない。サブエージェントと夜の照合係・整理係のセッションには読み込まない。runner は対話 UI を起動しない。
 - 書き換えは進行中のターンには反映されない。次に本人のターンを始める前に、拡張の置き場の追加・変更・削除を見て、変わっていればセッションの拡張を読み直す。このとき skill も読み直す。夜の切り替えや runner の再起動でセッションを開くときも読み込む。
 - Pi が報告した読み込みエラーやハンドラの例外は、sandbox のログと次のターンの入力に出す。読み込みエラーの拡張は読み込まず、ハンドラの例外は Pi の扱いに従う（例: `tool_call` の例外はそのツール呼び出しを止める）。
 - 記憶の拡張は、初めて試す内容の指紋を HOME の `.penelope-extension-trials.json` に未確認として記録してから読む。その最初のターンが `done` なら確認済みにする。それ以外で終わるか、未確認のまま runner が再起動したら、その内容は次のターンから読み込まない。外した場所と理由はログとターンの入力に出す。未確認の内容に変更すると再び試せるが、すでに外した内容に戻しても読み込まない。オーナーの拡張はこの仕組みでは外さない。

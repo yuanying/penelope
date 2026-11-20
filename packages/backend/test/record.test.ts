@@ -144,16 +144,17 @@ describe("the activity record", () => {
   });
 
   describe("nights", () => {
-    it("shows a night whose curator failed as failed even when its new session was made, with the turns of its steps", (t) => {
+    it("shows a verifier failure even when the night continued, and links the verifier's turn", (t) => {
       const { record, turn, night, clock } = setup(t);
       clock.set("2026-11-15T04:00:00Z");
       const seq = night("2026-11-15T04:00:00.000Z");
       turn("main", "r-1", "2026-11-15T04:00:01.000Z", "2026-11-15T04:01:00.000Z");
       record.turnEnded("main", { turn_id: "r-1", ...done, night: { seq, stage: "reflection" } });
-      turn("main", "c-1", "2026-11-15T04:01:01.000Z", "2026-11-15T04:02:00.000Z");
-      record.turnEnded("main", { turn_id: "c-1", result: "failed", reason: "context overflow", night: { seq, stage: "curator" } });
+      turn("main", "v-1", "2026-11-15T04:01:01.000Z", "2026-11-15T04:02:00.000Z");
+      const verifier = { result: "failed", reason: "context overflow" } as const;
+      record.turnEnded("main", { turn_id: "v-1", ...verifier, night: { seq, stage: "verifier" } });
       clock.set("2026-11-15T04:02:10Z");
-      record.nightReported({ seq, stages: { reflection: done, curator: { result: "failed", reason: "context overflow" }, session: done } });
+      record.nightReported({ seq, stages: { reflection: done, verifier, curator: done, session: done } });
 
       const { rows, failures, turns } = record.day({ day: "2026-11-15" });
       assert.deepEqual(rows.map((row) => row.kind), ["night"], "the turns of its steps are under the night");
@@ -163,25 +164,25 @@ describe("the activity record", () => {
       assert.equal(shown.at, "2026-11-15T04:00:01.000Z");
       const detail = record.night(shown.id);
       assert.equal(detail.night.scheduled_at, "2026-11-15T04:00:00.000Z");
-      assert.deepEqual([detail.turns.reflection?.id, detail.turns.curator?.id], ["r-1", "c-1"]);
+      assert.deepEqual([detail.turns.reflection?.id, detail.turns.verifier?.id], ["r-1", "v-1"]);
     });
 
     it("keeps a night's steps when the same night is reported again without them", (t) => {
       const { record, night, clock } = setup(t);
       clock.set("2026-11-15T04:00:00Z");
       const seq = night("2026-11-15T04:00:00.000Z");
-      record.nightReported({ seq, stages: { reflection: done, curator: done, session: done } });
+      record.nightReported({ seq, stages: { reflection: done, verifier: done, curator: done, session: done } });
       record.nightReported({ seq });
       const rows = record.day({ day: "2026-11-15" }).rows;
       assert.equal(rows.length, 1);
       assert.equal(rows[0]!.kind === "night" && rows[0]!.result, "done");
     });
 
-    it("shows an older runner's switch as a night whose first two steps are unknown", (t) => {
+    it("shows an older runner's switch as a night whose first three steps are unknown", (t) => {
       const { record } = setup(t);
       record.nightReported({});
       const [row] = record.day({ day: "2026-11-14" }).rows;
-      assert.deepEqual(row?.kind === "night" && [row.result, row.stages], ["unknown", { reflection: { result: "unknown" }, curator: { result: "unknown" }, session: { result: "done" } }]);
+      assert.deepEqual(row?.kind === "night" && [row.result, row.stages], ["unknown", { reflection: { result: "unknown" }, verifier: { result: "unknown" }, curator: { result: "unknown" }, session: { result: "done" } }]);
     });
   });
 

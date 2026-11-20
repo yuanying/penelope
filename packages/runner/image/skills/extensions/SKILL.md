@@ -13,7 +13,7 @@ The extension API and examples are documented in
 `/opt/penelope/runner/node_modules/@earendil-works/pi-coding-agent/docs/extensions.md` inside the sandbox image.
 
 Changes take effect before the next main turn, not during the current turn. The runner also loads extensions when it
-opens the main session. The curator and sub-agents do not load these extensions.
+opens the main session. Night workers and sub-agents do not load these extensions.
 
 The runner reports extension errors in the turn input. If the first turn with a changed set of memory extensions does
 not finish successfully, or the runner restarts before it finishes, that set is disabled. The runner checks again when

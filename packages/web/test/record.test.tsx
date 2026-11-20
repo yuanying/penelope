@@ -291,7 +291,7 @@ describe("a turn of the activity record", () => {
 });
 
 describe("the other pages of the activity record", () => {
-  it("show a night's three steps, where it stopped and the turn of each", async () => {
+  it("show the verifier's failed turn separately from the later steps that completed", async () => {
     const backend = new FakeBackend();
     backend.recordNights.set("n-1", {
       night: {
@@ -303,15 +303,15 @@ describe("the other pages of the activity record", () => {
         seconds: 600,
         result: "failed",
         failed_at: at(3, 10),
-        stages: { reflection: { result: "done" }, curator: { result: "failed", reason: "時間切れ" }, session: { result: "skipped" } },
+        stages: { reflection: { result: "done" }, verifier: { result: "failed", reason: "時間切れ" }, curator: { result: "done" }, session: { result: "done" } },
       },
-      turns: { reflection: turn("t-r", 3, 0, { triggers: [], trigger_count: 0, night: { id: "n-1", stage: "reflection" } }) },
+      turns: { verifier: turn("t-v", 3, 1, { triggers: [], trigger_count: 0, night: { id: "n-1", stage: "verifier" } }) },
     });
     start(backend, "#/record/nights/n-1");
-    assert.ok(await screen.findByText(w.stoppedAt("整理係")));
-    assert.ok(screen.getByText("2. 整理係 ・ ここで止まった"));
-    assert.ok(screen.getByText("3. 新しいセッション ・ 行われなかった"));
-    assert.ok(screen.getByRole("link", { name: /振り返り/ }));
+    assert.ok(await screen.findByText("照合係が失敗"));
+    assert.ok(screen.getByText("2. 照合係 ・ 失敗"));
+    assert.ok(screen.getByText("4. 新しいセッション ・ 済み"));
+    assert.ok(screen.getByRole("link", { name: /照合係/ }));
   });
 
   it("show a closed sub-agent's turns, a page more at a time", async () => {

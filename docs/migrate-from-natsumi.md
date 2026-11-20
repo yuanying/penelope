@@ -27,7 +27,7 @@ Kubernetes で動いている natsumi（[yuanying/natsumi](https://github.com/yu
 | 宛先の許し（natsumi の関所の allow-list） | 無い。penelope の Sentinel は既定が素通しで、記録だけを取る（[ADR-0003](adr/0003-all-egress-through-the-sentinel-passthrough-by-default.md)）。natsumi の許しの一覧は、後で絞るときの材料として配置のリポジトリに残しておくとよい |
 | 郵便ポスト（記憶の `postbox/` の定期便） | 仕組みは無い。予約と `a2a send` に替える。ファイルは記憶ごと移るので、移った後にエージェントに予約へ移してもらう（下の「後で」） |
 | モデルの経路を手で切り替える仕組み（natsumi ADR 0046） | 無い。モデルは配置の設定で 1 つ選ぶ |
-| 夜の整理係の工程・睡眠薬・ダッシュボード・設定の画面 | 夜の切り替えの 1 ターンの整理係（[ADR-0007](adr/0007-one-session-switched-nightly-with-a-one-turn-curator.md)）。設定は配置の ConfigMap で変える |
+| 夜の整理係の工程・睡眠薬・ダッシュボード・設定の画面 | 夜の切り替えの照合係と整理係（[ADR-0044](adr/0044-check-memory-against-records-before-nightly-organization.md)）。設定は配置の ConfigMap で変える |
 | ポッポさん（Slack への投稿の判定と承認） | 無い。エージェントが `slackctl post` で直接投稿する（[ADR-0033](adr/0033-slack-posts-through-slackctl-with-the-token-stand-in.md)） |
 | 宣言したツール・鍵を付ける中継（natsumi ADR 0075・0085） | 無い。sandbox は開発の道具を一通り持ち、鍵は Sentinel がサロゲートと差し替える（[ADR-0004](adr/0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)） |
 | A2A の待っている依頼と、受け口の Task | 移らない。受け口の URL（`/a2a/`）は同じ形だが、Task と context は新しく始まる |

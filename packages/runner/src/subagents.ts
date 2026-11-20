@@ -186,6 +186,18 @@ export class SubAgents {
     }
   }
 
+  /** Records written during the main session, including those of agents since closed. */
+  async recordsSince(since: number): Promise<string[]> {
+    const paths: string[] = [];
+    for (const { record } of this.agents.values()) {
+      const file = await stat(record.session).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "ENOENT") throw error;
+      });
+      if (file?.isFile() && file.mtimeMs >= since) paths.push(record.session);
+    }
+    return paths.sort();
+  }
+
   /** Starts a sub-agent and returns once its run has begun. */
   async start(request: StartRequest): Promise<string> {
     const { name, purpose } = request;

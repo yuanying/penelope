@@ -228,17 +228,18 @@ function normalDay(c: Clock, history: HistoryEntry[]): Pick<Scene, "record" | "n
         ended_at: at(3, 9),
         seconds: 540,
         result: "done",
-        stages: { reflection: { result: "done" }, curator: { result: "done" }, session: { result: "done" } },
+        stages: { reflection: { result: "done" }, verifier: { result: "done" }, curator: { result: "done" }, session: { result: "done" } },
       },
     ],
     nightTurns: [
-      turnRow("t-n1-reflection", at(3, 0), 300, { night: { id: night, stage: "reflection" }, tools: 5 }),
+      turnRow("t-n1-reflection", at(3, 0), 230, { night: { id: night, stage: "reflection" }, tools: 5 }),
+      turnRow("t-n1-verifier", at(3, 4), 58, { night: { id: night, stage: "verifier" }, tools: 3 }),
       turnRow("t-n1-curator", at(3, 5), 230, { night: { id: night, stage: "curator" }, tools: 8 }),
     ],
   };
 }
 
-/** A day where things went wrong: a failed turn, a failed job, a night stopped at the curator, and a night missed before. */
+/** A failed turn, a failed job, a night whose curator failed, and an earlier missed night. */
 function badDay(c: Clock, history: HistoryEntry[]): Pick<Scene, "record" | "nightTurns"> {
   const { at, ago } = c;
   const night = "n-2";
@@ -276,14 +277,16 @@ function badDay(c: Clock, history: HistoryEntry[]): Pick<Scene, "record" | "nigh
         failed_at: at(3, 8),
         stages: {
           reflection: { result: "done" },
+          verifier: { result: "done" },
           curator: { result: "failed", reason: "整理の途中で /memory への書き込みが拒まれた" },
-          session: { result: "skipped" },
+          session: { result: "done" },
         },
       },
       { id: "missed-1", kind: "missed_night", at: at(3, 0, 2), scheduled_at: at(3, 0, 2), failed_at: at(3, 1, 2) },
     ],
     nightTurns: [
-      turnRow("t-n2-reflection", at(3, 0), 280, { night: { id: night, stage: "reflection" }, tools: 4 }),
+      turnRow("t-n2-reflection", at(3, 0), 220, { night: { id: night, stage: "reflection" }, tools: 4 }),
+      turnRow("t-n2-verifier", at(3, 4), 50, { night: { id: night, stage: "verifier" }, tools: 2 }),
       turnRow("t-n2-curator", at(3, 5), 190, { night: { id: night, stage: "curator" }, tools: 6, result: "failed", reason: "/memory への書き込みが拒まれた" }),
     ],
   };
@@ -361,7 +364,7 @@ export const scenes: Record<string, SceneDef> = {
     },
   },
   failures: {
-    about: "a failed turn, a failed job, a night stopped at the curator, a missed night; 3 unseen",
+    about: "a failed turn, a failed job, a night whose curator failed, a missed night; 3 unseen",
     make: (now) => {
       const scene = ordinary(now);
       const c = clock(now);

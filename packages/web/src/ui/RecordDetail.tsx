@@ -196,7 +196,7 @@ function StoredResult({ api, turn, call, all }: { api: Api; turn: string; call: 
 function NightPage({ data }: { data: RecordNightResponse }) {
   const { night, turns } = data;
   const failed = failedStageOf(night);
-  const result = night.result === "failed" && failed !== undefined ? w.stoppedAt(failed.name) : night.result === "unknown" ? w.nightUnknown : w.nightDone;
+  const result = night.result === "failed" && failed !== undefined ? w.stageFailed(failed.name) : night.result === "unknown" ? w.nightUnknown : w.nightDone;
   const facts: Array<[string, string]> = [[w.facts.time, spanOf(night.started_at, night.ended_at, night.seconds)]];
   if (night.scheduled_at !== undefined) facts.push([w.facts.due, dateTimeOf(night.scheduled_at)]);
   return (
@@ -206,7 +206,7 @@ function NightPage({ data }: { data: RecordNightResponse }) {
       <ol className="record-steps">
         {stagesOf(night).map((stage, index) => {
           const turn = stage.key === "session" ? undefined : turns[stage.key];
-          const tail = stage.result === "failed" ? ` ・ ${w.stoppedHere}` : stage.result === "skipped" ? ` ・ ${w.stageWord.skipped}` : "";
+          const tail = ` ・ ${w.stageWord[stage.result]}`;
           return (
             <li key={stage.key} className="record-step" data-result={stage.result}>
               <span className="record-step-head">

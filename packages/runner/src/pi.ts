@@ -1,6 +1,5 @@
 // Opening Pi's sessions: hers, which persists and goes on after a restart, and
-// the curator's, which starts empty every night. Pi's own tools are kept as
-// Pi sets them; the backend's tools are added beside them.
+// the nightly workers', which start empty every night with file tools only.
 
 import { access, mkdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
@@ -15,10 +14,11 @@ import {
   type SettingsManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import type { TurnResult } from "@penelope/contract";
+import type { NightTurnStage, TurnResult } from "@penelope/contract";
 
 import type { Config } from "./config.ts";
 import type { TurnModels } from "./model-settings.ts";
+import type { MemoryFile } from "./night-memory.ts";
 import { type ExtensionNotice, type MemoryExtensionTrials, SessionExtensions } from "./extensions.ts";
 
 export interface PiSetup {
@@ -31,6 +31,8 @@ export interface PiSetup {
   tools: ToolDefinition[];
   /** The runner's own factories, given to Pi as they are. */
   extensions: ExtensionFactory[];
+  /** Night workers use only the supplied file tools, with no skills or other resources. */
+  fileOnly?: boolean;
   /** Opt in to owner and memory extensions, only for the main session. */
   diskExtensions?: { trials: MemoryExtensionTrials; log: (line: string) => void };
 }
@@ -39,6 +41,7 @@ export interface PiSetup {
 export interface SessionState {
   file: string;
   nightly?: number;
+  nightMemory?: MemoryFile[];
 }
 
 const stateFile = (config: Config) => join(config.sessionDir, "current.json");
@@ -104,7 +107,7 @@ export async function openSession(
   sessionManager: SessionManager,
   cwd = setup.config.home,
 ): Promise<OpenSession> {
-  const { config, modelRuntime, diskExtensions } = setup;
+  const { config, modelRuntime, diskExtensions, fileOnly } = setup;
   const settingsManager = setup.settings();
   const skillPaths: string[] = [];
   async function refreshSkillPaths(): Promise<void> {
@@ -129,7 +132,7 @@ export async function openSession(
       setup.log(`PENELOPE_IMAGE_SKILLS: image skill ${JSON.stringify(name)} not found; skipping`);
     }
   }
-  await refreshSkillPaths();
+  if (!fileOnly) await refreshSkillPaths();
   const disk = diskExtensions && new SessionExtensions(
     config.ownerExtensionsDir,
     resolve(config.memoryDir, "extensions"),
@@ -142,6 +145,7 @@ export async function openSession(
     agentDir: config.agentDir,
     settingsManager,
     noExtensions: true,
+    noSkills: fileOnly === true,
     extensionFactories: setup.extensions,
     ...(disk ? { additionalExtensionPaths: disk.paths } : {}),
     noContextFiles: true,
@@ -170,6 +174,7 @@ export async function openSession(
     settingsManager,
     resourceLoader,
     sessionManager,
+    ...(fileOnly ? { noTools: "all" as const, tools: setup.tools.map((tool) => tool.name) } : {}),
     customTools: setup.tools,
   });
   if (disk) {
@@ -213,7 +218,7 @@ export function openFile(config: Config, file: string): SessionManager {
   return SessionManager.open(file, config.sessionDir, config.home);
 }
 
-/** The curator's sessions are kept beside hers, for the record. */
-export function curatorManager(config: Config): SessionManager {
-  return SessionManager.create(config.home, join(config.sessionDir, "curator"));
+/** The nightly workers' transcripts are kept beside hers. */
+export function nightManager(config: Config, role: Exclude<NightTurnStage, "reflection">): SessionManager {
+  return SessionManager.create(config.memoryDir, join(config.sessionDir, role));
 }
