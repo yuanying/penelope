@@ -6,6 +6,16 @@ if [[ $# != 3 || ( $1 != fake && $1 != live ) ]]; then
   exit 2
 fi
 mode=$1
+if [[ $mode == live && -n ${EVAL_PI_AUTH:-} ]]; then
+  if [[ $EVAL_PI_AUTH != /* ]]; then
+    echo 'EVAL_PI_AUTH must be an absolute path' >&2
+    exit 2
+  fi
+  if [[ -n ${EVAL_BASE_URL:-} || -n ${EVAL_API_KEY:-} ]]; then
+    echo 'Use EVAL_PI_AUTH or EVAL_BASE_URL and EVAL_API_KEY, not both' >&2
+    exit 2
+  fi
+fi
 runs=${EVAL_RUNS:-1}
 if [[ ! $runs =~ ^[1-9][0-9]?$ ]]; then
   echo 'EVAL_RUNS must be an integer from 1 to 99' >&2
@@ -29,7 +39,7 @@ for label in base candidate; do
   git -C "$repo" archive "$ref" | tar -x -C "$code"
   mkdir -p "$code/night-eval"
   cp "$here"/*.ts "$code/night-eval/"
-  (cd "$code" && env -u EVAL_API_KEY npm ci --no-audit --no-fund >&2)
+  (cd "$code" && env -u EVAL_API_KEY -u EVAL_PI_AUTH npm ci --no-audit --no-fund >&2)
 done
 
 for ((run = 1; run <= runs; run++)); do

@@ -30,7 +30,9 @@ EVAL_RUNS=2 bash eval/run.sh fake 97bb688 97bb688
 
 偽モデルは採点用の正答を返さないので 0 点が正常。5 日分の原本とメモ、各夜の完了、最後の記憶読み取りまで通ればよい。npm の依存取得は必要だが、モデル API には接続しない。
 
-実モデルの場合は、実データや他の資格情報を載せていない使い捨て環境で実行する。**baseline の夜には shell があり、この道具は Pod のファイル・通信の隔離を再現しない。** 到達先を評価専用の API に絞り、短命かつ低い予算上限付きのキーを使う。`EVAL_API_KEY` はシークレットから環境変数に入れ、コマンド履歴や結果には残さない。
+### 実モデル: OpenAI 互換の Chat Completions
+
+実データや他の資格情報を載せていない使い捨て環境で実行する。**baseline の夜には shell があり、この道具は Pod のファイル・通信の隔離を再現しない。** 到達先を評価専用の API に絞り、短命かつ低い予算上限付きのキーを使う。`EVAL_API_KEY` はシークレットから環境変数に入れ、コマンド履歴や結果には残さない。
 
 ```sh
 # 評価専用 API のベース URL。/chat/completions 自体は付けない。
@@ -41,10 +43,27 @@ export EVAL_MODEL=your-chat-model
 EVAL_RUNS=3 EVAL_THINKING=high bash eval/run.sh live 97bb688 night-verifier > night-comparison.jsonl
 ```
 
-`night-verifier` は取得済みのブランチ名、追跡 ref、またはコミット SHA に置き換えられる。再現には両方の SHA を固定する。API はツール呼び出しに対応した OpenAI 互換のストリーミング Chat Completions を使う。
+API はツール呼び出しに対応した OpenAI 互換のストリーミング Chat Completions を使う。
+
+### 実モデル: Pi の OAuth ログイン
+
+Pi に保存済みの OAuth ログインを使う場合は、`EVAL_BASE_URL` と `EVAL_API_KEY` を設定せず、代わりに `EVAL_PI_AUTH` に元の `auth.json` の絶対パスを指定する。
+
+```sh
+EVAL_PI_AUTH="$HOME/.pi/agent/auth.json" EVAL_PROVIDER=openai EVAL_MODEL=gpt-6.1-sol \
+  EVAL_RUNS=3 EVAL_THINKING=high bash eval/run.sh live 97bb688 night-verifier > night-comparison.jsonl
+```
+
+`openai/gpt-6.1-sol` はこの比較で使う Pi の組み込みモデルで、ChatGPT のサブスクリプションで Responses API に接続する。指定するモデルは、比較する両方の ref の組み込み一覧に必要。`auth.json` はコピーせず、同じファイルを Pi のロック経由で読み書きする。OAuth 更新のためファイルへの書き込みと、隣にロックを作る権限が必要。隣の `models.json`、設定、拡張、skill、`AGENTS.md` やセッションは読み込まない。
+
+**baseline の夜の shell からは、指定した `auth.json` も読みうる。** 台本は架空で外部から届く文を入れないが、ファイルや通信は隔離しない。この制約を許容できる、信頼した ref と環境でのみ実行する。
+
+### 共通の指定と結果
+
+`night-verifier` は取得済みのブランチ名、追跡 ref、またはコミット SHA に置き換えられる。再現には両方の SHA を固定する。
 
 - `EVAL_RUNS`: 各版の試行回数（1〜99、既定 1）。同じ試行番号の base と candidate を順に回す。試行ごとに空の記憶・記録・作業場所から始める。
-- `EVAL_THINKING`: `off`（既定）、`minimal`、`low`、`medium`、`high`、`xhigh`。両版の夜と翌日の回答に同じ値を使う。`off` では `reasoning_effort` を送らない。それ以外は指定値を API に送るので、対応するモデル・エンドポイントを選ぶ。台本どおりに再生する日中の思考設定は変えない。
+- `EVAL_THINKING`: `off`（既定）、`minimal`、`low`、`medium`、`high`、`xhigh`。両版の夜と翌日の回答に同じ値を使う。対応するモデル・エンドポイントを選ぶ。Chat Completions モードでは `off` のときに `reasoning_effort` を送らず、それ以外では指定値を送る。台本どおりに再生する日中の思考設定は変えない。
 
 1 試行の 2 版合計で 5〜40 分、入力 20 万〜100 万・出力 2 万〜15 万トークンを計画の目安にする（未計測。思考の深さやツールの往復数で変わる）。たとえば 100 万トークンあたり入力 $2・出力 $10 なら約 $0.60〜$3.50。回数に比例するので 3 試行なら約 $1.80〜$10.50。実際の価格・使用量は provider 側で確認する。1 版・1 試行あたり 30 分で打ち切る。
 
