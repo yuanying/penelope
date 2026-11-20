@@ -117,7 +117,7 @@ async function ack(delivery: Promise<void>) {
 }
 try {
   const wallClock = Date.now;
-  mock.timers.enable({ apis: ["Date"], now: Date.parse(`${days[0].date}T09:00:00Z`) });
+  mock.timers.enable({ apis: ["Date"], now: Date.parse(`${days[0]!.date}T09:00:00Z`) });
   // The runner needs the fictional calendar, but Pi compares token expiry and
   // lock freshness using Date.now(). Never move that clock into the future.
   Date.now = wallClock;
