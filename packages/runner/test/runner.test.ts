@@ -541,10 +541,12 @@ test("without a knowledge purpose, night workers get the memory skill but no goa
   }
 });
 
-test("reflection and curation see the purpose file's size in the always-read layer", async () => {
+test("reflection and curation see the total always-read size, and curation starts with the overage priority", async () => {
   const { fake, start, calls, config } = await world();
   const purpose = "何を知っているべきか。";
+  config.promptLayerTargetBytes = 25;
   await writeFile(join(config.memoryDir, "PURPOSE.md"), purpose);
+  await writeFile(join(config.memoryDir, "always.md"), "keep\n");
   await start(() => ({ text: "ok" }));
   fake.push(nightly(1));
   await until(() => acked(fake).includes(1));
@@ -552,8 +554,36 @@ test("reflection and curation see the purpose file's size in the always-read lay
   const reflection = calls.find(isReflection)!;
   const curator = calls.find((call) => isCurator(config, call))!;
   for (const worker of [reflection, curator]) {
-    assert.ok(worker.userTexts.at(-1)!.includes(`PURPOSE.md: ${Buffer.byteLength(purpose)} bytes`));
+    const input = worker.userTexts.at(-1)!;
+    assert.ok(input.includes(`PURPOSE.md: ${Buffer.byteLength(purpose)} bytes`));
+    assert.ok(input.includes(`total: ${5 + Buffer.byteLength(purpose)} bytes; target: 25 bytes`));
   }
+  assert.match(curator.userTexts[0]!.split("\n")[0]!, /^First, shorten.*topics.*links/);
+});
+
+test("only the curator gets a map of memory reflecting daytime reads across a restart", async () => {
+  const { fake, start, calls, config } = await world();
+  const topic = join(config.memoryDir, "topic.md");
+  await writeFile(topic, "# Topic\nprivate example body\n");
+  await writeFile(join(config.memoryDir, "other.md"), "unopened example body\n");
+  const stop = await start((call) => call.lastRole === "user" && (!isCurator(config, call) && !isVerifier(config, call))
+    ? { calls: [{ tool: "read", args: { path: isReflection(call) ? join(config.memoryDir, "other.md") : topic } }] }
+    : { text: "ok" });
+  fake.push(ui(1, "read this"));
+  await until(() => acked(fake).includes(1));
+  fake.push(nightly(2));
+  await until(() => acked(fake).includes(2));
+  await stop();
+  calls.length = 0;
+  await start(() => ({ text: "ok" }));
+  fake.push(nightly(3));
+  await until(() => acked(fake).includes(3));
+  const curator = calls.find((call) => isCurator(config, call))!.userTexts[0]!;
+  const verifier = calls.find((call) => isVerifier(config, call))!.userTexts[0]!;
+  assert.match(curator, /"topic\.md",29,null,null,"\d{4}-\d{2}-\d{2}",1,0/);
+  assert.match(curator, /"other\.md",22,null,null,null,0,0/);
+  assert.doesNotMatch(curator, /example body/);
+  assert.doesNotMatch(verifier, /# Memory map/);
 });
 
 test("the verifier receives the full source time window after missed nights", async () => {

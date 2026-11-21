@@ -163,11 +163,11 @@ Any memory files below are as they were when this session started.`;
 }
 
 /** The input of her last turn of the day, in the day's session. */
-export function reflectionInput(places: Places, sizes: Partial<Record<string, number>>): string {
+export function reflectionInput(places: Places, layer: AlwaysReadLayer): string {
   const handoff = join(places.memory, "handoff.md");
   return `This session ends now. The purpose of this reflection is to leave a handoff in ${handoff} and a diary entry so your next session can work without asking the same questions or repeating the same mistakes. After this turn, the ${VERIFIER} checks the notes against the records, then the curator reorganises the memory.
 
-${promptMemory(sizes[PURPOSE] !== undefined)} Current sizes: ${promptSizes((name) => sizes[name])}.`;
+${promptMemory(layer.sizes[PURPOSE] !== undefined)} ${promptLayerSizes(layer)}.`;
 }
 
 function promptMemory(hasPurpose: boolean): string {
@@ -175,12 +175,32 @@ function promptMemory(hasPurpose: boolean): string {
   return `A new session carries ${files} in its system prompt in full unless a file is missing or over the size limit.`;
 }
 
-function promptSizes(bytes: (name: string) => number | undefined): string {
-  return PROMPT_FILES.flatMap((name) => {
-    const size = bytes(name);
-    if (name === PURPOSE && size === undefined) return [];
-    return [`${name}: ${size === undefined ? "missing" : `${size} bytes`}`];
-  }).join("; ");
+type AlwaysReadLayer = {
+  sizes: Partial<Record<(typeof PROMPT_FILES)[number], number>>;
+  total: number;
+  target: number;
+  overTarget: boolean;
+};
+
+export async function alwaysReadLayer(memoryDir: string, target: number): Promise<AlwaysReadLayer> {
+  const sizes: AlwaysReadLayer["sizes"] = {};
+  let total = 0;
+  for (const name of PROMPT_FILES) {
+    const info = await stat(join(memoryDir, name)).catch(() => undefined);
+    if (info?.isFile()) {
+      sizes[name] = info.size;
+      total += info.size;
+    }
+  }
+  return { sizes, total, target, overTarget: total > target };
+}
+
+function promptLayerSizes({ sizes, total, target }: AlwaysReadLayer): string {
+  const files = PROMPT_FILES.flatMap((name) => {
+    const size = sizes[name];
+    return size === undefined ? [] : [`${name}: ${size} bytes`];
+  });
+  return `Always-read layer sizes: ${[...files, `total: ${total} bytes`, `target: ${target} bytes`].join("; ")}`;
 }
 
 /** Asked once at the end of a turn that has no text of her own, before it is folded (ADR-0015). */
@@ -260,10 +280,15 @@ Event originals are in ${places.sources}/<source>[/<stream>]/<YYYY-MM-DD>.jsonl.
 ${changesInput(changed, haveBaseline)}`;
 }
 
-export function curatorInput(memory: MemoryFile[], changed: string[], haveBaseline: boolean): string {
-  return `Reflection and verification have been attempted; the next session starts from the memory you leave.
+export function curatorInput(memory: MemoryFile[], changed: string[], haveBaseline: boolean, layer: AlwaysReadLayer, map: string): string {
+  const priority = layer.overTarget
+    ? "First, shorten the always-read layer: it is over its size target. Move details into topics and leave links to them.\n\n"
+    : "";
+  return `${priority}Reflection and verification have been attempted; the next session starts from the memory you leave.
 
-${changesInput(changed, haveBaseline)} Current sizes: ${promptSizes((name) => memory.find((file) => file.path === name)?.bytes)}. Total memory: ${memory.reduce((bytes, file) => bytes + file.bytes, 0)} bytes.`;
+${changesInput(changed, haveBaseline)} ${promptLayerSizes(layer)}. Total memory: ${memory.reduce((bytes, file) => bytes + file.bytes, 0)} bytes.
+
+${map}`;
 }
 
 /** What a sub-agent is started with (ADR-0022). */

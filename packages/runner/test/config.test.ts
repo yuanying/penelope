@@ -27,6 +27,7 @@ test("the required settings and the defaults", () => {
     jobDir: "/home/agent/jobs",
     jobs: { max: 5, maxSeconds: 86400, tailChars: 4000 },
     promptFileMaxBytes: 65536,
+    promptLayerTargetBytes: 16384,
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
     turnFold: true,

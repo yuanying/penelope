@@ -56,6 +56,13 @@ describe("the memory", () => {
     ].join("\n"));
   });
 
+  it("identifies writes by a night worker in the memory history", async (t) => {
+    const dir = tempDir(t);
+    writeFileSync(path.join(dir, "topic.md"), "current\n");
+    await new Memory(dir, author).commit({ agent: "main", turnId: "v-1", nightWorker: "verifier" });
+    assert.equal(git(dir, "log", "-1", "--format=%(trailers:key=Night-stage,valueonly)").trim(), "verifier");
+  });
+
   it("counts binary files in the first night commit without counting them as text lines", async (t) => {
     const dir = tempDir(t);
     const memory = new Memory(dir, author);

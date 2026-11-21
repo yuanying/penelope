@@ -54,6 +54,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
     jobDir: join(home, "jobs"),
     jobs: { max: 5, maxSeconds: 86400, tailChars: 4000 },
     promptFileMaxBytes: 65536,
+    promptLayerTargetBytes: 16384,
     imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,
     turnFold: options.turnFold ?? true,

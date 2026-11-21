@@ -20,6 +20,7 @@ import type { Config } from "./config.ts";
 import { imageLimitExtension } from "./image-limit.ts";
 import type { TurnModels } from "./model-settings.ts";
 import type { MemoryFile } from "./night-memory.ts";
+import type { MemoryRead } from "./memory-reads.ts";
 import { type ExtensionNotice, type MemoryExtensionTrials, SessionExtensions } from "./extensions.ts";
 
 export interface PiSetup {
@@ -44,6 +45,7 @@ export interface SessionState {
   file: string;
   nightly?: number;
   nightMemory?: MemoryFile[];
+  memoryReads?: MemoryRead[];
 }
 
 const stateFile = (config: Config) => join(config.sessionDir, "current.json");

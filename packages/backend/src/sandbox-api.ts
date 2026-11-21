@@ -197,8 +197,10 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         keep(() => record.turnEnded(agent, end));
         conversation.turnEnded(agent);
         try {
+          const stage = agent === "main" ? end.night?.stage : undefined;
           await memory.commit({
             agent, turnId: turn_id,
+            ...(stage === "verifier" || stage === "curator" ? { nightWorker: stage } : {}),
             ...(agent !== "main" || end.night === undefined ? {} : {
               onChange: (change) => {
                 if (change === undefined) log("memory: nightly change counts not measured");

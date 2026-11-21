@@ -26,11 +26,14 @@ export class Memory {
   }
 
   /** Commits everything that changed in the work tree. `clean` when nothing did. */
-  commit({ agent, turnId, onChange }: {
-    agent: string; turnId: string; onChange?: (change: RecordMemoryChange | undefined) => void;
+  commit({ agent, turnId, nightWorker, onChange }: {
+    agent: string; turnId: string; nightWorker?: "verifier" | "curator";
+    onChange?: (change: RecordMemoryChange | undefined) => void;
   }): Promise<"committed" | "clean"> {
     return this.queue(async () => {
-      const result = await this.commitNow([`Turn ${turnId}`, `Agent: ${agent}`]);
+      const message = [`Turn ${turnId}`, `Agent: ${agent}`];
+      if (nightWorker) message.push(`Night-stage: ${nightWorker}`);
+      const result = await this.commitNow(message);
       if (onChange !== undefined) {
         // Measure before another queued commit can move HEAD. A failed
         // measurement is not a failed commit, and its git output is private.

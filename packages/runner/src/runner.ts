@@ -10,7 +10,6 @@
 // hands over one that is not acked yet, is dropped by its seq.
 
 import { randomUUID } from "node:crypto";
-import { stat } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
@@ -34,6 +33,8 @@ import { MemoryExtensionTrials } from "./extensions.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
+import { memoryMap } from "./memory-map.ts";
+import { memoryReads, NIGHT_REFLECTION } from "./memory-reads.ts";
 import { TurnModels } from "./model-settings.ts";
 import { memoryChanges, memorySnapshot } from "./night-memory.ts";
 import { nightTools } from "./night-tools.ts";
@@ -50,11 +51,11 @@ import {
   writeState,
 } from "./pi.ts";
 import {
+  alwaysReadLayer,
   curatorInput,
   curatorSystemPrompt,
   foldAskInput,
   type Places,
-  PROMPT_FILES,
   readPromptFiles,
   reflectionInput,
   systemPrompt,
@@ -512,15 +513,23 @@ export class Runner {
   /** Each step is attempted even if one before it failed (ADR-0044). */
   private async nightly(seq: number): Promise<NightStages> {
     const nightStarted = new Date().toISOString();
-    const { memoryDir, identity } = this.config;
+    const { memoryDir, identity, promptLayerTargetBytes } = this.config;
     const before = this.state?.nightMemory;
+    const manager = this.session!.session.sessionManager;
+    const today = nightStarted.slice(0, 10);
+    const previousReads = this.state?.memoryReads ?? [];
+    const reads = await memoryReads(memoryDir, manager.getCwd(), manager.getEntries(), previousReads, today).catch(() => {
+      this.log("night memory reads could not be collected");
+      return previousReads;
+    });
     const reflection = await this.nightStage("reflection", async () => {
-      const sizes: Partial<Record<string, number>> = {};
-      for (const name of PROMPT_FILES) {
-        const info = await stat(join(memoryDir, name)).catch(() => undefined);
-        if (info?.isFile()) sizes[name] = info.size;
+      const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
+      manager.appendCustomEntry(NIGHT_REFLECTION, true);
+      try {
+        return stageOf(await this.turnOf(this.session!.session, reflectionInput(this.places, layer), { night: { seq, stage: "reflection" } }));
+      } finally {
+        manager.appendCustomEntry(NIGHT_REFLECTION, false);
       }
-      return stageOf(await this.turnOf(this.session!.session, reflectionInput(this.places, sizes), { night: { seq, stage: "reflection" } }));
     });
     const verifier = await this.nightStage(VERIFIER, async () => {
       const main = this.state!.file;
@@ -535,8 +544,10 @@ export class Runner {
     });
     const curator = await this.nightStage("curator", async () => {
       const memory = await memorySnapshot(memoryDir);
+      const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
+      const map = await memoryMap(memoryDir, memory, reads, today);
       return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
-        curatorInput(memory, memoryChanges(before, memory), before !== undefined),
+        curatorInput(memory, memoryChanges(before, memory), before !== undefined, layer, map),
         nightTools(this.config));
     });
     let session: NightStage;
@@ -545,7 +556,7 @@ export class Runner {
         this.log(`night memory baseline not kept: ${failure(error)}`);
         return undefined;
       });
-      const state: SessionState = { file: await newSessionFile(this.config), nightly: seq, ...(nightMemory ? { nightMemory } : {}) };
+      const state: SessionState = { file: await newSessionFile(this.config), nightly: seq, ...(nightMemory ? { nightMemory } : {}), memoryReads: reads };
       const next = await this.openMainSession(state.file);
       try {
         await writeState(this.config, state);
