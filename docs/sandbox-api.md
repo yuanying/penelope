@@ -312,6 +312,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 ## モデルの設定
 
+- `GET /v1/model-settings?agent=main` は保存設定だけを `200` と `{selection}` で返す。保存設定がなければ `selection` は `null`。sandbox の通常の認証が必要で、候補一覧・既定値・報告の期限・保存設定は変更しない。[記憶評価 CLI](memory-eval.md) はこの口で日中のモデル設定を読む。評価の問いや結果はこの API を通らない。
 - `PUT /v1/model-settings` は `{agent: "main", models, default}`（候補と既定の型は [UI 向けの API の仕様](ui-api.md) の「設定」）。名前・ID・コンテキスト・思考の深さだけを送る。鍵や接続先は送らない。Pi の `ModelRuntime.getAvailable` が認証を確認した一覧を使う。
 - backend は一覧をメモリに置き、最後の報告から 2 分で期限切れにする。応答は `200` と `{selection}`。sandbox からの要求はオーナーの設定を書き換えない。
 - runner は起動後の poll と各ターンの前に報告し、各ターンの開始時点の設定をセッションに適用する。通信に失敗したらログに残し、最後に読めた設定を使う。まだ読めていなければ既定のままにする。

@@ -164,6 +164,16 @@ kubectl -n "$ns" create secret generic penelope-receivers \
 - GitHub の OAuth App の callback は `<公開の URL>/auth/github/callback`。
 - 鍵を変えたら Pod を作り直す（`kubectl -n "$ns" rollout restart statefulset/penelope`）。receivers は鍵を起動のときにだけ読む。
 
+## 記憶の評価
+
+sandbox の image に入る `penelope-memory-eval` は、配置の `PURPOSE.md` にある問いで記憶を評価する。見本の Pod では次のように起動する。
+
+```sh
+kubectl -n penelope exec penelope-0 -c sandbox -- penelope-memory-eval
+```
+
+既定の出力には問いや答えを含めない。問いの書式、過去の記憶の指定、結果の比較は [記憶評価 CLI の仕様](../../docs/memory-eval.md) を参照。
+
 ## モデルの設定
 
 `PENELOPE_MODEL` と `PENELOPE_THINKING` は、オーナーが Web UI の「設定」で選ぶまでの既定である。保存した組は backend の SQLite に残り、本体・サブエージェント・夜の整理係の次のターンから使う。候補を増やすには sandbox の `models.json` にモデルを追加し、必要な鍵の差し替えは従来どおり Sentinel に設定する。候補には Pi が認証を確認できたモデルだけが出る。候補から保存済みのモデルが外れたら、runner は既定で動き、そのことをログに残す。

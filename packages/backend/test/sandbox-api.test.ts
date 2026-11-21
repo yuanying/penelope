@@ -55,8 +55,9 @@ async function setup(
   const inbox = new Inbox(db, queue, { assets, now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const socketPath = path.join(dir, "sandbox.sock");
+  const modelSettings = new ModelSettings(db, clock.now);
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, record, modelSettings: new ModelSettings(db), now: Date.now, log: () => {} }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, record, modelSettings, now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {
@@ -65,7 +66,7 @@ async function setup(
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, agents, record, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir };
+  return { queue, conversation, agents, record, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir, modelSettings };
 }
 
 /** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
@@ -94,6 +95,26 @@ describe("the sandbox's API", () => {
       const { call } = await setup(t, "");
       assert.equal((await call("/v1/events?agent=main&wait=0")).status, 401);
     });
+  });
+
+  it("reads the saved model without changing the catalog, default or selection", async (t) => {
+    const { call, clock, modelSettings } = await setup(t);
+    const selection = { model: "test/chosen", thinking: "low" };
+    const report = await call("/v1/model-settings", { method: "PUT", json: {
+      agent: "main",
+      models: [{ provider: "test", id: "chosen", name: "Chosen", context_window: 1024, thinking_levels: ["low", "high"] }],
+      default: { ...selection, thinking: "high" },
+    } });
+    assert.equal(report.status, 200);
+    modelSettings.save(selection);
+    clock.advance(1);
+    const before = modelSettings.read();
+    const answer = await call("/v1/model-settings?agent=main");
+    assert.equal(answer.status, 200);
+    assert.deepEqual(answer.json(), { selection });
+    assert.deepEqual(modelSettings.read(), before);
+    clock.advance(1);
+    assert.deepEqual(modelSettings.read(), { models: [], default: null, selection: before.selection });
   });
 
   describe("taking events", () => {
