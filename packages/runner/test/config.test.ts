@@ -29,6 +29,7 @@ test("the required settings and the defaults", () => {
     promptFileMaxBytes: 65536,
     promptLayerTargetBytes: 16384,
     nightCarryDays: 7,
+    reviewTopicMaxBytes: 100000,
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
     turnFold: true,

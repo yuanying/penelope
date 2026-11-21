@@ -30,6 +30,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_TIME_ZONE` | `TZ`、それも無ければ `UTC` | 時間帯。`/sources` の日付、起きている時間、cron の式に使う |
 | `PENELOPE_AWAKE_HOURS` | `07:00-23:00` | 起きている時間（`HH:MM-HH:MM`、始まりを含み終わりを含まない。日をまたいでよい。始まりと終わりが同じならいつも起きている） |
 | `PENELOPE_NIGHTLY_CRON` | `0 4 * * *` | 夜の切り替えの時刻（5 欄の cron の式）。テスト用に、先頭に秒の欄を足した 6 欄も受ける（例: `*/20 * * * * *`） |
+| `PENELOPE_REVIEW_WEEKDAY` | `0` | 週の棚卸しを行う曜日（`0` は日曜、`6` は土曜）。`PENELOPE_TIME_ZONE` で数える |
 | `PENELOPE_BATCH_QUIET_MINUTES` | `5` | `batch` の N（最後の 1 件から待つ分） |
 | `PENELOPE_BATCH_MAX_MINUTES` | `30` | `batch` の M（最初の 1 件から待つ最長の分） |
 | `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
@@ -134,6 +135,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 [ADR-0044](adr/0044-check-memory-against-records-before-nightly-organization.md) と [sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」の、backend の役目を決める。
 
 - `PENELOPE_NIGHTLY_CRON` の時刻に、`source` が `control`、`id` が `nightly@<時刻>`、`payload` が `{kind: "nightly"}` の出来事を列に入れる。backend が止まっていて時刻を過ぎたものは、後から入れない。次の夜を待つ。
+- 棚卸しは、配置のタイムゾーンで `PENELOPE_REVIEW_WEEKDAY` に当たる日の最初の予定の夜とする。その出来事の `payload` に予定時刻の現地日付 `review_date`（`YYYY-MM-DD`）を保存する。判定は配送・実行時刻ではなく予定時刻で行い、再配送でも同じ `payload` を渡す。最初の予定を逃したり、その曜日に予定が無かったりした週は棚卸しを埋め合わせない。
 - 時刻は 15 秒ごとに確かめる。テスト用の秒の欄で夜どうしの間が 1 分より短いときは、1 秒ごとに確かめる。
 - backend は切り替えの段を数えない。制御の出来事も、ほかの出来事と同じく、ack が無ければ `PENELOPE_REDELIVER_MINUTES` の後にもう一度渡すだけである。
 - 切り替えの知らせ（`POST /v1/sessions/rotated`）は、段の結果とともに活動の記録に残す（下の「活動の記録」）。

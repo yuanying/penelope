@@ -169,6 +169,23 @@ describe("the scheduler", () => {
     assert.equal(nightly?.id, "nightly@2026-11-14T08:30:10.000Z");
   });
 
+  it("marks only the first scheduled switch on the configured local weekday and keeps its review date on redelivery", (t) => {
+    const { clock, queue, schedules } = setup(t, "2026-11-15T14:59:00Z");
+    const scheduler = new Scheduler(schedules, queue, {
+      now: clock.now, timeZone: "Asia/Tokyo", nightly: "0 0,1 * * *", reviewWeekday: 1, log: () => {},
+    });
+    // The first Monday occurrence is still Sunday in UTC.
+    clock.set("2026-11-15T15:01:00Z");
+    scheduler.tick();
+    const [first] = queue.take({ after: 0 });
+    assert.deepEqual(first?.inline && first.payload, { kind: "nightly", review_date: "2026-11-16" });
+    clock.set("2026-11-15T16:00:00Z");
+    scheduler.tick();
+    const [again, second] = queue.take({ after: first!.seq });
+    assert.deepEqual(again, first);
+    assert.deepEqual(second?.inline && second.payload, { kind: "nightly" });
+  });
+
   it("does not make up a nightly switch the backend was down for", (t) => {
     const { clock, queue } = setup(t, "2026-11-14T03:00:00Z");
     // Started after the nightly time: the next one is tomorrow's.

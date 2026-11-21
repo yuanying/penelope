@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import type { Identity } from "./config.ts";
 import type { Connector } from "./connectors.ts";
+import type { ArchivePlan } from "./memory-review.ts";
 import type { DaytimeRecords, MemoryFile } from "./night-memory.ts";
 
 export const VERIFIER = "verifier";
@@ -258,7 +259,7 @@ export function curatorSystemPrompt(identity: Identity, places: Places, memory: 
     : "make what is needed easy to find and current";
   return `${nightRole(identity, places, "curator")}${nightKnowledge(places, memory)}
 
-${promptMemory(withPurpose)} The rest is read as needed, usually starting from INDEX.md. Your purpose is to keep that always-read layer small and ${aim}: the memory should preserve what is known now, not stack up daily accounts.`;
+${promptMemory(withPurpose)} The rest is read as needed, usually starting from INDEX.md. Your purpose is to keep that always-read layer small and ${aim}: the topics should preserve what is known now, while the diary keeps the day-by-day record.`;
 }
 
 function changesInput(changed: string[], haveBaseline: boolean): string {
@@ -284,13 +285,41 @@ Event originals are in ${places.sources}/<source>[/<stream>]/<YYYY-MM-DD>.jsonl.
 ${changesInput(changed, haveBaseline)}`;
 }
 
-export function curatorInput(memory: MemoryFile[], changed: string[], haveBaseline: boolean, layer: AlwaysReadLayer, map: string): string {
-  const priority = layer.overTarget
+function layerPriority(layer: AlwaysReadLayer): string {
+  return layer.overTarget
     ? "First, shorten the always-read layer: it is over its size target. Move details into topics and leave links to them.\n\n"
     : "";
-  return `${priority}Reflection and verification have been attempted; the next session starts from the memory you leave.
+}
+
+export function curatorInput(memory: MemoryFile[], changed: string[], haveBaseline: boolean, layer: AlwaysReadLayer, map: string): string {
+  return `${layerPriority(layer)}Reflection and verification have been attempted; the next session starts from the memory you leave.
 
 ${changesInput(changed, haveBaseline)} ${promptLayerSizes(layer)}. Total memory: ${memory.reduce((bytes, file) => bytes + file.bytes, 0)} bytes.
+
+${map}`;
+}
+
+export function reviewContentInput(
+  date: string, topics: string[], diary: string[], archive: ArchivePlan, layer: AlwaysReadLayer, map: string,
+): string {
+  return `${layerPriority(layer)}# Content review (${date})
+
+The diary shows what happened. Topics should capture patterns across days and reflect what is true now. Older facts removed from topics belong as summaries in ${archive.current}; daily diary entries remain as they are. Existing archive summaries are due to be combined as follows (sources and destination, relative to the memory root): ${JSON.stringify(archive.groups)}.
+
+Topic bodies in scope: ${JSON.stringify(topics)}.
+Diary entries for this week: ${JSON.stringify(diary)}.
+${promptLayerSizes(layer)}.
+
+${map}`;
+}
+
+export function reviewStructureInput(places: Places, memory: MemoryFile[], map: string): string {
+  const purpose = hasPurpose(memory)
+    ? `${join(places.memory, PURPOSE)} sets the knowledge purpose and lists the questions this memory should answer under 答えられるべき問い.`
+    : "Without a separate knowledge purpose, the structure should make current information easy to find.";
+  return `Is the memory organised for its purpose?
+
+${purpose} The current index is ${join(places.memory, "INDEX.md")} if present, and the map below shows how the files link to one another. Topic bodies are available as needed. Merging, splitting and moving topics, and revising the index and links, are expected work when they make the knowledge easier to find and use.
 
 ${map}`;
 }

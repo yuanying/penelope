@@ -27,7 +27,7 @@ function slack(seq: number, delivery: "now" | "batch"): DeliveredEvent {
   };
 }
 
-function nightly(seq: number): DeliveredEvent {
+function nightly(seq: number, reviewDate?: string): DeliveredEvent {
   return {
     seq,
     source: "control",
@@ -37,7 +37,7 @@ function nightly(seq: number): DeliveredEvent {
     summary: "nightly",
     delivery: "now",
     inline: true,
-    payload: { kind: "nightly" },
+    payload: { kind: "nightly", ...(reviewDate ? { review_date: reviewDate } : {}) },
     appended: { path: "/sources/control/2026-11-14.jsonl", lines: [1, 1] },
   };
 }
@@ -492,6 +492,62 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   assert.ok(sessionsBefore.every((name) => sessionsAfter.includes(name)), "the day's record is kept");
   assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name.endsWith(".jsonl")).length, 1, "one new record");
 });
+
+test("weekly review rebuilds the map after content review and gives it to a fresh structure session", async () => {
+  const { fake, start, calls, config } = await world();
+  config.promptLayerTargetBytes = 1;
+  await writeFile(join(config.memoryDir, "always.md"), "[topic](old.md)\n");
+  await writeFile(join(config.memoryDir, "old.md"), "# Current\n");
+  await writeFile(join(config.memoryDir, "PURPOSE.md"), "## 答えられるべき問い\n\n- What is current?\n");
+  await mkdir(join(config.memoryDir, "diary"));
+  await writeFile(join(config.memoryDir, "diary/2026-11-10.md"), "A repeated event\n");
+  await start((call) => {
+    if (isCurator(config, call) && call.lastRole === "user") {
+      return { calls: [{ tool: "move", args: call.userTexts[0]!.includes("Content review")
+        ? { from: "old.md", to: "current.md" }
+        : { from: "current.md", to: "final.md" } }] };
+    }
+    return { text: "ok" };
+  });
+  fake.push(nightly(1, "2026-11-15"));
+  await until(() => acked(fake).includes(1));
+
+  const [content, structure] = calls.filter((call) => isCurator(config, call) && call.lastRole === "user");
+  assert.match(content!.userTexts[0]!, /^First, shorten the always-read layer/);
+  assert.match(content!.userTexts[0]!, /Diary entries[^\n]*diary\/2026-11-10\.md/);
+  assert.equal(structure!.userTexts.length, 1);
+  assert.match(structure!.userTexts[0]!, /^Is the memory organised for its purpose\?/);
+  assert.match(structure!.userTexts[0]!, /"current\.md",\d+/);
+  assert.doesNotMatch(structure!.userTexts[0]!, /"old\.md"/);
+  assert.match(structure!.userTexts[0]!, /PURPOSE\.md.*答えられるべき問い/);
+  assert.equal(await readFile(join(config.memoryDir, "always.md"), "utf8"), "[topic](final.md)\n");
+});
+
+for (const failed of ["content", "structure"] as const) {
+  test(`a failed weekly ${failed} review does not advance the curator baseline or block the other work`, async () => {
+    const { fake, start, calls, config } = await world();
+    await start((call) => {
+      const input = call.userTexts[0]!;
+      const fails = failed === "content" ? input.includes("Content review") : input.startsWith("Is the memory organised");
+      return fails ? { error: "the model is away" } : { text: "ok" };
+    });
+    fake.push(nightly(1));
+    await until(() => acked(fake).includes(1));
+    await writeFile(join(config.memoryDir, "topic.md"), "daytime edit\n");
+    fake.push(nightly(2, "2026-11-15"));
+    await until(() => acked(fake).includes(2));
+    fake.push(nightly(3));
+    await until(() => acked(fake).includes(3));
+
+    const curatorTurns = (fake.sent("POST", "/v1/turns/end") as TurnEndRequest[])
+      .filter(({ night }) => night?.seq === 2 && night.stage === "curator");
+    assert.deepEqual(curatorTurns.map(({ result }) => result), failed === "content" ? ["failed", "done"] : ["done", "failed"]);
+    const review = (fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[]).find(({ seq }) => seq === 2)!;
+    assert.equal(review.stages?.curator.result, "failed");
+    assert.equal(review.stages?.session.result, "done");
+    assert.match(calls.filter((call) => isCurator(config, call)).at(-1)!.userTexts[0]!, /including removals\): \["topic\.md"\]/);
+  });
+}
 
 test("a curator move is repaired after its turn commit and before the next night's baseline", async () => {
   const { fake, start, calls, config } = await world();

@@ -57,6 +57,8 @@ export interface Config {
   promptLayerTargetBytes: number;
   /** UTC days of unverified daytime records to carry into later nights. */
   nightCarryDays: number;
+  /** Topic body budget for one weekly content review. */
+  reviewTopicMaxBytes: number;
   /** An image of the owner's message larger than this is left as a path. */
   imageMaxBytes: number;
   pollWaitSeconds: number;
@@ -133,6 +135,7 @@ export function readConfig(env: Env): Config {
   const promptFileMaxBytes = positiveInteger(env, "PENELOPE_PROMPT_FILE_MAX_BYTES", 65536, problems);
   const promptLayerTargetBytes = positiveInteger(env, "PENELOPE_PROMPT_LAYER_TARGET_BYTES", 16384, problems);
   const nightCarryDays = positiveInteger(env, "PENELOPE_NIGHT_CARRY_DAYS", 7, problems);
+  const reviewTopicMaxBytes = positiveInteger(env, "PENELOPE_REVIEW_TOPIC_MAX_BYTES", 100000, problems);
   const imageMaxBytes = positiveInteger(env, "PENELOPE_IMAGE_MAX_BYTES", A2A_IMAGE_MAX_BYTES, problems);
   const pollWaitSeconds = positiveInteger(env, "PENELOPE_POLL_WAIT_SECONDS", 30, problems);
   const jobs: JobLimits = {
@@ -172,6 +175,7 @@ export function readConfig(env: Env): Config {
     promptFileMaxBytes,
     promptLayerTargetBytes,
     nightCarryDays,
+    reviewTopicMaxBytes,
     imageMaxBytes,
     pollWaitSeconds,
     turnFold: fold !== "off",

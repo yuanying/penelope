@@ -55,7 +55,7 @@ export type SourcesLine = {
 };
 
 /** The payload of a `control` event. The runner handles it; it never enters her turn. */
-export type ControlPayload = { kind: "nightly" };
+export type ControlPayload = { kind: "nightly"; /** Scheduled local date, only for weekly review. */ review_date?: string };
 
 /** The payload of a `cron` event: one of her schedules came due. */
 export type CronPayload = { schedule_id: string; reason: string };

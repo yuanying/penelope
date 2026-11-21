@@ -71,7 +71,7 @@ export async function startBackend(
   const conversation = new Conversation(db, feed, { now, assets });
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
-  const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, log });
+  const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, reviewWeekday: config.reviewWeekday, log });
   const record = new ActivityRecord(db, feed, {
     now,
     timeZone: config.timeZone,

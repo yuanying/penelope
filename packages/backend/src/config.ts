@@ -31,6 +31,7 @@ export type Config = {
   timeZone: string;
   awakeHours: string;
   nightly: string;
+  reviewWeekday: number;
   batch: { quietMs: number; maxMs: number };
   redeliverMs: number;
   /** The heartbeat's quiet time (ADR-0031); none when it is off. */
@@ -135,6 +136,9 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     throw new ConfigError(`PENELOPE_NIGHTLY_CRON: ${error instanceof Error ? error.message : String(error)}`);
   }
 
+  const reviewWeekday = get("PENELOPE_REVIEW_WEEKDAY") ?? "0";
+  if (!/^[0-6]$/.test(reviewWeekday)) throw new ConfigError("PENELOPE_REVIEW_WEEKDAY must be 0 (Sunday) through 6 (Saturday)");
+
   let publicUrl = get("PENELOPE_PUBLIC_URL");
   if (publicUrl !== undefined) {
     if (!URL.canParse(publicUrl) || !/^https?:$/.test(new URL(publicUrl).protocol)) {
@@ -189,6 +193,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     timeZone,
     awakeHours,
     nightly,
+    reviewWeekday: Number(reviewWeekday),
     batch: { quietMs: minutes("PENELOPE_BATCH_QUIET_MINUTES", 5), maxMs: minutes("PENELOPE_BATCH_MAX_MINUTES", 30) },
     redeliverMs: minutes("PENELOPE_REDELIVER_MINUTES", 5),
     heartbeatMs: heartbeatOf(),

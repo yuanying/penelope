@@ -8,7 +8,7 @@ import { Cron } from "croner";
 
 import { isTime } from "./envelope.ts";
 import type { Queue } from "./queue.ts";
-import { iso, tickMs } from "./time.ts";
+import { dayIn, iso, tickMs } from "./time.ts";
 
 /** A schedule that cannot be made, answered with 400. */
 export class ScheduleError extends Error {}
@@ -112,20 +112,24 @@ export class Scheduler {
   private readonly now: () => number;
   private readonly log: (line: string) => void;
   private readonly nightly: Cron;
+  private readonly timeZone: string;
+  private readonly reviewWeekday: number;
   private nextNightly: number | undefined;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(
     schedules: Schedules,
     queue: Queue,
-    options: { now: () => number; timeZone: string; nightly: string; log?: (line: string) => void },
+    options: { now: () => number; timeZone: string; nightly: string; reviewWeekday?: number; log?: (line: string) => void },
   ) {
     this.schedules = schedules;
     this.queue = queue;
     this.now = options.now;
     this.log = options.log ?? console.error;
     // A field of seconds is for the tests, to have a night come in seconds.
-    this.nightly = cronOf(options.nightly, options.timeZone, { seconds: true });
+    this.timeZone = options.timeZone;
+    this.reviewWeekday = options.reviewWeekday ?? 0;
+    this.nightly = cronOf(options.nightly, this.timeZone, { seconds: true });
     this.nextNightly = this.nightly.nextRun(new Date(this.now()))?.getTime();
   }
 
@@ -140,11 +144,20 @@ export class Scheduler {
     }
     if (this.nextNightly !== undefined && this.nextNightly <= now) {
       const due = iso(this.nextNightly);
-      const payload: ControlPayload = { kind: "nightly" };
+      const reviewDate = this.reviewDate(this.nextNightly);
+      const payload: ControlPayload = { kind: "nightly", ...(reviewDate ? { review_date: reviewDate } : {}) };
       if (this.queueEvent({ source: "control", id: `nightly@${due}`, occurred_at: due, summary: "the nightly switch", payload })) {
         this.nextNightly = this.nightly.nextRun(new Date(now))?.getTime();
       }
     }
+  }
+
+  /** Mark the first scheduled occurrence on the review weekday, even if the cron runs more than once a day. */
+  private reviewDate(due: number): string | undefined {
+    const day = dayIn(due, this.timeZone);
+    if (new Date(`${day}T00:00:00Z`).getUTCDay() !== this.reviewWeekday) return undefined;
+    const [previous] = this.nightly.previousRuns(1, new Date(due));
+    return previous && dayIn(previous.getTime(), this.timeZone) === day ? undefined : day;
   }
 
   /** Ticks every `everyMs` until stopped: by default as often as the nights come for. */

@@ -99,7 +99,7 @@ test("the curator has no personality and is told whose memory it is", async () =
 test("the curator keeps current knowledge rather than daily accounts even with a purpose", async () => {
   const places = await memory({});
   const prompt = curatorSystemPrompt(identity, places, [{ path: "PURPOSE.md", bytes: 10, sha256: "unused" }]);
-  assert.match(prompt, /preserve what is known now, not stack up daily accounts/);
+  assert.match(prompt, /preserve what is known now, while the diary keeps the day-by-day record/);
 });
 
 test("with folding on, the system prompt says what folding leaves", async () => {

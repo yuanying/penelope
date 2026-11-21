@@ -56,6 +56,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
     promptFileMaxBytes: 65536,
     promptLayerTargetBytes: 16384,
     nightCarryDays: 7,
+    reviewTopicMaxBytes: 100000,
     imageMaxBytes: 1_000_000,
     pollWaitSeconds: 1,
     turnFold: options.turnFold ?? true,

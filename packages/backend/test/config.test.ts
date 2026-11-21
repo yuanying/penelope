@@ -36,6 +36,7 @@ describe("the configuration", () => {
       timeZone: "UTC",
       awakeHours: "07:00-23:00",
       nightly: "0 4 * * *",
+      reviewWeekday: 0,
       batch: { quietMs: 5 * 60_000, maxMs: 30 * 60_000 },
       redeliverMs: 5 * 60_000,
       heartbeatMs: undefined,
