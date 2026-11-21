@@ -96,6 +96,12 @@ test("the curator has no personality and is told whose memory it is", async () =
   assert.ok(prompt.includes(places.memory));
 });
 
+test("the curator keeps current knowledge rather than daily accounts even with a purpose", async () => {
+  const places = await memory({});
+  const prompt = curatorSystemPrompt(identity, places, [{ path: "PURPOSE.md", bytes: 10, sha256: "unused" }]);
+  assert.match(prompt, /preserve what is known now, not stack up daily accounts/);
+});
+
 test("with folding on, the system prompt says what folding leaves", async () => {
   const places = await memory({});
   const files = await readPromptFiles(places.memory, 1000);

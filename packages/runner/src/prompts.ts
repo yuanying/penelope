@@ -234,11 +234,11 @@ Your purpose is to make today's notes and handoff verifiable against the origina
 export function curatorSystemPrompt(identity: Identity, places: Places, memory: MemoryFile[] = []): string {
   const withPurpose = hasPurpose(memory);
   const aim = withPurpose
-    ? "Your purpose is to keep that always-read layer small and organise memory so the knowledge needed for its purpose is easy to find and its questions can be answered from the current state."
-    : "Your purpose is to keep that always-read layer small and make what is needed easy to find and current: the memory should preserve what is known now, not stack up daily accounts.";
+    ? "organise memory so the knowledge needed for its purpose is easy to find and its questions can be answered from the current state"
+    : "make what is needed easy to find and current";
   return `${nightRole(identity, places, "curator")}${nightKnowledge(places, memory)}
 
-${promptMemory(withPurpose)} The rest is read as needed, usually starting from INDEX.md. ${aim}`;
+${promptMemory(withPurpose)} The rest is read as needed, usually starting from INDEX.md. Your purpose is to keep that always-read layer small and ${aim}: the memory should preserve what is known now, not stack up daily accounts.`;
 }
 
 function changesInput(changed: string[], haveBaseline: boolean): string {
