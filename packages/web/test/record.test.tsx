@@ -340,6 +340,52 @@ describe("the other pages of the activity record", () => {
     assert.ok(detail.getByText("記憶 2 ファイル +18/−5 行"));
   });
 
+  it("shows why a completed night needs attention on the row and in its detail", async () => {
+    const backend = new FakeBackend();
+    const night: RecordNight = {
+      id: "n-warning", kind: "night", at: at(3, 0), started_at: at(3, 0), ended_at: at(3, 10), seconds: 600, result: "done",
+      stages: {
+        reflection: { result: "done" }, session: { result: "done" },
+        verifier: { result: "done", dropped_records: 2 },
+        curator: { result: "done", always_read_over_target: { total_bytes: 18240, target_bytes: 16384 } },
+      },
+    };
+    backend.recordDays.set(backend.today, dayOf(backend.today, [night]));
+    backend.recordNights.set(night.id, { night, turns: {} });
+    start(backend, "#/record");
+    const link = await screen.findByRole("link", { name: /夜の切り替え/ });
+    const warning = /毎回読む層が目安を超過（18240 \/ 16384 バイト）.*照合対象から外れた未照合の記録 2 件/;
+    assert.ok(within(link).getByText(warning));
+    await follow(link);
+    assert.ok(await within(await screen.findByRole("article")).findByText(warning));
+  });
+
+  it("shows each weekly review turn's result, reason and memory change", async () => {
+    const backend = new FakeBackend();
+    const night: RecordNight = {
+      id: "n-review", kind: "night", at: at(3, 0), started_at: at(3, 0), ended_at: at(3, 10), seconds: 600, result: "failed",
+      stages: {
+        reflection: { result: "done" }, verifier: { result: "done" }, session: { result: "done" },
+        curator: { result: "failed", review: {
+          content: { result: "failed", reason: "モデルが停止", turn_id: "t-content", memory_change: { files: 1, added: 4, removed: 0 } },
+          structure: { result: "done", memory_change: { files: 2, added: 0, removed: 3 } },
+        } },
+      },
+    };
+    backend.recordDays.set(backend.today, dayOf(backend.today, [night]));
+    backend.recordNights.set(night.id, { night, turns: {
+      content: turn("t-content", 3, 1, { triggers: [], trigger_count: 0, night: { id: night.id, stage: "curator" } }),
+    } });
+    start(backend, "#/record");
+    await follow(await screen.findByRole("link", { name: /夜の切り替え（棚卸し）/ }));
+    const content = within((await screen.findByText("中身 ・ 失敗")).closest("li")!);
+    assert.ok(content.getByText("モデルが停止"));
+    assert.ok(content.getByText("記憶 1 ファイル +4/−0 行"));
+    assert.equal(content.getByRole("link").getAttribute("href"), "#/record/turns/t-content");
+    const structure = within(screen.getByText("構成 ・ 済み").closest("li")!);
+    assert.ok(structure.getByText("記憶 2 ファイル +0/−3 行"));
+  });
+
   it("show a closed sub-agent's turns, a page more at a time", async () => {
     const backend = new FakeBackend();
     const sub = { id: "renovate-review", kind: "sub_agent", at: at(10, 30), agent: "renovate-review", purpose: "PR をまとめて確かめる", closed_at: at(10, 30), turns: 2, failed_turns: 0 } as const;

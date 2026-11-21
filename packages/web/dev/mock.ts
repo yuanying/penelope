@@ -347,9 +347,15 @@ function record(w: World, method: string, url: URL): RecordAnswer | undefined {
   if (parts[0] === "nights" && parts.length === 2) {
     const night = w.record.find((row) => row.kind === "night" && row.id === parts[1]);
     if (night?.kind !== "night") return undefined;
-    return { night, turns: Object.fromEntries(turns.flatMap((turn) =>
-      turn.night?.id === night.id ? [[turn.night.stage, turn]] : [],
-    )) };
+    const nightTurns = Object.fromEntries(turns.flatMap((turn) => turn.night?.id === night.id ? [[turn.night.stage, turn]] : []));
+    const review = night.stages.curator.review;
+    if (review !== undefined) {
+      for (const phase of ["content", "structure"] as const) {
+        const turn = w.nightTurns.find(({ id }) => id === review[phase].turn_id);
+        if (turn !== undefined) nightTurns[phase] = turn;
+      }
+    }
+    return { night, turns: nightTurns };
   }
   if (parts[0] === "sub-agents" && parts.length === 2) {
     const name = parts[1]!;

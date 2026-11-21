@@ -231,6 +231,8 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - ターンの `triggers` は、渡した出来事を渡した順に、`RECORD_TRIGGERS_MAX`（20）件まで並べたもの。1 件は `{seq, source, stream?, summary}`（型は `RecordTrigger`）。`trigger_count` は全部の数。サブエージェントのターン（頼みは本体から来る）、夜の切り替えのターン、出来事の分からないターンでは空で、`trigger_count` は 0 である。
 - 夜の `result` は、段のどれかが失敗なら `failed`、そうでなければ `done`、段の結果が知らされていなければ `unknown`。`stages` は `{reflection, verifier, curator, session}`（振り返り、照合係、整理係、新しいセッション） で、1 つの段は `{result, reason?, memory_change?}`。`result` は `done`・`failed`・`skipped`（行われなかった）・`unknown`。段の結果が知らされていない夜は、`session` が `done` で、ほかは `unknown` である。照合係を持たない旧 runner から段の結果が知らされた夜は、`verifier` が `skipped` になる。
 - 夜の `memory_change` は `{files, added, removed, handoff_changed?}`（型は `RecordMemoryChange`）。振り返り・照合係・整理係で計測できたときだけ、その段でコミットした変更ファイル数と増減行数を返す。振り返りでは `handoff_changed` が引き継ぎファイル `handoff.md` を変えたかを示す。変更なしは 3 つの数が 0。旧記録、計測できなかった段、新しいセッションでは欄が無い。段の成否とは別で、失敗した段にも変更量はありうる。
+- 任意の `stages.verifier.dropped_records` は持ち越しの上限を超えて照合対象から外れた未照合の記録の件数、`stages.curator.always_read_over_target` は整理前に目安を超えた毎回読む層の合計と目安（`{total_bytes, target_bytes}`）である。どちらも引き継ぎ未更新と同じく失敗には数えない。欄が無ければ表示しない。旧 runner が送らなかった場合も含むため、欄が無いことから件数 0 や目安以内とは判断しない。
+- `stages.curator.review` があれば棚卸しの夜で、`{content, structure}` にそれぞれの `{result, reason?, turn_id?, memory_change?}` を持つ。通常の夜や旧記録にはこの欄は無い。夜全体の成否は引き続き 4 段で決め、整理係に失敗があっても夜の失敗は 1 件である。
 - **逃した夜** は、記録が始まった後の予定の夜の時刻（backend の `PENELOPE_NIGHTLY_CRON`、今の設定で数える）のうち、次のどちらかのものである。夜の出来事が、その時刻から 1 分たっても列に無い（backend が止まっていた）。夜の出来事はあるが、次の夜の時刻までに切り替えの知らせが来なかった。`failed_at` はそれが決まった時刻（1 分後か、次の夜の時刻）。後から知らせが来れば、逃した夜ではなくなる。
 - 閉じたサブエージェントの `turns` と `failed_turns` は、記録に残っているそのサブエージェントのターンと、うち失敗の数。
 
@@ -242,7 +244,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
   - `expired` は、30 日を過ぎて流れが消えたとき `true`（そのとき `flow` は空）。
   - `replies` は、そのターンで出した返事の `{id, at, text, history_before}`（型は `RecordReply`）の並び。`history_before` は `GET /api/history?before=` に渡すと、その返事から始まるページが返る値である。Web UI は「会話でこの返事を見る」で、会話を開いてそのページを読み、`id` の返事の位置へ移る。
 - `GET /api/record/turns/<id>/results/<call_id>` は `{output}`（型は `RecordResultResponse`）。そのツールの結果の本文の全部（runner が切った 16,000 文字まで）。流れが消えたもの、無いものは `404`。
-- `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, verifier?, curator?}` で、その段の最後のターン（一覧の `turn` の行と同じ形）。手順を回し直した夜は、最後に回したもの。
+- `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, verifier?, curator?, content?, structure?}`（一覧の `turn` の行と同じ形）。通常はその段の最後のターン、棚卸しでは `content`・`structure` に報告された各ターンを返し、`curator` は旧 UI 向けにうち最後のものを返す。
 - `GET /api/record/sub-agents/<name>?before=` は `{sub_agent, turns, before?}`（型は `RecordSubAgentResponse`）。`sub_agent` は一覧の行と同じ形（閉じていなければ `closed_at` が無い）。`turns` はそのサブエージェントのターンの新しい順で、1 ページ 20 件。`before` は次のページの不透明な cursor で、最後のページには無い。backend の渡していない `before` は `400`。
 - 無い `id`・名前は `404`。どの口も GET のほかの method は `405`。
 
@@ -262,7 +264,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - まだ見ていない失敗の数は、最初につなぐときとつなぎ直すときに `GET /api/record/unseen` を読み、その後は流れの `record` で直す。左のレールの「活動の記録」とスマートフォンのメニューのボタン（とメニューの中の「活動の記録」）に出す。活動の記録の場所にいるあいだは出さない。
 - 活動の記録の場所を開くと `POST /api/record/seen` を 1 回送る。そこにいるあいだに数が 1 以上になったら（新しい失敗が来たら）、もう 1 回送り、返った `unseen` を知らせの件数に足す。「新しい」の札は、最初に送ったときの `previous_seen_at` より後の `failed_at` を持つ行に付ける。
 - 一覧は、ブラウザの時間帯を `tz` に渡して今日を読み、下までスクロールしたら `before` の日を読む。行の無い日は出さない。流れがターンの始まりか終わり、サブエージェントを閉じたこと、`record` を送るたびに、今日をもう 1 回読んで置き換える。
-- 夜の一覧行と 1 件の画面では、段の結果の横に記憶の変更量を出す。変更が 0 なら「記憶の変更なし」、計測されていなければ「記憶の変更は不明」、振り返りで `handoff_changed` が `false` なら「引き継ぎ未更新」と出す。行われなかった段と新しいセッションには変更量を出さない。
+- 夜の一覧行と 1 件の画面では、段の結果の横に記憶の変更量を出す。変更が 0 なら「記憶の変更なし」、計測されていなければ「記憶の変更は不明」、振り返りで `handoff_changed` が `false` なら「引き継ぎ未更新」と出す。行われなかった段と新しいセッションには変更量を出さない。毎回読む層の超過と照合対象外の件数は、夜の行と 1 件の画面に注意事項として出す。棚卸しでは一覧でも「棚卸し」と示し、詳細では整理係の下に中身・構成それぞれの成否、理由、変更量とターンへのリンク（ターンがあるとき）を出す。整理係全体の変更量を別に表示しない。
 - 畳みは 1 時間ごと（ブラウザの時間帯）で、失敗していないターンが 2 つ以上ある時間帯だけを畳む。畳んだ行はその時間の始まりの位置に置く。きっかけの種類ごとの数は、多い順に 3 つまでと「ほか n」。
 - 1 件の画面のツールの結果は、開いたときに `GET /api/record/turns/<id>/results/<call_id>` を読む。`404` なら「この結果は残っていません。」を出す。閉じたサブエージェントのターンは、「残りの n 件を見る」で次のページを読む。
 

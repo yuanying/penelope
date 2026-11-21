@@ -123,9 +123,6 @@ const modelError = (message: { errorMessage?: string }) => message.errorMessage 
 const stageOf = ({ result, reason, turn_id }: Outcome & { turn_id: string }): NightTurnReport =>
   result === "done" ? { result, turn_id } : { result: "failed", reason: result === "stopped" ? `Stopped: ${reason}` : (reason ?? ""), turn_id };
 
-// Runner-only metadata until the activity record has a field for it.
-type RunnerNightStages = NightStages & { verifier: NightTurnReport & { droppedRecords?: number } };
-
 const utcDay = (time: string): number => Math.floor(Date.parse(time) / 86_400_000);
 
 export class Runner {
@@ -509,14 +506,8 @@ export class Runner {
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
     const stages = made ? undefined : await this.nightly(event.seq, payload.review_date);
-    let reported: NightStages | undefined;
-    if (stages) {
-      // Do not send runner-only fields through the current activity contract.
-      const { droppedRecords: _dropped, ...verifier } = stages.verifier;
-      reported = { ...stages, verifier };
-    }
     await this.backend
-      .rotated({ seq: event.seq, ...(reported ? { stages: reported } : {}) })
+      .rotated({ seq: event.seq, ...(stages ? { stages } : {}) })
       .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
     // Without a new session the event is not acked: it comes again, and the night is run again.
     if (stages && stages.session.result !== "done") {
@@ -527,7 +518,7 @@ export class Runner {
   }
 
   /** Each step is attempted even if one before it failed (ADR-0044). */
-  private async nightly(seq: number, reviewDate?: string): Promise<RunnerNightStages> {
+  private async nightly(seq: number, reviewDate?: string): Promise<NightStages> {
     const nightStarted = new Date().toISOString();
     const { memoryDir, identity, promptLayerTargetBytes, nightCarryDays } = this.config;
     const manager = this.session!.session.sessionManager;
@@ -571,6 +562,7 @@ export class Runner {
         verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined), { transcripts });
     });
     const lastReviews = new Map(this.state!.lastTopicReviews);
+    let overTarget: NightStages["curator"]["always_read_over_target"];
     const curate = async (review?: { kind: "content"; date: string } | { kind: "structure" }) => {
       const moves = new MemoryMoves();
       let topics: string[] = [];
@@ -582,6 +574,7 @@ export class Runner {
           return this.nightWorker(seq, "curator", system, reviewStructureInput(this.places, memory, map), { moves });
         }
         const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
+        if (layer.overTarget) overTarget = { total_bytes: layer.total, target_bytes: layer.target };
         if (review?.kind === "content") {
           const paths = memory.map(({ path }) => path);
           topics = reviewTopics(memory, lastReviews, this.config.reviewTopicMaxBytes);
@@ -603,7 +596,7 @@ export class Runner {
       for (const { to, date } of relocated) if (date !== undefined) lastReviews.set(to, date);
       return result;
     };
-    let curator: NightTurnReport;
+    let curator: NightStages["curator"];
     if (reviewDate === undefined) {
       curator = await curate();
     } else {
@@ -611,8 +604,9 @@ export class Runner {
       const structure = await curate({ kind: "structure" });
       const turn_id = structure.turn_id ?? content.turn_id;
       const reasons = [...new Set([content.reason, structure.reason].filter(Boolean))];
-      // The existing stage can carry only one turn ID. It refers to the last turn that ran.
+      // Keep the aggregate and last turn ID for older backends.
       curator = {
+        review: { content, structure },
         result: content.result === "done" && structure.result === "done" ? "done" : "failed",
         ...(reasons.length ? { reason: reasons.join("; ") } : {}),
         ...(turn_id ? { turn_id } : {}),
@@ -659,7 +653,12 @@ export class Runner {
       this.log(`the new session could not start: ${failure(error)}`);
       session = { result: "failed", reason: `The new session could not start: ${failure(error)}` };
     }
-    return { reflection, verifier: { ...verifier, ...(droppedRecords ? { droppedRecords } : {}) }, curator, session };
+    return {
+      reflection,
+      verifier: { ...verifier, ...(droppedRecords ? { dropped_records: droppedRecords } : {}) },
+      curator: { ...curator, ...(overTarget === undefined ? {} : { always_read_over_target: overTarget }) },
+      session,
+    };
   }
 
   /** Keep night work independently of whether a new daytime session opens. */

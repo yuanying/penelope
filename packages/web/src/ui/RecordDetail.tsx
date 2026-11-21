@@ -1,5 +1,5 @@
 // One row of the activity record on a page of its own (docs/design/README.md,
-// 15): a turn with its flow and the replies it sent, a night with its three
+// 15): a turn with its flow and the replies it sent, a night with its four
 // steps, or a closed sub-agent with its turns. Each has an address, so that
 // a reply in the conversation opens the turn that sent it.
 import { Banner } from "@astryxdesign/core/Banner";
@@ -18,7 +18,7 @@ import { type Api, Refused } from "../model/api.ts";
 import { ChevronLeftIcon } from "./icons.tsx";
 import { markdownLinks } from "./links.tsx";
 import { FlowLine } from "./Now.tsx";
-import { dateTimeOf, failedStageOf, headlineText, isFresh, spanOf, stagesOf } from "./record.ts";
+import { dateTimeOf, failedStageOf, headlineText, isFresh, nightTitle, nightWarnings, spanOf, stagesOf } from "./record.ts";
 import { RecordMark, RecordRowView, StageMark, StageMemory } from "./RecordRow.tsx";
 import { hashOf, type RecordPage } from "./route.ts";
 import { sizeOf, words } from "./words.ts";
@@ -195,16 +195,19 @@ function StoredResult({ api, turn, call, all }: { api: Api; turn: string; call: 
 
 function NightPage({ data }: { data: RecordNightResponse }) {
   const { night, turns } = data;
+  const warnings = nightWarnings(night);
   const failed = failedStageOf(night);
   const result = night.result === "failed" && failed !== undefined ? w.stageFailed(failed.name) : night.result === "unknown" ? w.nightUnknown : w.nightDone;
   const facts: Array<[string, string]> = [[w.facts.time, spanOf(night.started_at, night.ended_at, night.seconds)]];
   if (night.scheduled_at !== undefined) facts.push([w.facts.due, dateTimeOf(night.scheduled_at)]);
   return (
     <>
-      <Head title={w.night} mark={<RecordMark mark={night.result === "failed" ? "fail" : "night"} />} result={result} reason={failed?.reason} bad={night.result === "failed"} />
+      <Head title={nightTitle(night)} mark={<RecordMark mark={night.result === "failed" ? "fail" : "night"} />} result={result} reason={failed?.reason} bad={night.result === "failed"} />
       <Facts facts={facts} />
+      {warnings === undefined ? null : <p className="record-note">{warnings}</p>}
       <ol className="record-steps">
         {stagesOf(night).map((stage, index) => {
+          const { review } = stage;
           const turn = stage.key === "session" ? undefined : turns[stage.key];
           const tail = ` ・ ${w.stageWord[stage.result]}`;
           return (
@@ -217,7 +220,29 @@ function NightPage({ data }: { data: RecordNightResponse }) {
                 </span>
                 <StageMemory stage={stage} />
               </span>
-              {turn === undefined ? null : (
+              {review !== undefined ? (
+                <ul className="record-steps record-review">
+                  {(["content", "structure"] as const).map((phase) => {
+                    const report = review[phase];
+                    const reviewTurn = turns[phase];
+                    return (
+                      <li key={phase} className="record-step" data-result={report.result}>
+                        <span className="record-step-head">
+                          <StageMark result={report.result} />
+                          <span>{w.review[phase]} ・ {w.stageWord[report.result]}</span>
+                          <StageMemory stage={{ ...report, key: "curator", name: w.review[phase] }} />
+                        </span>
+                        {report.reason ? <span className="record-note">{report.reason}</span> : null}
+                        {reviewTurn === undefined ? null : (
+                          <ul className="record-rows">
+                            <RecordRowView row={reviewTurn} />
+                          </ul>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : turn === undefined ? null : (
                 <ul className="record-rows">
                   <RecordRowView row={turn} />
                 </ul>

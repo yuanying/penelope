@@ -516,6 +516,24 @@ describe("the sandbox's API", () => {
       assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
     });
 
+    it("accepts optional memory warnings and weekly review reports without keeping extra fields", async (t) => {
+      const { call, record } = await setup(t);
+      const done = { result: "done" };
+      const over = { total_bytes: 9, target_bytes: 5 };
+      const content = { ...done, turn_id: "content" };
+      const structure = { ...done, turn_id: "structure" };
+      const stages = {
+        reflection: done, verifier: { ...done, dropped_records: 2 }, session: done,
+        curator: { ...done, always_read_over_target: { ...over, path: "example.md" }, review: {
+          content: { ...content, text: "not part of the summary" }, structure,
+        } },
+      };
+      assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages } })).status, 204);
+      const [row] = record.day({ day: "2026-11-14" }).rows;
+      assert.ok(row?.kind === "night");
+      assert.deepEqual(row.stages, { ...stages, curator: { ...done, always_read_over_target: over, review: { content, structure } } });
+    });
+
     it("reports the committed memory changes separately from each night's stage result", async (t) => {
       const { call, record, memoryDir } = await setup(t);
       const done = { result: "done" };
@@ -567,6 +585,9 @@ describe("the sandbox's API", () => {
       for (const body of [
         { seq: 7, stages: { reflection: ok, verifier: { result: "maybe" }, curator: ok, session: ok } },
         { seq: 7, stages: { reflection: { ...ok, turn_id: "" }, verifier: ok, curator: ok, session: ok } },
+        { seq: 7, stages: { reflection: ok, verifier: { ...ok, dropped_records: -1 }, curator: ok, session: ok } },
+        { seq: 7, stages: { reflection: ok, curator: { ...ok, always_read_over_target: { total_bytes: 5, target_bytes: 5 } }, session: ok } },
+        { seq: 7, stages: { reflection: ok, curator: { ...ok, review: { content: ok } }, session: ok } },
         { seq: 7, stages: { reflection: ok, curator: ok } },
         { stages: { reflection: ok, curator: ok, session: ok } },
         { seq: "7" },

@@ -368,6 +368,34 @@ export const scenes: Record<string, SceneDef> = {
       };
     },
   },
+  "memory-review": {
+    about: "a weekly review with two curator turns, an over-target prompt layer and dropped records",
+    make: (now) => {
+      const scene = ordinary(now);
+      const { at } = clock(now);
+      const content = turnRow("t-n1-review-content", at(3, 5), 120, { night: { id: "n-1", stage: "curator" } });
+      const structure = turnRow("t-n1-review-structure", at(3, 7), 110, { night: { id: "n-1", stage: "curator" } });
+      return {
+        ...scene,
+        record: scene.record.map((row) => row.kind !== "night" ? row : {
+          ...row,
+          stages: {
+            ...row.stages,
+            verifier: { ...row.stages.verifier, dropped_records: 2 },
+            curator: {
+              ...row.stages.curator,
+              always_read_over_target: { total_bytes: 18240, target_bytes: 16384 },
+              review: {
+                content: { result: "done", turn_id: content.id, memory_change: { files: 2, added: 24, removed: 3 } },
+                structure: { ...row.stages.curator, turn_id: structure.id },
+              },
+            },
+          },
+        }),
+        nightTurns: [...scene.nightTurns.filter((turn) => turn.night?.stage !== "curator"), content, structure],
+      };
+    },
+  },
   failures: {
     about: "a failed turn, a failed job, a night whose curator failed, a missed night; 3 unseen",
     make: (now) => {

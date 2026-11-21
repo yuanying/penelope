@@ -437,8 +437,8 @@ function turnEnd(body: Record<string, unknown>): TurnEnd {
 /** The steps of a night; older runners do not have a verifier. */
 function nightStages(value: unknown): NightStages {
   const stages = object(value);
-  const stage = (name: keyof NightStages): NightTurnReport => {
-    const { result, reason, turn_id } = object(stages[name] ?? null);
+  const stage = (value: unknown, name: string): NightTurnReport => {
+    const { result, reason, turn_id } = object(value);
     if (result !== "done" && result !== "failed" && result !== "skipped") throw new HttpError(400, `stages.${name}.result must be done, failed or skipped`);
     if (reason !== undefined && typeof reason !== "string") throw new HttpError(400, `stages.${name}.reason must be a string`);
     if (name !== "session" && turn_id !== undefined && (typeof turn_id !== "string" || turn_id === "")) {
@@ -446,10 +446,40 @@ function nightStages(value: unknown): NightStages {
     }
     return { result, ...(reason === undefined ? {} : { reason }), ...(name !== "session" && typeof turn_id === "string" ? { turn_id } : {}) };
   };
+  const verifier = stages.verifier === undefined ? {} : object(stages.verifier);
+  const curator = object(stages.curator);
+  const { dropped_records } = verifier;
+  if (dropped_records !== undefined && !positiveInteger(dropped_records)) {
+    throw new HttpError(400, "stages.verifier.dropped_records must be a positive integer");
+  }
+  const over = curator.always_read_over_target === undefined ? undefined : object(curator.always_read_over_target);
+  const review = curator.review === undefined ? undefined : object(curator.review);
+  let always_read_over_target: NightStages["curator"]["always_read_over_target"];
+  if (over !== undefined) {
+    const { total_bytes, target_bytes } = over;
+    if (!positiveInteger(total_bytes) || !positiveInteger(target_bytes) || total_bytes <= target_bytes) {
+      throw new HttpError(400, "stages.curator.always_read_over_target needs integer bytes above a positive target");
+    }
+    always_read_over_target = { total_bytes, target_bytes };
+  }
   return {
-    reflection: stage("reflection"),
-    verifier: stages.verifier === undefined ? { result: "skipped" } : stage("verifier"),
-    curator: stage("curator"),
-    session: stage("session"),
+    reflection: stage(stages.reflection, "reflection"),
+    verifier: stages.verifier === undefined ? { result: "skipped" } : {
+      ...stage(verifier, "verifier"),
+      ...(dropped_records === undefined ? {} : { dropped_records }),
+    },
+    curator: {
+      ...stage(curator, "curator"),
+      ...(always_read_over_target === undefined ? {} : { always_read_over_target }),
+      ...(review === undefined ? {} : { review: {
+        content: stage(review.content, "curator.review.content"),
+        structure: stage(review.structure, "curator.review.structure"),
+      } }),
+    },
+    session: stage(stages.session, "session"),
   };
+}
+
+function positiveInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }

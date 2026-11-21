@@ -2,7 +2,7 @@
 // screens are agreed with the owner.
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId, JobEndKind, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
+import type { Activity, AgentId, JobEndKind, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };
@@ -240,7 +240,15 @@ export type RecordNight = RecordRowBase & {
   ended_at: string;
   seconds: number;
   result: "done" | "failed" | "unknown";
-  stages: { reflection: RecordNightStage; verifier: RecordNightStage; curator: RecordNightStage; session: RecordNightStage };
+  stages: {
+    reflection: RecordNightStage;
+    verifier: RecordNightStage & { dropped_records?: number };
+    curator: RecordNightStage & {
+      always_read_over_target?: NightLayerOverTarget;
+      review?: Record<NightReviewPhase, RecordNightStage & { turn_id?: string }>;
+    };
+    session: RecordNightStage;
+  };
 };
 
 /** A night that was due and was not switched (ADR-0038). It has no page of its own. `at` is when it was due. */
@@ -335,10 +343,10 @@ export type RecordTurnResponse = {
 /** `GET /api/record/turns/<id>/results/<call_id>`: the whole output of one tool's result. */
 export type RecordResultResponse = { output: string };
 
-/** `GET /api/record/nights/<id>`: the night, and the last turn of each of its steps that had one. */
+/** `GET /api/record/nights/<id>`: the night, its stage turns and the individual weekly review turns. */
 export type RecordNightResponse = {
   night: RecordNight;
-  turns: Partial<Record<NightTurnStage, RecordTurn>>;
+  turns: Partial<Record<NightTurnStage | NightReviewPhase, RecordTurn>>;
 };
 
 /** `GET /api/record/sub-agents/<name>?before=`: the sub-agent and its turns, newest first, in pages. */

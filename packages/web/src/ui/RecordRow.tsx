@@ -24,7 +24,7 @@ import {
   UnknownIcon,
   WarnIcon,
 } from "./icons.tsx";
-import { durationOf, type Group, headlineOf, jobMeta, jobNote, mixOf, nightNote, type Stage, stagesOf, subMeta, timeOfDay, turnMeta, turnNote } from "./record.ts";
+import { durationOf, type Group, headlineOf, jobMeta, jobNote, mixOf, nightNote, nightTitle, nightWarnings, type Stage, stagesOf, subMeta, timeOfDay, turnMeta, turnNote } from "./record.ts";
 import { hashOf, type RecordPage } from "./route.ts";
 import { words } from "./words.ts";
 
@@ -82,7 +82,7 @@ export function pageOf(row: RecordRow): RecordPage | undefined {
   }
 }
 
-type Shape = { mark: Mark; kind: string; who?: string; text?: ReactNode; mono?: string; more?: string; meta: string; note?: string; bad: boolean };
+type Shape = { mark: Mark; kind: string; who?: string; text?: ReactNode; mono?: string; more?: string; meta: string; note?: string; warning?: string; bad: boolean };
 
 function shapeOf(row: RecordRow, showWho: boolean): Shape {
   switch (row.kind) {
@@ -102,9 +102,11 @@ function shapeOf(row: RecordRow, showWho: boolean): Shape {
     }
     case "night": {
       const note = nightNote(row);
+      const warning = nightWarnings(row);
       return {
         mark: row.result === "failed" ? "fail" : "night",
-        kind: w.night,
+        kind: nightTitle(row),
+        ...(warning === undefined ? {} : { warning }),
         text: <Stages stages={stagesOf(row)} />,
         meta: durationOf(row.seconds),
         ...(note === undefined ? {} : { note }),
@@ -139,7 +141,7 @@ export function Stages({ stages }: { stages: Stage[] }) {
 }
 
 export function StageMemory({ stage }: { stage: Stage }) {
-  if (stage.key === "session" || stage.result === "skipped") return null;
+  if (stage.key === "session" || stage.result === "skipped" || stage.review !== undefined) return null;
   const change = stage.memory_change;
   const label = change === undefined ? w.memoryUnknown : change.files === 0 ? w.memoryUnchanged : w.memoryChanged(change.files, change.added, change.removed);
   return <span className="record-stage-memory">{label}{change?.handoff_changed === false ? ` ・ ${w.handoffUnchanged}` : ""}</span>;
@@ -186,6 +188,7 @@ export function RecordRowView({ row, fresh = false, showWho = true }: { row: Rec
             {shape.note}
           </span>
         )}
+        {shape.warning === undefined ? null : <span className="record-note">{shape.warning}</span>}
       </span>
       <span className="record-open" aria-hidden>
         {page === undefined ? null : <ChevronRightIcon width={16} height={16} />}

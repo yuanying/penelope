@@ -541,6 +541,17 @@ test("an unchanged topic counts as reviewed so the next week reaches another top
   assert.deepEqual(scopes, ['["a.md"]', '["b.md"]']);
 });
 
+test("the night reports the always-read size that the curator was asked to shrink", async () => {
+  const { fake, start, config } = await world();
+  config.promptLayerTargetBytes = 5;
+  await writeFile(join(config.memoryDir, "always.md"), "日本語");
+  await start(() => ({ text: "ok" }));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  const [rotation] = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  assert.deepEqual(rotation?.stages?.curator.always_read_over_target, { total_bytes: 9, target_bytes: 5 });
+});
+
 for (const failed of ["content", "structure"] as const) {
   test(`a failed weekly ${failed} review does not advance the curator baseline or block the other work`, async () => {
     const { fake, start, calls, config } = await world();
@@ -562,6 +573,8 @@ for (const failed of ["content", "structure"] as const) {
     assert.deepEqual(curatorTurns.map(({ result }) => result), failed === "content" ? ["failed", "done"] : ["done", "failed"]);
     const review = (fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[]).find(({ seq }) => seq === 2)!;
     assert.equal(review.stages?.curator.result, "failed");
+    const [content, structure] = curatorTurns.map(({ turn_id, result, reason }) => ({ turn_id, result, ...(reason ? { reason } : {}) }));
+    assert.deepEqual(review.stages?.curator.review, { content, structure }, "both review turns are reported with their own outcome");
     assert.equal(review.stages?.session.result, "done");
     assert.match(calls.filter((call) => isCurator(config, call)).at(-1)!.userTexts[0]!, /including removals\): \["topic\.md"\]/);
   });
@@ -890,6 +903,8 @@ test("the verifier drops and logs unverified records beyond the configured UTC d
   assert.ok(input.includes(file) && input.includes(retained) && !input.includes(expired));
   assert.ok(verifier.messages.some((message) => message.role === "toolResult" && message.isError));
   assert.ok(logs.some((line) => line.includes("dropped 1 unverified daytime record")));
+  const [rotation] = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  assert.equal(rotation?.stages?.verifier.dropped_records, 1, "report the dropped count without sending the original paths");
 });
 
 test("a nightly event that comes again after the switch only tells and acks", async () => {

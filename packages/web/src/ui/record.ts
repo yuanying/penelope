@@ -2,7 +2,7 @@
 // 15): a turn's heading from what started it, the small words at the end of
 // a row, the turns that went as usual folded an hour at a time, and the days
 // and times. Plain functions, so that the tests read them without a DOM.
-import type { RecordJob, RecordNight, RecordNightStage, RecordRow, RecordSubAgent, RecordTurn, Source } from "@penelope/contract";
+import type { RecordJob, RecordNight, RecordRow, RecordSubAgent, RecordTurn, Source } from "@penelope/contract";
 
 import { sourceWord, triggerWords, words } from "./words.ts";
 
@@ -68,7 +68,20 @@ export function turnNote(turn: RecordTurn): string | undefined {
   return turn.result === "failed" ? join([w.failed, turn.reason]) : undefined;
 }
 
-export type Stage = RecordNightStage & { key: keyof RecordNight["stages"]; name: string };
+export type Stage = RecordNight["stages"]["curator"] & { key: keyof RecordNight["stages"]; name: string };
+
+export function nightTitle(night: RecordNight): string {
+  return night.stages.curator.review === undefined ? w.night : w.reviewNight;
+}
+
+export function nightWarnings(night: RecordNight): string | undefined {
+  const over = night.stages.curator.always_read_over_target;
+  const dropped = night.stages.verifier.dropped_records;
+  return join([
+    over === undefined ? undefined : w.layerOverTarget(over.total_bytes, over.target_bytes),
+    dropped === undefined ? undefined : w.droppedRecords(dropped),
+  ]);
+}
 
 export function stagesOf(night: RecordNight): Stage[] {
   return (["reflection", "verifier", "curator", "session"] as const).map((key) => {

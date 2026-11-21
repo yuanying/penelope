@@ -167,6 +167,45 @@ describe("the activity record", () => {
       assert.deepEqual([detail.turns.reflection?.id, detail.turns.verifier?.id], ["r-1", "v-1"]);
     });
 
+    it("keeps each weekly review's own memory change and links only its reported turn", (t) => {
+      const { record } = setup(t);
+      const end = (turn_id: string, added: number) => {
+        const ended = { turn_id, ...done, night: { seq: 7, stage: "curator" as const } };
+        record.turnEnded("main", ended);
+        record.nightMemoryChanged(ended, { files: 1, added, removed: 0 });
+      };
+      end("content", 4);
+      end("structure", 2);
+      end("other-attempt", 10);
+      record.nightReported({ seq: 7, stages: {
+        reflection: done, verifier: done, session: done,
+        curator: { ...done, turn_id: "structure", review: {
+          content: { ...done, turn_id: "content" },
+          structure: { ...done, turn_id: "structure" },
+        } },
+      } });
+      const [row] = record.day({ day: "2026-11-14" }).rows;
+      assert.ok(row?.kind === "night");
+      assert.deepEqual(row.stages.curator.review, {
+        content: { ...done, turn_id: "content", memory_change: { files: 1, added: 4, removed: 0 } },
+        structure: { ...done, turn_id: "structure", memory_change: { files: 1, added: 2, removed: 0 } },
+      });
+      const { turns } = record.night(row.id);
+      assert.deepEqual([turns.content?.id, turns.structure?.id], ["content", "structure"]);
+    });
+
+    it("shows memory warnings without counting them as unseen failures", (t) => {
+      const { record, clock } = setup(t);
+      clock.set("2026-11-14T10:00:00Z");
+      const verifier = { ...done, dropped_records: 2 };
+      const curator = { ...done, always_read_over_target: { total_bytes: 9, target_bytes: 5 } };
+      record.nightReported({ seq: 7, stages: { reflection: done, verifier, curator, session: done } });
+      const { rows: [row], failures } = record.day({ day: "2026-11-14" });
+      assert.ok(row?.kind === "night");
+      assert.deepEqual([row.stages.verifier, row.stages.curator, row.result], [verifier, curator, "done"]);
+      assert.deepEqual([failures, record.unseen()], [0, 0]);
+    });
+
     it("keeps a night's steps when the same night is reported again without them", (t) => {
       const { record, night, clock } = setup(t);
       clock.set("2026-11-15T04:00:00Z");

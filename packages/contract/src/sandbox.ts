@@ -218,8 +218,19 @@ export type NightStage = {
 /** For a stage with a turn, its ID ties the result to the backend's memory commit. */
 export type NightTurnReport = NightStage & { turn_id?: string };
 
-/** The four steps of a night (ADR-0044). */
-export type NightStages = Record<NightTurnStage, NightTurnReport> & { session: NightStage };
+export type NightReviewPhase = "content" | "structure";
+export type NightLayerOverTarget = { total_bytes: number; target_bytes: number };
+
+/** The four steps of a night (ADR-0044); a weekly review is still one curator step. */
+export type NightStages = {
+  reflection: NightTurnReport;
+  verifier: NightTurnReport & { dropped_records?: number };
+  curator: NightTurnReport & {
+    always_read_over_target?: NightLayerOverTarget;
+    review?: Record<NightReviewPhase, NightTurnReport>;
+  };
+  session: NightStage;
+};
 
 /**
  * `POST /v1/sessions/rotated`: the runner went through the nightly switch of

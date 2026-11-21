@@ -10,6 +10,7 @@ import {
   type AgentId,
   type JobEnd,
   type NightStages,
+  type NightTurnReport,
   type NightTurnStage,
   RECORD_COMMAND_MAX,
   RECORD_FLOW_DAYS,
@@ -236,9 +237,7 @@ export class ActivityRecord {
 
   /** Copy counts for this attempt only: an earlier attempt may have reached a stage this one did not. */
   private stagesKept(seq: number, stages: NightStages): RecordNight["stages"] {
-    const stage = (key: keyof NightStages): RecordNightStage => {
-      const { result, reason } = stages[key];
-      const turnId = key === "session" ? undefined : stages[key].turn_id;
+    const stage = (key: keyof NightStages, { result, reason, turn_id: turnId }: NightTurnReport): RecordNightStage => {
       const row = turnId === undefined || result === "skipped" ? undefined : this.db.prepare(
         "SELECT memory_change FROM turns WHERE turn_id = ? AND agent = 'main' AND night_seq = ? AND stage = ?",
       ).get(turnId, seq, key) as { memory_change: string | null } | undefined;
@@ -248,7 +247,22 @@ export class ActivityRecord {
         ...(row?.memory_change == null ? {} : { memory_change: JSON.parse(row.memory_change) as RecordMemoryChange }),
       };
     };
-    return { reflection: stage("reflection"), verifier: stage("verifier"), curator: stage("curator"), session: stage("session") };
+    const reviewTurn = (turn: NightTurnReport) => ({
+      ...stage("curator", turn),
+      ...(turn.turn_id === undefined ? {} : { turn_id: turn.turn_id }),
+    });
+    const { dropped_records } = stages.verifier;
+    const { always_read_over_target, review } = stages.curator;
+    return {
+      reflection: stage("reflection", stages.reflection),
+      verifier: { ...stage("verifier", stages.verifier), ...(dropped_records === undefined ? {} : { dropped_records }) },
+      curator: {
+        ...stage("curator", stages.curator),
+        ...(always_read_over_target === undefined ? {} : { always_read_over_target }),
+        ...(review === undefined ? {} : { review: { content: reviewTurn(review.content), structure: reviewTurn(review.structure) } }),
+      },
+      session: stage("session", stages.session),
+    };
   }
 
   /** The end of a background job, as its event carries it; one not of that shape is left out of the record. */
@@ -343,14 +357,28 @@ export class ActivityRecord {
   night(id: string): RecordNightResponse {
     const row = /^\d+$/.test(id) ? (this.db.prepare("SELECT row, at, seq, stages, scheduled_at, started_at, failed FROM session_rotations WHERE row = ?").get(Number(id)) as NightRow | undefined) : undefined;
     if (row === undefined) throw new RecordQueryError(404, "no such night");
+    const night = nightOf(row);
     const turns: RecordNightResponse["turns"] = {};
+    const review = night.stages.curator.review;
     if (row.seq !== null) {
       for (const stage of ["reflection", "verifier", "curator"] as const) {
+        if (stage === "curator" && review !== undefined) continue;
         const turn = this.db.prepare(`${TURN_SELECT} WHERE t.night_seq = ? AND t.stage = ? ORDER BY t.at DESC LIMIT 1`).get(row.seq, stage) as TurnRow | undefined;
         if (turn !== undefined) turns[stage] = turnOf(turn);
       }
+      if (review !== undefined) {
+        const find = this.db.prepare(`${TURN_SELECT} WHERE t.turn_id = ? AND t.agent = 'main' AND t.night_seq = ? AND t.stage = 'curator'`);
+        for (const phase of ["content", "structure"] as const) {
+          const { turn_id } = review[phase];
+          if (turn_id === undefined) continue;
+          const turn = find.get(turn_id, row.seq) as TurnRow | undefined;
+          if (turn !== undefined) turns[phase] = turnOf(turn);
+        }
+        const last = turns.structure ?? turns.content;
+        if (last !== undefined) turns.curator = last;
+      }
     }
-    return { night: nightOf(row), turns };
+    return { night, turns };
   }
 
   subAgent(name: string, before?: string): RecordSubAgentResponse {
