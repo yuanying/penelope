@@ -541,46 +541,57 @@ export class Runner {
         manager.appendCustomEntry(NIGHT_REFLECTION, false);
       }
     });
+    const { file: main, verifierMemory, curatorMemory, unverifiedRecords = [] } = this.state!;
     const header = manager.getHeader();
+    // Collect originals for carry-over even if the verifier cannot start.
+    const originals = header
+      ? await this.subAgents.recordsSince(Date.parse(header.timestamp)).then((subAgents) => ({ subAgents }), (error: unknown) => ({ error }))
+      : { error: new Error("The daytime session has no header.") };
     const current: DaytimeRecords = {
-      main: this.state!.file, started: header?.timestamp ?? nightStarted, ended: nightStarted, subAgents: [],
+      main, started: header?.timestamp ?? nightStarted, ended: nightStarted,
+      subAgents: "subAgents" in originals ? originals.subAgents : unverifiedRecords.find((record) => record.main === main)?.subAgents ?? [],
     };
     // A retry of the same switch still has the same daytime session.
-    const previous = (this.state!.unverifiedRecords ?? []).filter((record) => record.main !== current.main);
+    const previous = unverifiedRecords.filter((record) => record.main !== main);
     const cutoff = utcDay(nightStarted) - nightCarryDays;
     const carried = previous.filter(({ ended }) => utcDay(ended) >= cutoff);
     const droppedRecords = previous.length - carried.length;
     if (droppedRecords) this.log(`night verifier: dropped ${droppedRecords} unverified daytime record(s) older than ${nightCarryDays} UTC days`);
 
-    let verifierMemory = this.state!.verifierMemory;
-    const verifier = await this.nightStage(VERIFIER, async () => {
-      if (!header) throw new Error("The daytime session has no header.");
-      current.subAgents = await this.subAgents.recordsSince(Date.parse(header.timestamp));
+    let verifier = await this.nightStage(VERIFIER, async () => {
+      if ("error" in originals) throw originals.error;
       const transcripts = [current, ...carried].flatMap(({ main, subAgents }) => [main, ...subAgents]);
       const memory = await memorySnapshot(memoryDir);
-      const report = await this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places, memory),
+      return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places, memory),
         verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined),
         nightTools(this.config, transcripts));
-      if (report.result === "done") verifierMemory = await memorySnapshot(memoryDir);
-      return report;
     });
-    await this.keepNightState({
-      ...(verifierMemory !== undefined ? { verifierMemory } : {}),
-      unverifiedRecords: verifier.result === "done" ? [] : [...carried, current],
-    });
-
-    const curator = await this.nightStage("curator", async () => {
-      const before = this.state!.curatorMemory;
+    let curator = await this.nightStage("curator", async () => {
       const memory = await memorySnapshot(memoryDir);
       const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
       const map = await memoryMap(memoryDir, memory, reads, today);
-      const report = await this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
-        curatorInput(memory, memoryChanges(before, memory), before !== undefined, layer, map),
+      return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
+        curatorInput(memory, memoryChanges(curatorMemory, memory), curatorMemory !== undefined, layer, map),
         nightTools(this.config));
-      // Take the baseline after the whole stage succeeds, not after an individual turn.
-      if (report.result === "done") await this.keepNightState({ curatorMemory: await memorySnapshot(memoryDir) });
-      return report;
     });
+
+    // Use the memory left by the whole curator stage, so its edits are not
+    // mistaken for daytime changes after a successful verification.
+    const after = verifier.result === "done" || curator.result === "done"
+      ? await memorySnapshot(memoryDir).catch((error: unknown) => {
+        const reason = `The night baseline could not be taken: ${failure(error)}`;
+        this.log(reason);
+        if (verifier.result === "done") verifier = { ...verifier, result: "failed", reason };
+        if (curator.result === "done") curator = { ...curator, result: "failed", reason };
+        return undefined;
+      })
+      : undefined;
+    await this.keepNightState({
+      ...(after !== undefined && verifier.result === "done" ? { verifierMemory: after } : {}),
+      ...(after !== undefined && curator.result === "done" ? { curatorMemory: after } : {}),
+      unverifiedRecords: verifier.result === "done" ? [] : [...carried, current],
+    });
+
     let session: NightStage;
     try {
       const state: SessionState = { ...this.state!, file: await newSessionFile(this.config), nightly: seq, memoryReads: reads };

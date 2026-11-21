@@ -649,6 +649,21 @@ test("the curator sees changes since the previous night across a runner restart"
   assert.match(curator.userTexts[0]!, /\["removed.md","verified.md"\]/);
 });
 
+test("after successful verification the next verifier sees daytime edits, not the previous night's curator edits", async () => {
+  const { fake, start, calls, config } = await world();
+  await start((call) => isCurator(config, call) && call.lastRole === "user"
+    ? { calls: [{ tool: "write", args: { path: "curated.md", content: "reorganized at night" } }] }
+    : { text: "ok" });
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  await writeFile(join(config.memoryDir, "day.md"), "changed during the day");
+  fake.push(nightly(2));
+  await until(() => acked(fake).includes(2));
+
+  const verifier = calls.filter((call) => isVerifier(config, call)).at(-1)!;
+  assert.match(verifier.userTexts[0]!, /Memory paths changed[^\n]+: \["day\.md"\]/);
+});
+
 for (const failed of ["verifier", "curator"] as const) {
   test(`only the ${failed} retries the same memory changes after a failed night stage`, async () => {
     const { fake, start, calls, config } = await world();
