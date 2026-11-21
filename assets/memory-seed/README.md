@@ -10,6 +10,10 @@
 | --- | --- |
 | `agents/default.md` | 役割を選ばずに起こしたサブエージェントの働き方。サブエージェントのシステムプロンプトの後ろに足される |
 | `skills/subagents/SKILL.md` | 本体がサブエージェントをいつ・どう使うかの skill |
+| `skills/memory/SKILL.md` | 記憶の書き方と探し方の skill |
+| `PURPOSE.md` | 配置ごとに何を知っているべきか、どんな問いに答えられるべきかを書くための雛形 |
 
-形と扱いは [ADR-0022](../../docs/adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) にあります。
+`PURPOSE.md` は例を配置に合う内容に書き換えてから入れます。入れた後に目的を見直すときは、オーナーの同意を得て書き換えます。問いは [記憶評価 CLI](../../docs/memory-eval.md#問いの書き方) が読みます。
+
+形と扱いは、サブエージェントについては [ADR-0022](../../docs/adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)、記憶の目的と書き方については [ADR-0049](../../docs/adr/0049-grow-memory-around-an-instance-purpose.md) にあります。
 記憶の中の文なので、ほかの記憶（`personality.md` など）と同じく日本語で書きます。
