@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
-import { basename, dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 
-import { marked } from "marked";
+import { normalizeIdentifier } from "micromark-util-normalize-identifier";
 
-import { memoryPath, recentReadCutoff, type MemoryRead } from "./memory-reads.ts";
+import { memoryLink, memoryMarkdown } from "./memory-markdown.ts";
+import { recentReadCutoff, type MemoryRead } from "./memory-reads.ts";
 import type { MemoryFile } from "./night-memory.ts";
 
 const run = promisify(execFile);
@@ -45,15 +46,7 @@ async function commitDates(root: string, paths: Set<string>): Promise<Map<string
   return dates;
 }
 
-function localTarget(root: string, source: string, href: string): string | undefined {
-  const urlPath = href.split(/[?#]/, 1)[0]!;
-  if (!urlPath || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(urlPath)) return undefined;
-  try {
-    return memoryPath(root, resolve(root, dirname(source), decodeURIComponent(urlPath)));
-  } catch {
-    return undefined;
-  }
-}
+type LinkUse = { label?: string; reference?: string; destination?: string };
 
 async function markdownShape(root: string, path: string): Promise<{ sections: Section[]; links: string[] }> {
   const sections: Section[] = [];
@@ -61,30 +54,65 @@ async function markdownShape(root: string, path: string): Promise<{ sections: Se
   if (!/\.md$/i.test(path)) return { sections, links };
   const body = await readFile(join(root, path), "utf8").catch(() => undefined);
   if (body === undefined) return { sections, links };
-  const tokens = marked.lexer(body);
-  let firstLine = 1;
+  const { text, events } = memoryMarkdown(body);
+  const definitions = new Map<string, string>();
+  const uses: LinkUse[] = [];
+  const open: LinkUse[] = []; // An image may occur inside another link's label.
+  let definition: LinkUse = {};
   let sectionAt = 0;
-  for (const token of tokens) {
-    if (token.type === "heading") {
-      if (sectionAt) sections.at(-1)![1] = firstLine - sectionAt;
-      sectionAt = firstLine;
-      const label = token.text.replace(/\s+/g, " ").trim();
-      sections.push([label.length > 80 ? `${label.slice(0, 79)}…` : label, 0]);
+  let nested = 0;
+  for (const [action, token, context] of events) {
+    const { type, start, end } = token;
+    if (type === "blockQuote" || type === "listOrdered" || type === "listUnordered") {
+      nested += action === "enter" ? 1 : -1;
+    } else if (type === "link" || type === "image") {
+      if (action === "enter") {
+        const use: LinkUse = {};
+        uses.push(use);
+        open.push(use);
+      } else open.pop();
+    } else if (type === "definition" && action === "exit") {
+      const id = normalizeIdentifier(definition.label ?? "");
+      if (!definitions.has(id)) definitions.set(id, definition.destination ?? "");
+      definition = {};
+    } else if (action === "enter") {
+      if ((type === "atxHeading" || type === "setextHeading") && nested === 0) {
+        if (sectionAt) sections.at(-1)![1] = start.line - sectionAt;
+        sectionAt = start.line;
+        sections.push(["", 0]);
+      } else if ((type === "atxHeadingText" || type === "setextHeadingText") && nested === 0) {
+        const label = context.sliceSerialize(token).replace(/\s+/g, " ").trim();
+        sections.at(-1)![0] = label.length > 80 ? `${label.slice(0, 79)}…` : label;
+      } else if (type === "definitionLabelString") {
+        definition.label = context.sliceSerialize(token);
+      } else if (type === "definitionDestinationString") {
+        definition.destination = text.slice(start.offset, end.offset);
+      } else {
+        const use = open.at(-1);
+        if (!use) continue;
+        if (type === "labelText") use.label = context.sliceSerialize(token);
+        if (type === "referenceString") use.reference = context.sliceSerialize(token);
+        if (type === "resource") use.destination = ""; // An empty inline destination is not a reference.
+        if (type === "resourceDestinationString") use.destination = text.slice(start.offset, end.offset);
+      }
     }
-    firstLine += token.raw.split("\n").length - 1;
   }
-  if (sectionAt) sections.at(-1)![1] = firstLine - sectionAt + Number(!body.endsWith("\n"));
-  marked.walkTokens(tokens, (token) => {
-    if (token.type === "link" || token.type === "image") {
-      const target = localTarget(root, path, token.href);
-      if (target !== undefined) links.push(target);
-    }
-  });
+  if (sectionAt) {
+    const lines = text.split(/\r\n?|\n/).length - Number(/[\r\n]$/.test(text));
+    sections.at(-1)![1] = lines + 1 - sectionAt;
+  }
+  // Count actual uses, not unused definitions, in the order they appear.
+  for (const use of uses) {
+    const raw = use.destination ?? definitions.get(normalizeIdentifier(use.reference ?? use.label ?? ""));
+    const target = raw === undefined ? undefined : memoryLink(root, path, raw)?.target;
+    if (target !== undefined) links.push(target);
+  }
   return { sections, links };
 }
 
 /** One compact row per file; group filenames by directory without dropping any files. */
 export async function memoryMap(root: string, files: MemoryFile[], reads: MemoryRead[], today: string): Promise<string> {
+  root = resolve(root);
   const paths = new Set(files.map(({ path }) => path));
   const dirs = new Set([""]);
   for (const path of paths) {

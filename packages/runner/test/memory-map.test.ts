@@ -27,6 +27,16 @@ test("the map shows Markdown sections and local file links without copying the b
   assert.doesNotMatch(map, /body outside the map|none\.md|# example/);
 });
 
+test("the map counts each use of a reference and resolves its destination the same way as a repaired link", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "memory-map-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(join(root, "index.md"), "[TOPIC] [read][topic] ![topic][] [not a file](https://example.com/gone.md)\n\n[topic]: /memory/topic%20name.md&#35;section\n[unused]: missing.md\n");
+  await writeFile(join(root, "topic name.md"), "# Topic\n");
+  const map = await memoryMap(root, await memorySnapshot(root), [], today);
+  assert.match(map, /"topic name\.md",8,null,null,null,0,3/);
+  assert.doesNotMatch(map, /gone\.md|missing\.md/);
+});
+
 test("daytime commits advance the last change but not the last write by a night worker", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memory-map-"));
   t.after(() => rm(root, { recursive: true, force: true }));

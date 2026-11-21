@@ -13,9 +13,9 @@
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@penelope/contract": "0.0.0",
     "@penelope/slack": "0.0.0",
-    "marked": "18.0.11",
     "micromark": "4.0.3",
     "micromark-util-decode-string": "2.0.1",
+    "micromark-util-normalize-identifier": "2.0.1",
     "typebox": "1.4.7",
     "yaml": "2.9.0"
   }

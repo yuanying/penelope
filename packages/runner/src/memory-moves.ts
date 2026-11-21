@@ -1,12 +1,10 @@
 import { constants } from "node:fs";
 import { open, readdir } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 
 import type { MemoryMove } from "@penelope/contract";
-import { parse, postprocess, preprocess } from "micromark";
-import { decodeString } from "micromark-util-decode-string";
 
-import { memoryPath } from "./memory-reads.ts";
+import { memoryLink, memoryMarkdown } from "./memory-markdown.ts";
 
 /** Successful file operations from one night-worker turn, grouped by the file that moved. */
 export class MemoryMoves {
@@ -26,24 +24,6 @@ export class MemoryMoves {
 const barePathFiles = new Set(["personality.md", "always.md", "handoff.md", "PURPOSE.md", "INDEX.md"]);
 const noFollow = constants.O_NOFOLLOW | constants.O_NONBLOCK;
 
-/** Preserve the raw query/fragment, including Markdown escapes or character references. */
-function splitDestination(raw: string): [path: string, suffix: string] {
-  for (const match of raw.matchAll(/\\[\\?#]|&(?:#[\da-z]+|[a-z][\da-z]*);|[?#]/gi)) {
-    if (/^[?#]$/.test(decodeString(match[0]))) return [raw.slice(0, match.index), raw.slice(match.index)];
-  }
-  return [raw, ""];
-}
-
-function decodePath(raw: string): string | undefined {
-  const path = decodeString(raw);
-  if (!path || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(path)) return undefined;
-  try {
-    return decodeURIComponent(path);
-  } catch {
-    return undefined;
-  }
-}
-
 function encodePath(path: string): string {
   return path.split("/").map((part) => encodeURIComponent(part)
     .replace(/[()]/g, (c) => c === "(" ? "%28" : "%29")).join("/");
@@ -52,12 +32,9 @@ function encodePath(path: string): string {
 function repairBody(
   body: string, repairLink: (raw: string) => string, repairBare: (text: string) => string,
 ): string {
-  // Micromark supplies source spans. Work on the original text rather than
-  // rendering Markdown again; its parser skips a leading BOM in the offsets.
-  const bom = body.startsWith("\uFEFF") ? 1 : 0;
-  const text = body.slice(bom);
-  const events = postprocess(parse().document().write(preprocess()(text, undefined, true)));
-  let output = body.slice(0, bom);
+  // Work on the original text rather than rendering Markdown again.
+  const { text, events } = memoryMarkdown(body);
+  let output = body.slice(0, body.length - text.length);
   let cursor = 0;
   let protectedUntil = 0;
   for (const [event, token] of events) {
@@ -134,15 +111,11 @@ export async function repairMemoryReferences(root: string, moves: MemoryMoves, o
     if (!/\.md$/i.test(source)) continue;
     const previous = moves.history.get(source)?.[0] ?? source;
     const repairLink = (raw: string): string => {
-      const [rawPath, suffix] = splitDestination(raw);
-      const path = decodePath(rawPath);
-      if (!path) return raw;
-      const prefix = isAbsolute(path) ? roots.find((r) => path.startsWith(`${r}/`)) : undefined;
-      if (isAbsolute(path) && prefix === undefined) return raw;
-      const current = memoryPath(root, prefix === undefined
-        ? resolve(root, dirname(source), path) : resolve(root, path.slice(prefix.length + 1)));
+      const link = memoryLink(root, source, raw);
+      if (link === undefined) return raw;
+      const { path, suffix, prefix, target: current } = link;
       if (current !== undefined && exists.has(current)) return raw;
-      const old = prefix === undefined ? memoryPath(root, resolve(root, dirname(previous), path)) : current;
+      const old = prefix === undefined && previous !== source ? memoryLink(root, previous, raw)?.target : current;
       if (old === undefined || ambiguous.has(old)) return raw;
       const target = relocated.get(old) ?? (exists.has(old) ? old : undefined);
       if (target === undefined || target === current) return raw;
