@@ -528,14 +528,14 @@ export class Runner {
       if (!header) throw new Error("The daytime session has no header.");
       const records = await this.subAgents.recordsSince(Date.parse(header.timestamp));
       const memory = await memorySnapshot(memoryDir);
-      return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places),
+      return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places, memory),
         verifierInput(this.places, { started: header.timestamp, ended: nightStarted, main, subAgents: records },
           memoryChanges(before, memory), before !== undefined),
         nightTools(this.config, [main, ...records]));
     });
     const curator = await this.nightStage("curator", async () => {
       const memory = await memorySnapshot(memoryDir);
-      return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places),
+      return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
         curatorInput(memory, memoryChanges(before, memory), before !== undefined),
         nightTools(this.config));
     });

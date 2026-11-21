@@ -7,7 +7,7 @@ import type { DeliveredEvent, SessionRotatedRequest, TurnEndRequest, TurnLine } 
 
 import type { Config } from "../src/config.ts";
 import { newSessionFile, writeState } from "../src/pi.ts";
-import { curatorSystemPrompt, FOLDING, foldAskInput, type Places, verifierSystemPrompt } from "../src/prompts.ts";
+import { FOLDING, foldAskInput } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
 import { MODEL, OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
 import { acked, activities, closers, ui, world } from "./world.ts";
@@ -418,14 +418,11 @@ test("a batch that comes during a turn follows it", async () => {
   assert.deepEqual(acked(fake).sort(), [1, 2, 3]);
 });
 
-const placesOf = (config: Config): Places => ({ memory: config.memoryDir, sources: config.sourcesDir, home: config.home, imageSkills: config.imageSkillsDir });
-
-// The calls of the night are told apart by the prompts the runner gives, so that
-// a change of their wording does not change which call is which.
+// Identify the role without depending on the rest of its prompt.
 const isCurator = (config: Config, call: Call) =>
-  call.systemPrompt.includes(curatorSystemPrompt(config.identity, placesOf(config)).trimEnd());
+  call.systemPrompt.includes(`You are the curator of the memory of ${config.identity.name},`);
 const isVerifier = (config: Config, call: Call) =>
-  call.systemPrompt.includes(verifierSystemPrompt(config.identity, placesOf(config)).trimEnd());
+  call.systemPrompt.includes(`You are the verifier of the memory of ${config.identity.name},`);
 const isReflection = (call: Call) => call.userTexts.at(-1)!.startsWith("This session ends now.");
 
 /** The curator writes INDEX.md, the reflection writes handoff.md, and any other turn answers. */
@@ -494,6 +491,69 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   const sessionsAfter = await readdir(config.sessionDir);
   assert.ok(sessionsBefore.every((name) => sessionsAfter.includes(name)), "the day's record is kept");
   assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name.endsWith(".jsonl")).length, 1, "one new record");
+});
+
+test("night workers get the knowledge purpose and only enduring goal guidance", async () => {
+  const { fake, start, calls, config } = await world();
+  const purpose = join(config.memoryDir, "PURPOSE.md");
+  const goals = join(config.memoryDir, "goals");
+  const goal = join(goals, "cluster-health.md");
+  const today = join(goals, "today.md");
+  await mkdir(goals);
+  await writeFile(purpose, "What should be known");
+  await writeFile(goal, "# Cluster health\n\n## なぜ\nKeep services available\n\n## 今の様子\nA temporary detail");
+  await writeFile(today, "# Today's plan\nA temporary task");
+  await start(() => ({ text: "ok" }));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+
+  const verifier = calls.find((call) => isVerifier(config, call))!.systemPrompt;
+  const curator = calls.find((call) => isCurator(config, call))!.systemPrompt;
+  for (const prompt of [verifier, curator]) {
+    assert.ok(prompt.includes(purpose));
+    assert.ok(prompt.includes(goal));
+    assert.ok(prompt.includes("## なぜ"));
+    assert.ok(!prompt.includes(today));
+    assert.ok(!prompt.includes("A temporary detail"));
+  }
+  assert.match(verifier, /missing.*today|today.*missing/i);
+  assert.match(curator, /answer.*current|current.*answer/i);
+});
+
+test("without a knowledge purpose, night workers get the memory skill but no goal guidance", async () => {
+  const { fake, start, calls, config } = await world();
+  const skillDir = join(config.memoryDir, "skills", "memory");
+  const skill = join(skillDir, "SKILL.md");
+  const goals = join(config.memoryDir, "goals");
+  const goal = join(goals, "cluster-health.md");
+  await mkdir(skillDir, { recursive: true });
+  await writeFile(skill, "# Memory");
+  await mkdir(goals);
+  await writeFile(goal, "# Cluster health\n\n## なぜ\nKeep services available");
+  await start(() => ({ text: "ok" }));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+
+  for (const worker of [calls.find((c) => isVerifier(config, c))!, calls.find((c) => isCurator(config, c))!]) {
+    assert.ok(worker.systemPrompt.includes(skill));
+    assert.ok(!worker.systemPrompt.includes(join(config.memoryDir, "PURPOSE.md")));
+    assert.ok(!worker.systemPrompt.includes(goal));
+  }
+});
+
+test("reflection and curation see the purpose file's size in the always-read layer", async () => {
+  const { fake, start, calls, config } = await world();
+  const purpose = "何を知っているべきか。";
+  await writeFile(join(config.memoryDir, "PURPOSE.md"), purpose);
+  await start(() => ({ text: "ok" }));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+
+  const reflection = calls.find(isReflection)!;
+  const curator = calls.find((call) => isCurator(config, call))!;
+  for (const worker of [reflection, curator]) {
+    assert.ok(worker.userTexts.at(-1)!.includes(`PURPOSE.md: ${Buffer.byteLength(purpose)} bytes`));
+  }
 });
 
 test("the verifier receives the full source time window after missed nights", async () => {
