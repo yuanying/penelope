@@ -523,6 +523,24 @@ test("weekly review rebuilds the map after content review and gives it to a fres
   assert.equal(await readFile(join(config.memoryDir, "always.md"), "utf8"), "[topic](final.md)\n");
 });
 
+test("an unchanged topic counts as reviewed so the next week reaches another topic after a restart", async () => {
+  const { fake, start, calls, config } = await world();
+  config.reviewTopicMaxBytes = 4;
+  await writeFile(join(config.memoryDir, "a.md"), "One\n");
+  await writeFile(join(config.memoryDir, "b.md"), "Two\n");
+  const answer = () => ({ text: "No changes needed" });
+  const stop = await start(answer);
+  fake.push(nightly(1, "2026-11-15"));
+  await until(() => acked(fake).includes(1));
+  await stop();
+
+  await start(answer);
+  fake.push(nightly(2, "2026-11-22"));
+  await until(() => acked(fake).includes(2));
+  const scopes = calls.flatMap((call) => call.userTexts[0]?.match(/^Topic bodies in scope: (.*)\.$/m)?.[1] ?? []);
+  assert.deepEqual(scopes, ['["a.md"]', '["b.md"]']);
+});
+
 for (const failed of ["content", "structure"] as const) {
   test(`a failed weekly ${failed} review does not advance the curator baseline or block the other work`, async () => {
     const { fake, start, calls, config } = await world();

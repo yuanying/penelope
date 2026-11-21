@@ -5,14 +5,17 @@ const nonTopics = new Set<string>([...PROMPT_FILES, "INDEX.md"]);
 
 /** The map stays whole; only the set of topic bodies to review has a byte budget. */
 export function reviewTopics(
-  files: readonly Pick<MemoryFile, "path" | "bytes">[], lastNightWrites: ReadonlyMap<string, string>, maxBytes: number,
+  files: readonly Pick<MemoryFile, "path" | "bytes">[], lastReviews: ReadonlyMap<string, string>, maxBytes: number,
 ): string[] {
   const topics = files.filter(({ path }) => /\.md$/i.test(path) && !nonTopics.has(path) && !/^(diary|archive|goals|skills|agents|extensions)\//.test(path));
-  topics.sort((a, b) => (lastNightWrites.get(a.path) ?? "").localeCompare(lastNightWrites.get(b.path) ?? "") || a.path.localeCompare(b.path));
+  topics.sort((a, b) => (lastReviews.get(a.path) ?? "").localeCompare(lastReviews.get(b.path) ?? "") || a.path.localeCompare(b.path));
   const selected: string[] = [];
   let remaining = maxBytes;
   for (const { path, bytes } of topics) {
-    if (bytes > remaining) continue;
+    if (bytes > remaining) {
+      if (selected.length === 0) return [path];
+      continue;
+    }
     selected.push(path);
     remaining -= bytes;
   }

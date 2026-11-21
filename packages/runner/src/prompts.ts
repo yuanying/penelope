@@ -306,6 +306,7 @@ export function reviewContentInput(
 
 The diary shows what happened. Topics should capture patterns across days and reflect what is true now. Older facts removed from topics belong as summaries in ${archive.current}; daily diary entries remain as they are. Existing archive summaries are due to be combined as follows (sources and destination, relative to the memory root): ${JSON.stringify(archive.groups)}.
 
+Topics are prioritised from least recently in scope, starting with topics not yet reviewed.
 Topic bodies in scope: ${JSON.stringify(topics)}.
 Diary entries for this week: ${JSON.stringify(diary)}.
 ${promptLayerSizes(layer)}.

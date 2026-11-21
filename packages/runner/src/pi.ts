@@ -48,6 +48,7 @@ export interface SessionState {
   curatorMemory?: MemoryFile[];
   unverifiedRecords?: DaytimeRecords[];
   memoryReads?: MemoryRead[];
+  lastTopicReviews?: [path: string, date: string][];
 }
 
 const stateFile = (config: Config) => join(config.sessionDir, "current.json");

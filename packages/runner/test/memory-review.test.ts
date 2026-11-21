@@ -3,19 +3,24 @@ import { test } from "node:test";
 
 import { planArchive, reviewTopics, weekDiary } from "../src/memory-review.ts";
 
-test("the topic budget gives priority to never reviewed and oldest night writes, skipping files that cannot fit", () => {
+test("the topic budget gives priority to never reviewed and least recently reviewed topics, skipping files that cannot fit", () => {
   const files = [
     { path: "recent.md", bytes: 4 },
     { path: "old.md", bytes: 4 },
     { path: "new.md", bytes: 4 },
-    { path: "huge.md", bytes: 20 },
+    { path: "wide.md", bytes: 20 },
     { path: "always.md", bytes: 1 },
     { path: "INDEX.md", bytes: 1 },
     { path: "archive/2026-11.md", bytes: 1 },
     { path: "diary/2026-11-15.md", bytes: 1 },
   ];
-  const lastNightWrites = new Map([["recent.md", "2026-11-12"], ["old.md", "2026-10-20"]]);
-  assert.deepEqual(reviewTopics(files, lastNightWrites, 8), ["new.md", "old.md"]);
+  const lastReviews = new Map([["recent.md", "2026-11-12"], ["old.md", "2026-10-20"]]);
+  assert.deepEqual(reviewTopics(files, lastReviews, 8), ["new.md", "old.md"]);
+});
+
+test("a topic larger than the entire budget gets a review to itself when its turn comes", () => {
+  const files = [{ path: "large.md", bytes: 20 }, { path: "small.md", bytes: 1 }];
+  assert.deepEqual(reviewTopics(files, new Map([["small.md", "2026-11-15"]]), 8), ["large.md"]);
 });
 
 test("the diary list spans the seven dates ending on the scheduled review date", () => {

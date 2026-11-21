@@ -63,7 +63,7 @@ test("the map keeps the last read but counts only the current day and previous 2
     { path: "old.md", dates: ["2026-10-01", "2026-10-22"] },
     { path: "recent.md", dates: ["2026-10-22", "2026-10-23", "2026-11-21", "2026-11-21"] },
   ], today);
-  const { text: map } = await memoryMap(root, await memorySnapshot(root), reads, today);
+  const map = await memoryMap(root, await memorySnapshot(root), reads, today);
   assert.match(map, /"old\.md",4,null,null,"2026-10-22",0,0/);
   assert.match(map, /"recent\.md",7,null,null,"2026-11-21",3,0/);
 });

@@ -20,7 +20,7 @@ test("the map shows Markdown sections and local file links without copying the b
   ].join("\n"));
   await writeFile(join(root, "topic name.md"), "# Detail\n");
   await writeFile(join(root, "unlinked.md"), "No links\n");
-  const { text: map } = await memoryMap(root, await memorySnapshot(root), [], today);
+  const map = await memoryMap(root, await memorySnapshot(root), [], today);
   assert.match(map, /"topic name\.md",9,null,null,null,0,1/);
   assert.match(map, /"unlinked\.md",9,null,null,null,0,0/);
   assert.match(map, /"topics\/"\n\["index\.md",\d+,null,null,null,0,0,\[\["Current",6\],\["Next",6\]\],\["gone\.md"\],\["topic name\.md"\]\]/);
@@ -32,7 +32,7 @@ test("the map counts each use of a reference and resolves its destination the sa
   t.after(() => rm(root, { recursive: true, force: true }));
   await writeFile(join(root, "index.md"), "[TOPIC] [read][topic] ![topic][] [not a file](https://example.com/gone.md)\n\n[topic]: /memory/topic%20name.md&#35;section\n[unused]: missing.md\n");
   await writeFile(join(root, "topic name.md"), "# Topic\n");
-  const { text: map } = await memoryMap(root, await memorySnapshot(root), [], today);
+  const map = await memoryMap(root, await memorySnapshot(root), [], today);
   assert.match(map, /"topic name\.md",8,null,null,null,0,3/);
   assert.doesNotMatch(map, /gone\.md|missing\.md/);
 });
@@ -51,5 +51,5 @@ test("daytime commits advance the last change but not the last write by a night 
       env: { ...process.env, GIT_COMMITTER_DATE: `2026-11-${day}T23:30:00-02:00` },
     });
   }
-  assert.match((await memoryMap(root, await memorySnapshot(root), [], today)).text, /"topic\.md",11,"2026-11-04","2026-11-03"/);
+  assert.match(await memoryMap(root, await memorySnapshot(root), [], today), /"topic\.md",11,"2026-11-04","2026-11-03"/);
 });
