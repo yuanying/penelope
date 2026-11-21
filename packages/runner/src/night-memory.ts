@@ -6,6 +6,14 @@ import { join } from "node:path";
 /** Only paths, lengths and fingerprints are kept between nights, not the file contents. */
 export type MemoryFile = { path: string; bytes: number; sha256: string };
 
+/** The original transcripts for a daytime session and the time window of its events. */
+export interface DaytimeRecords {
+  main: string;
+  subAgents: string[];
+  started: string;
+  ended: string;
+}
+
 export async function memorySnapshot(root: string): Promise<MemoryFile[]> {
   const files: MemoryFile[] = [];
   async function walk(dir: string): Promise<void> {

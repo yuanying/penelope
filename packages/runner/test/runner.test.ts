@@ -649,6 +649,119 @@ test("the curator sees changes since the previous night across a runner restart"
   assert.match(curator.userTexts[0]!, /\["removed.md","verified.md"\]/);
 });
 
+for (const failed of ["verifier", "curator"] as const) {
+  test(`only the ${failed} retries the same memory changes after a failed night stage`, async () => {
+    const { fake, start, calls, config } = await world();
+    const isFailed = failed === "verifier" ? isVerifier : isCurator;
+    const isDone = failed === "verifier" ? isCurator : isVerifier;
+    let secondNight = false;
+    const stop = await start((call) => {
+      if (!secondNight) return { text: "ok" };
+      if (isFailed(config, call)) return { error: "the model is away" };
+      if (isDone(config, call) && call.lastRole === "user") {
+        return { calls: [{ tool: "write", args: { path: "worker.md", content: "written by the successful worker" } }] };
+      }
+      return { text: "ok" };
+    });
+    fake.push(nightly(1));
+    await until(() => acked(fake).includes(1));
+    await writeFile(join(config.memoryDir, "day.md"), "changed during the day");
+    secondNight = true;
+    fake.push(nightly(2));
+    await until(() => acked(fake).includes(2));
+    await stop();
+
+    calls.length = 0;
+    await start(() => ({ text: "ok" }));
+    fake.push(nightly(3));
+    await until(() => acked(fake).includes(3));
+    const failedInput = calls.find((call) => isFailed(config, call))!.userTexts[0]!;
+    const doneInput = calls.find((call) => isDone(config, call))!.userTexts[0]!;
+    assert.match(failedInput, /\["day\.md","worker\.md"\]/);
+    assert.match(doneInput, /Memory paths changed[^\n]+: \[\]/);
+  });
+}
+
+test("both workers compare against the legacy night baseline on the first night after upgrade", async () => {
+  const { fake, start, calls, config } = await world();
+  const file = await newSessionFile(config);
+  await writeFile(join(config.memoryDir, "new.md"), "new");
+  await writeFile(join(config.sessionDir, "current.json"), JSON.stringify({
+    file, nightMemory: [{ path: "removed.md", bytes: 3, sha256: "old" }],
+  }));
+  await start(() => ({ text: "ok" }));
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  for (const worker of [isVerifier, isCurator]) {
+    assert.match(calls.find((call) => worker(config, call))!.userTexts[0]!, /\["new\.md","removed\.md"\]/);
+  }
+});
+
+test("after restart the verifier can use the previous originals until verification succeeds", async () => {
+  const { fake, start, calls, config } = await world({ turnFold: false });
+  const first = await newSessionFile(config);
+  await writeState(config, { file: first });
+  const stop = await start((call) => {
+    if (isVerifier(config, call)) return { error: "the model is away" };
+    if (call.lastRole === "user" && call.tools.includes("subagent_start") && call.lastText.includes("original daytime request")) {
+      return { calls: [{ tool: "subagent_start", args: { name: "audit", purpose: "audit", prompt: "original sub-agent request" } }] };
+    }
+    return { text: "ok" };
+  });
+  fake.push(ui(1, "original daytime request"));
+  await until(() => acked(fake).includes(1) && fake.selfEvents.length === 1);
+  const dir = join(config.subAgentDir, "audit");
+  const sub = join(dir, (await readdir(dir)).find((name) => name.endsWith(".jsonl"))!);
+  fake.push(nightly(2));
+  await until(() => acked(fake).includes(2));
+  await stop();
+
+  calls.length = 0;
+  let checkOriginals = true;
+  await start((call) => checkOriginals && isVerifier(config, call) && call.lastRole === "user"
+    ? { calls: [
+      { tool: "grep", args: { path: first, pattern: "original daytime request" } },
+      { tool: "grep", args: { path: sub, pattern: "original sub-agent request" } },
+    ] }
+    : { text: "ok" });
+  fake.push(nightly(3));
+  await until(() => acked(fake).includes(3));
+  const checked = calls.find((call) => isVerifier(config, call) && call.lastRole === "toolResult")!;
+  assert.ok(checked.userTexts[0]!.includes(first) && checked.userTexts[0]!.includes(sub));
+  const results = checked.messages.filter((message) => message.role === "toolResult").map((message) => JSON.stringify(message));
+  assert.match(results[0]!, /original daytime request/);
+  assert.match(results[1]!, /original sub-agent request/);
+
+  checkOriginals = false;
+  fake.push(nightly(4));
+  await until(() => acked(fake).includes(4));
+  const later = calls.filter((call) => isVerifier(config, call)).at(-1)!.userTexts[0]!;
+  assert.ok(!later.includes(first) && !later.includes(sub));
+});
+
+test("the verifier drops and logs unverified records beyond the configured UTC day window", async () => {
+  const { fake, start, calls, config, logs } = await world();
+  const expired = await newSessionFile(config);
+  const retained = await newSessionFile(config);
+  const file = await newSessionFile(config);
+  const at = (daysAgo: number) => new Date(Date.now() - daysAgo * 86_400_000).toISOString();
+  const record = (main: string, daysAgo: number) => ({ main, started: at(daysAgo + 1), ended: at(daysAgo), subAgents: [] });
+  config.nightCarryDays = 2;
+  await writeFile(join(config.sessionDir, "current.json"), JSON.stringify({
+    file, unverifiedRecords: [record(expired, 3), record(retained, 2)],
+  }));
+  await start((call) => isVerifier(config, call) && call.lastRole === "user"
+    ? { calls: [{ tool: "read", args: { path: expired, limit: 1 } }] }
+    : { text: "ok" });
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  const verifier = calls.find((call) => isVerifier(config, call) && call.lastRole === "toolResult")!;
+  const input = verifier.userTexts[0]!;
+  assert.ok(input.includes(file) && input.includes(retained) && !input.includes(expired));
+  assert.ok(verifier.messages.some((message) => message.role === "toolResult" && message.isError));
+  assert.ok(logs.some((line) => line.includes("dropped 1 unverified daytime record")));
+});
+
 test("a nightly event that comes again after the switch only tells and acks", async () => {
   const { fake, start, calls, config } = await world();
   fake.dropAcks.add(1);

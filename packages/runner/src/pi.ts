@@ -19,7 +19,7 @@ import type { NightTurnStage, TurnResult } from "@penelope/contract";
 import type { Config } from "./config.ts";
 import { imageLimitExtension } from "./image-limit.ts";
 import type { TurnModels } from "./model-settings.ts";
-import type { MemoryFile } from "./night-memory.ts";
+import type { DaytimeRecords, MemoryFile } from "./night-memory.ts";
 import type { MemoryRead } from "./memory-reads.ts";
 import { type ExtensionNotice, type MemoryExtensionTrials, SessionExtensions } from "./extensions.ts";
 
@@ -44,7 +44,9 @@ export interface PiSetup {
 export interface SessionState {
   file: string;
   nightly?: number;
-  nightMemory?: MemoryFile[];
+  verifierMemory?: MemoryFile[];
+  curatorMemory?: MemoryFile[];
+  unverifiedRecords?: DaytimeRecords[];
   memoryReads?: MemoryRead[];
 }
 
@@ -52,8 +54,12 @@ const stateFile = (config: Config) => join(config.sessionDir, "current.json");
 
 export async function readState(config: Config): Promise<SessionState | undefined> {
   try {
-    const state = JSON.parse(await readFile(stateFile(config), "utf8")) as SessionState;
+    const { nightMemory, ...state } = JSON.parse(await readFile(stateFile(config), "utf8")) as SessionState & { nightMemory?: MemoryFile[] };
     await access(state.file);
+    if (nightMemory !== undefined) {
+      state.verifierMemory ??= nightMemory;
+      state.curatorMemory ??= nightMemory;
+    }
     return state;
   } catch {
     return undefined;

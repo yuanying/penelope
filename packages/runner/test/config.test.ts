@@ -28,6 +28,7 @@ test("the required settings and the defaults", () => {
     jobs: { max: 5, maxSeconds: 86400, tailChars: 4000 },
     promptFileMaxBytes: 65536,
     promptLayerTargetBytes: 16384,
+    nightCarryDays: 7,
     imageMaxBytes: 5242880,
     pollWaitSeconds: 30,
     turnFold: true,
