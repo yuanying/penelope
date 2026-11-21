@@ -168,6 +168,18 @@ export type TurnResult = "done" | "failed" | "stopped";
 /** The steps of the nightly switch that are turns (ADR-0007). */
 export type NightTurnStage = "reflection" | "verifier" | "curator";
 
+export interface MemoryMove {
+  from: string;
+  to: string;
+}
+
+/** `POST /v1/memory/repairs`: commit the runner's reference edits, not the worker's turn. */
+export interface MemoryRepairRequest {
+  agent: AgentId;
+  paths: string[];
+  moves: MemoryMove[];
+}
+
 /**
  * `POST /v1/turns/end`: the turn is over; the backend commits /memory. The
  * rest is for the activity record (ADR-0038); a runner that leaves it out

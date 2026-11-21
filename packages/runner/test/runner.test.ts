@@ -493,6 +493,47 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name.endsWith(".jsonl")).length, 1, "one new record");
 });
 
+test("a curator move is repaired after its turn commit and before the next night's baseline", async () => {
+  const { fake, start, calls, config } = await world();
+  await writeFile(join(config.memoryDir, "old.md"), "topic\n");
+  await writeFile(join(config.memoryDir, "always.md"), "[topic](old.md)\n");
+  await start((call) => {
+    if (isCurator(config, call) && call.lastRole === "user" && calls.filter((c) => isCurator(config, c)).length === 1) {
+      return { calls: [{ tool: "move", args: { from: "old.md", to: "topics/new.md" } }] };
+    }
+    return { text: "ok" };
+  });
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  const repair = "POST /v1/memory/repairs";
+  const order = fake.order().filter((r) => r === "POST /v1/turns/end" || r === repair || r === "POST /v1/sessions/rotated");
+  assert.deepEqual(order.slice(-3), ["POST /v1/turns/end", repair, "POST /v1/sessions/rotated"]);
+  assert.deepEqual(fake.sent("POST", "/v1/memory/repairs"), [{
+    agent: "main", paths: ["always.md"], moves: [{ from: "old.md", to: "topics/new.md" }],
+  }]);
+  assert.equal(await readFile(join(config.memoryDir, "always.md"), "utf8"), "[topic](topics/new.md)\n");
+
+  fake.push(nightly(2));
+  await until(() => acked(fake).includes(2));
+  const curator = calls.filter((c) => isCurator(config, c)).at(-1)!;
+  assert.match(curator.userTexts[0]!, /changed since this stage last succeeded \(including removals\): \[\]/);
+});
+
+test("a rejected repair commit does not stop the nightly session switch", async () => {
+  const { fake, start, config, logs } = await world();
+  await writeFile(join(config.memoryDir, "old.md"), "topic\n");
+  await writeFile(join(config.memoryDir, "always.md"), "[topic](old.md)\n");
+  fake.refuseMemoryRepairs = true;
+  await start((call) => isCurator(config, call) && call.lastRole === "user"
+    ? { calls: [{ tool: "move", args: { from: "old.md", to: "new.md" } }] }
+    : { text: "ok" });
+  fake.push(nightly(1));
+  await until(() => acked(fake).includes(1));
+  const [rotation] = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  assert.equal(rotation?.stages?.session.result, "done");
+  assert.ok(logs.some((line) => line.includes("night memory reference repair") && line.includes("503")));
+});
+
 test("night workers get the knowledge purpose and only enduring goal guidance", async () => {
   const { fake, start, calls, config } = await world();
   const purpose = join(config.memoryDir, "PURPOSE.md");

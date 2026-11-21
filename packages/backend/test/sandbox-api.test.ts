@@ -404,6 +404,32 @@ describe("the sandbox's API", () => {
     });
   });
 
+  describe("memory reference repairs", () => {
+    it("commits exactly the repaired files separately from the curator's move", async (t) => {
+      const { call, memoryDir } = await setup(t);
+      const git = (...args: string[]) => execFileSync("git", args, { cwd: memoryDir, encoding: "utf8" });
+      writeFileSync(path.join(memoryDir, "new.md"), "the moved topic");
+      writeFileSync(path.join(memoryDir, "a[1].md"), "[topic](old.md)");
+      assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "curator", night: { seq: 7, stage: "curator" } } })).status, 204);
+      writeFileSync(path.join(memoryDir, "a[1].md"), "[topic](new.md)");
+      writeFileSync(path.join(memoryDir, "a1.md"), "unrelated change");
+      const repair = { paths: ["a[1].md"], moves: [{ from: "old.md", to: "new.md" }] };
+      assert.equal((await call("/v1/memory/repairs", { json: { agent: "main", ...repair } })).status, 204);
+      assert.equal(git("show", "HEAD^:a[1].md"), "[topic](old.md)");
+      assert.equal(git("diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD"), "a[1].md\n");
+      assert.match(git("log", "-1", "--format=%B"), /Runner.*reference.*\n[\s\S]*old\.md.*→.*new\.md/i);
+    });
+
+    it("does not accept an unscoped repair commit", async (t) => {
+      const { call, memoryDir } = await setup(t);
+      writeFileSync(path.join(memoryDir, "always.md"), "unrelated change");
+      for (const paths of [[], ["../always.md"], [".git/config"]]) {
+        assert.equal((await call("/v1/memory/repairs", { json: { agent: "main", paths, moves: [{ from: "old.md", to: "new.md" }] } })).status, 400);
+      }
+      assert.ok(!existsSync(path.join(memoryDir, ".git")));
+    });
+  });
+
   describe("the end of a turn", () => {
     it("commits /memory", async (t) => {
       const { call, memoryDir } = await setup(t);

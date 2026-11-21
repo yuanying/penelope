@@ -67,7 +67,7 @@ export class Memory {
   private async commitNow(message: string[], paths: string[] = []): Promise<"committed" | "clean"> {
     // A Pod mounts .git on its own, so it can be there and empty: a repository has its HEAD.
     if (!existsSync(path.join(this.dir, ".git", "HEAD"))) await this.git("init", "--quiet", "--initial-branch=main");
-    const only = paths.length === 0 ? [] : ["--", ...paths];
+    const only = paths.length === 0 ? [] : ["--", ...paths.map((name) => `:(literal)${name}`)];
     await this.git("add", "--all", ...only);
     const { stdout } = await this.git("status", "--porcelain", ...only);
     if (stdout === "") return "clean";

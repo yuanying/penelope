@@ -12,6 +12,7 @@ import {
 import { Type } from "typebox";
 
 import type { Config } from "./config.ts";
+import type { MemoryMoves } from "./memory-moves.ts";
 import { textLines, textPage } from "./night-text.ts";
 
 type NightPaths = Pick<Config, "memoryDir" | "sourcesDir" | "sessionDir" | "subAgentDir">;
@@ -23,8 +24,8 @@ const inside = (root: string, path: string): boolean => {
 };
 
 /** File tools only: memory is writable; source files and selected transcripts are read-only. */
-export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefinition[] {
-  return fileTools(config.memoryDir, { config, transcripts });
+export function nightTools(config: NightPaths, transcripts?: string[], moves?: MemoryMoves): ToolDefinition[] {
+  return fileTools(config.memoryDir, { config, transcripts, moves });
 }
 
 /** The evaluation can read only its private snapshot of memory. */
@@ -34,7 +35,7 @@ export function memoryReadTools(memoryDir: string, onRead: (path: string) => voi
 
 function fileTools(
   memoryDir: string,
-  night?: { config: NightPaths; transcripts: string[] | undefined },
+  night?: { config: NightPaths; transcripts: string[] | undefined; moves: MemoryMoves | undefined },
   onRead?: (path: string) => void,
 ): ToolDefinition[] {
   const memory = resolve(memoryDir);
@@ -218,6 +219,7 @@ function fileTools(
         if (existing) throw new Error("The destination already exists.");
         await mkdir(await checked(resolve(target, ".."), "dir", true), { recursive: true });
         await rename(source, target);
+        night.moves?.move(relative(memory, source), relative(memory, target));
         return { content: [{ type: "text", text: "Moved." }], details: undefined };
       },
     }),
@@ -225,7 +227,9 @@ function fileTools(
       name: "remove", label: "remove", description: "Remove a file in memory.",
       parameters: Type.Object({ path: Type.String() }),
       async execute(_id, { path }) {
-        await unlink(await checked(path, "file", true));
+        const target = await checked(path, "file", true);
+        await unlink(target);
+        night.moves?.remove(relative(memory, target));
         return { content: [{ type: "text", text: "Removed." }], details: undefined };
       },
     }),

@@ -9,6 +9,7 @@ import type {
   AgentId,
   DeliveredEvent,
   JobEventRequest,
+  MemoryRepairRequest,
   ModelCatalog,
   ModelSelectionResponse,
   PollResponse,
@@ -44,6 +45,7 @@ export class Backend {
   private readonly url: string;
   private readonly token: string;
   readonly agent: AgentId;
+  private turns: { last: Promise<void> } = { last: Promise.resolve() };
 
   constructor(options: BackendOptions) {
     this.url = options.url.replace(/\/+$/, "");
@@ -53,7 +55,9 @@ export class Backend {
 
   /** The same API, called as another agent: a sub-agent's requests carry its name. */
   as(agent: AgentId): Backend {
-    return new Backend({ url: this.url, token: this.token, agent });
+    const client = new Backend({ url: this.url, token: this.token, agent });
+    client.turns = this.turns;
+    return client;
   }
 
   /** `GET /v1/events`: waits up to `wait` seconds for events after `after`. */
@@ -81,8 +85,19 @@ export class Backend {
   }
 
   /** `POST /v1/turns/end`: the backend commits /memory, and records how the turn went (ADR-0038). */
-  async turnEnd(end: Without<TurnEndRequest>): Promise<void> {
-    await this.post("/v1/turns/end", end);
+  async turnEnd(end: Without<TurnEndRequest>, afterCommit?: () => Promise<void>): Promise<void> {
+    // A sub-agent's turn end commits the entire working tree too. Keep it
+    // from committing a curator turn's reference edits before their own commit.
+    const next = this.turns.last.then(async () => {
+      await this.post("/v1/turns/end", end);
+      await afterCommit?.();
+    });
+    this.turns.last = next.catch(() => {});
+    await next;
+  }
+
+  async commitMemoryRepairs(repair: Without<MemoryRepairRequest>): Promise<void> {
+    await this.post("/v1/memory/repairs", repair);
   }
 
   async reply(reply: Without<ReplyRequest>): Promise<ReplyResponse> {

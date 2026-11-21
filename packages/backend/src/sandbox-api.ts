@@ -4,7 +4,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
+import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type MemoryMove, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
@@ -220,6 +220,32 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         sendEmpty(response, 204);
         return;
       }
+      case "POST /v1/memory/repairs": {
+        const { agent, paths, moves } = withAgent(await body());
+        mainOnly(agent, "commits memory reference repairs");
+        if (!Array.isArray(paths) || !paths.length || !paths.every((path) => memoryRelativePath(path) && /\.md$/i.test(path))) {
+          throw new HttpError(400, "paths must be a nonempty list of memory-relative Markdown paths");
+        }
+        if (!Array.isArray(moves) || !moves.length) throw new HttpError(400, "moves must be a nonempty list");
+        const mapping = moves.map((value): MemoryMove => {
+          const { from, to } = object(value);
+          if (!memoryRelativePath(from) || !memoryRelativePath(to) || from === to) {
+            throw new HttpError(400, "each move needs distinct memory-relative from and to paths");
+          }
+          return { from, to };
+        });
+        try {
+          await memory.commitPaths([...new Set<string>(paths)], [
+            "Runner: repair memory references",
+            mapping.map(({ from, to }) => `${JSON.stringify(from)} → ${JSON.stringify(to)}`).join("\n"),
+          ]);
+        } catch (error) {
+          log(`memory: reference repairs not committed: ${error instanceof Error ? error.message : String(error)}`);
+          throw new HttpError(500, "/memory reference repairs could not be committed");
+        }
+        sendEmpty(response, 204);
+        return;
+      }
       case "POST /v1/agents": {
         const { agent, purpose, closed } = withAgent(await body());
         if (agent === "main") throw new HttpError(400, "agent must be a sub-agent's name, not main");
@@ -271,7 +297,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };
@@ -381,6 +407,11 @@ function activity(value: unknown): Activity {
 }
 
 /** The end of a turn: its id, and what the runner said of it for the record (ADR-0038). */
+function memoryRelativePath(value: unknown): value is string {
+  return typeof value === "string" && !value.includes("\0") &&
+    value.split("/").every((part) => part !== "" && part !== "." && part !== ".." && part !== ".git");
+}
+
 function turnEnd(body: Record<string, unknown>): TurnEnd {
   const { turn_id, result, reason, seqs, night } = body;
   if (typeof turn_id !== "string" || turn_id === "") throw new HttpError(400, "turn_id must be a non-empty string");

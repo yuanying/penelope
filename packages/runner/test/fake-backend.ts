@@ -45,6 +45,7 @@ export class FakeBackend {
   private replies = 0;
   /** When set, every reply is refused with a 400 and this error, as the backend refuses an image. */
   refuseReplies: string | undefined;
+  refuseMemoryRepairs = false;
   private readonly server: Server;
 
   constructor() {
@@ -184,6 +185,9 @@ export class FakeBackend {
     if (key === "POST /v1/job-events") {
       this.jobEvents.push(body as JobEventRequest);
       return answer(202);
+    }
+    if (key === "POST /v1/memory/repairs") {
+      return this.refuseMemoryRepairs ? answer(503, { error: "unavailable" }) : answer(204);
     }
     if (
       key === "POST /v1/agents" ||

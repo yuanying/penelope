@@ -36,6 +36,7 @@ import { Jobs } from "./jobs.ts";
 import { memoryMap } from "./memory-map.ts";
 import { memoryReads, NIGHT_REFLECTION } from "./memory-reads.ts";
 import { TurnModels } from "./model-settings.ts";
+import { MemoryMoves, repairMemoryReferences } from "./memory-moves.ts";
 import { type DaytimeRecords, memoryChanges, memorySnapshot } from "./night-memory.ts";
 import { nightTools } from "./night-tools.ts";
 import {
@@ -86,6 +87,7 @@ interface TurnOptions {
   seqs?: number[];
   /** For a turn of the nightly switch: its control event and step. The turn is not ordinary. */
   night?: { seq: number; stage: NightTurnStage };
+  afterCommit?: () => Promise<void>;
   images?: ImageContent[];
   heartbeat?: boolean;
 }
@@ -441,7 +443,7 @@ export class Runner {
         turn_id: recorder.turnId,
         ...outcome,
         ...(ordinary ? { seqs: turn.seqs } : { night }),
-      });
+      }, options.afterCommit);
     } catch (error) {
       this.log(`turn end not sent: ${failure(error)}`);
     }
@@ -563,16 +565,14 @@ export class Runner {
       const transcripts = [current, ...carried].flatMap(({ main, subAgents }) => [main, ...subAgents]);
       const memory = await memorySnapshot(memoryDir);
       return this.nightWorker(seq, VERIFIER, verifierSystemPrompt(identity, this.places, memory),
-        verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined),
-        nightTools(this.config, transcripts));
+        verifierInput(this.places, current, carried, memoryChanges(verifierMemory, memory), verifierMemory !== undefined), transcripts);
     });
     let curator = await this.nightStage("curator", async () => {
       const memory = await memorySnapshot(memoryDir);
       const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
       const map = await memoryMap(memoryDir, memory, reads, today);
       return this.nightWorker(seq, "curator", curatorSystemPrompt(identity, this.places, memory),
-        curatorInput(memory, memoryChanges(curatorMemory, memory), curatorMemory !== undefined, layer, map),
-        nightTools(this.config));
+        curatorInput(memory, memoryChanges(curatorMemory, memory), curatorMemory !== undefined, layer, map));
     });
 
     // Use the memory left by the whole curator stage, so its edits are not
@@ -634,16 +634,31 @@ export class Runner {
   }
 
   private async nightWorker(
-    seq: number, stage: Exclude<NightTurnStage, "reflection">, system: string, input: string, tools: PiSetup["tools"],
+    seq: number, stage: Exclude<NightTurnStage, "reflection">, system: string, input: string, transcripts?: string[],
   ): Promise<NightTurnReport> {
+    const moves = stage === "curator" ? new MemoryMoves() : undefined;
+    const tools = nightTools(this.config, transcripts, moves);
     const { session } = await openSession(
       { ...this.setup, tools, extensions: [], fileOnly: true }, system,
       nightManager(this.config, stage), this.config.memoryDir,
     );
     try {
-      return stageOf(await this.turnOf(session, input, { night: { seq, stage } }));
+      return stageOf(await this.turnOf(session, input, {
+        night: { seq, stage },
+        ...(moves === undefined ? {} : { afterCommit: () => this.repairMoves(moves) }),
+      }));
     } finally {
       session.dispose();
+    }
+  }
+
+  private async repairMoves(moves: MemoryMoves): Promise<void> {
+    const report = (error: unknown) => this.log(`night memory reference repair: ${failure(error)}`);
+    try {
+      const repair = await repairMemoryReferences(this.config.memoryDir, moves, report);
+      if (repair.paths.length > 0) await this.backend.commitMemoryRepairs(repair);
+    } catch (error) {
+      report(error);
     }
   }
 }
