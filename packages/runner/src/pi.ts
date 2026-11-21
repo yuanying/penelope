@@ -104,7 +104,7 @@ export interface OpenSession {
  * `cwd` (HOME unless given). The skills are found from HOME whatever `cwd` is.
  */
 export async function openSession(
-  setup: PiSetup,
+  setup: Omit<PiSetup, "turnModels"> & { turnModels?: TurnModels },
   systemPrompt: string,
   sessionManager: SessionManager,
   cwd = setup.config.home,
@@ -186,7 +186,7 @@ export async function openSession(
       onError: ({ extensionPath, event, error }) => disk.report("handler_error", extensionPath, `${event}: ${error}`),
     });
   }
-  setup.turnModels.remember(session, disk !== undefined);
+  setup.turnModels?.remember(session, disk !== undefined);
   return {
     session,
     async beforeTurn() {

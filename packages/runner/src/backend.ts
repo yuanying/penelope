@@ -63,6 +63,11 @@ export class Backend {
     return response.events;
   }
 
+  async readModelSelection(signal: AbortSignal): Promise<ModelSelectionResponse> {
+    const query = new URLSearchParams({ agent: this.agent });
+    return (await this.request("GET", `/v1/model-settings?${query}`, undefined, signal)) as ModelSelectionResponse;
+  }
+
   async reportModels(catalog: ModelCatalog, signal: AbortSignal): Promise<ModelSelectionResponse> {
     return (await this.request("PUT", "/v1/model-settings", { agent: this.agent, ...catalog }, signal)) as ModelSelectionResponse;
   }

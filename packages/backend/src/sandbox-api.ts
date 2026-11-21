@@ -80,6 +80,11 @@ export function sandboxHandler(options: SandboxOptions): Handler {
     }
 
     switch (route) {
+      case "GET /v1/model-settings": {
+        mainOnly(agentOf(url.searchParams.get("agent")), "reads the saved model selection");
+        sendJson(response, 200, { selection: options.modelSettings.selection() });
+        return;
+      }
       case "PUT /v1/model-settings": {
         const report = withAgent(await body());
         mainOnly(report.agent, "reports model availability");

@@ -24,10 +24,24 @@ const inside = (root: string, path: string): boolean => {
 
 /** File tools only: memory is writable; source files and selected transcripts are read-only. */
 export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefinition[] {
-  const memory = resolve(config.memoryDir);
-  const sources = resolve(config.sourcesDir);
-  const sessionRoots = [resolve(config.sessionDir), resolve(config.subAgentDir)];
-  if ([sources, ...sessionRoots].some((root) => inside(memory, root) || inside(root, memory))) {
+  return fileTools(config.memoryDir, { config, transcripts });
+}
+
+/** The evaluation can read only its private snapshot of memory. */
+export function memoryReadTools(memoryDir: string, onRead: (path: string) => void): ToolDefinition[] {
+  return fileTools(memoryDir, undefined, onRead);
+}
+
+function fileTools(
+  memoryDir: string,
+  night?: { config: NightPaths; transcripts: string[] | undefined },
+  onRead?: (path: string) => void,
+): ToolDefinition[] {
+  const memory = resolve(memoryDir);
+  const { config, transcripts } = night ?? {};
+  const sources = config && resolve(config.sourcesDir);
+  const sessionRoots = config ? [resolve(config.sessionDir), resolve(config.subAgentDir)] : [];
+  if (sources && [sources, ...sessionRoots].some((root) => inside(memory, root) || inside(root, memory))) {
     throw new Error("Memory and original record directories must not overlap.");
   }
   const records = new Set(transcripts?.map((path) => resolve(path)));
@@ -42,7 +56,7 @@ export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefi
   async function checked(path: string, kind: "file" | "dir", writing = false): Promise<string> {
     const target = resolve(memory, path);
     const root = inside(memory, target) ? memory
-      : !writing && transcripts && inside(sources, target) ? sources
+      : !writing && transcripts && sources && inside(sources, target) ? sources
       : !writing && kind === "file" && records.has(target) ? target : undefined;
     if (root === undefined) throw denied(target);
     const parts = relative(root, target).split(sep).filter(Boolean);
@@ -73,6 +87,7 @@ export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefi
     const file = await open(await checked(path, "file"), constants.O_RDONLY | noFollow);
     const input = file.createReadStream({ encoding: "utf8", signal });
     try {
+      onRead?.(relative(memory, resolve(memory, path)));
       yield* textLines(input, path.endsWith(".jsonl"));
     } finally {
       input.destroy();
@@ -160,13 +175,13 @@ export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefi
             if (index < 0) continue;
             if (results.length >= limit) return text(`${results.join("\n")}\n\n[More matches; narrow the search path or pattern.]`);
             const excerpt = value.slice(Math.max(index - 60, 0), index + pattern.length + 60);
-            results.push(`${file}:${line}:${index + 1}: ${excerpt}`);
+            results.push(`${night ? file : relative(memory, file)}:${line}:${index + 1}: ${excerpt}`);
           }
         }
         return text(results.length ? results.join("\n") : "No matches.");
       },
     }),
-    createEditToolDefinition(memory, {
+    ...(night ? [createEditToolDefinition(memory, {
       operations: {
         access: async (path) => { await checked(path, "file", true); },
         readFile: readMemory,
@@ -178,7 +193,7 @@ export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefi
         mkdir: async (path) => { await mkdir(await checked(path, "dir", true), { recursive: true }); },
         writeFile: writeMemory,
       },
-    }),
+    })] : []),
     defineTool({
       name: "ls", label: "ls", description: transcripts ? "List a directory in memory or the event sources." : "List a directory in memory.",
       parameters: Type.Object({ path: Type.String() }),
@@ -190,7 +205,7 @@ export function nightTools(config: NightPaths, transcripts?: string[]): ToolDefi
       },
     }),
   ] as ToolDefinition[];
-  if (!transcripts) tools.push(...[
+  if (night && !transcripts) tools.push(...[
     defineTool({
       name: "move", label: "move", description: "Move a memory file to a new path in memory, creating its parent directories.",
       parameters: Type.Object({ from: Type.String(), to: Type.String() }),

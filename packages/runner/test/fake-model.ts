@@ -13,6 +13,7 @@ import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 export interface Answer {
   thinking?: string;
   text?: string;
+  tokens?: number;
   calls?: { tool: string; args: Record<string, unknown> }[];
   /** The request fails with this message, as when the model's API answers with an error. */
   error?: string;
@@ -156,6 +157,7 @@ export async function fakeRuntime(root: string, script: Script): Promise<ModelRu
           push({ type: "error", reason: "error", error: message });
           return;
         }
+        message.usage.totalTokens = answer.tokens ?? 0;
         push({ type: "start", partial: message });
         if (answer.thinking) {
           const index = message.content.length;
