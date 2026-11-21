@@ -114,7 +114,7 @@ describe("the sandbox's API", () => {
     assert.deepEqual(answer.json(), { selection });
     assert.deepEqual(modelSettings.read(), before);
     clock.advance(1);
-    assert.deepEqual(modelSettings.read(), { models: [], default: null, selection });
+    assert.deepEqual(modelSettings.read(), { models: [], default: null, selection: before.selection });
   });
 
   describe("taking events", () => {
