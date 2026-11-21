@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -25,6 +25,32 @@ test("a search contributes one date per found memory file without keeping the qu
       content: [{ type: "text", text: `${topic}:private match\n${topic}:another match\n${root}/not-a-file:another private match` }] } },
   ].map((entry) => JSON.stringify(entry)).join("\n")).filter((entry) => entry.type !== "session");
   assert.deepEqual(await memoryReads(root, tmpdir(), entries, [], "2026-11-21"), [{ path: "topic.md", dates: ["2026-11-20"] }]);
+});
+
+test("one successful shell call contributes one reference per existing memory path named in its command", async (t) => {
+  const cwd = await mkdtemp(join(tmpdir(), "memory-reads-"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const root = join(cwd, "memory");
+  await mkdir(root);
+  for (const name of ["quoted topic.md", "tile.md", "note.md"]) {
+    await writeFile(join(root, name), "private body\n");
+  }
+  await writeFile(join(cwd, "outside.md"), "outside\n");
+  const timestamp = "2026-11-20T19:00:00.000Z";
+  const command = `cat "${root}/quoted topic.md" | head; sed -n '1,2p' ~/memory/tile.md; head ./memory/note.md ${root}/note.md ./memory/missing.md outside.md`;
+  const entries = parseSessionEntries([
+    { type: "session", version: 3, id: "session", cwd, timestamp },
+    { type: "message", id: "call", parentId: null, timestamp, message: { role: "assistant", content: [
+      { type: "toolCall", id: "shell", name: "bash", arguments: { command } },
+    ] } },
+    { type: "message", id: "result", parentId: "call", timestamp, message: { role: "toolResult", toolCallId: "shell", toolName: "bash", isError: false,
+      content: [{ type: "text", text: "private body" }] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n")).filter((entry) => entry.type !== "session");
+  assert.deepEqual(await memoryReads(root, cwd, entries, [], "2026-11-21"), [
+    { path: "quoted topic.md", dates: ["2026-11-20"] },
+    { path: "tile.md", dates: ["2026-11-20"] },
+    { path: "note.md", dates: ["2026-11-20"] },
+  ]);
 });
 
 test("the map keeps the last read but counts only the current day and previous 29 days", async (t) => {

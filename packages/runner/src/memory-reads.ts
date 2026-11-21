@@ -3,7 +3,7 @@ import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 
-/** One date per read or search call, plus the most recent date if all reads aged out. */
+/** One date per call referencing the file, or the most recent date if all references aged out. */
 export type MemoryRead = { path: string; dates: string[] };
 
 export const NIGHT_REFLECTION = "penelope:night-reflection";
@@ -58,24 +58,31 @@ export async function memoryReads(
       if (read) {
         found.add(locate(path));
       } else {
-        const shell = call.name === "bash" && typeof command === "string"
-          ? /^\s*(rg|grep|fd|find)\s/.exec(command)?.[1] : undefined;
-        if (!shell && call.name !== "grep" && call.name !== "find") continue;
-        let base = locate(typeof path === "string" ? path : ".");
-        if (call.name === "grep" && await isFile(base)) base = dirname(base);
-        for (const part of message.content) {
-          if (part.type !== "text") continue;
-          for (const line of part.text.split("\n")) {
-            if (!line) continue;
-            if (shell) {
-              // Shell output is only a hint: take absolute filenames in common search output formats.
-              const path = shell === "rg" || shell === "grep" ? line.split(":", 1)[0]! : line;
-              if (isAbsolute(path)) found.add(resolve(path));
-            } else if (call.name === "grep") {
-              // Pi grep prefixes matches (not context lines) with filename:line:.
-              const match = /^(.+?):\d+:/.exec(line)?.[1];
-              if (match) found.add(resolve(base, match));
-            } else if (!line.startsWith("[")) found.add(resolve(base, line));
+        let shellSearch: string | undefined;
+        if (call.name === "bash" && typeof command === "string") {
+          // Pick out plain and quoted words; do not evaluate shell syntax or expansions.
+          for (const word of command.matchAll(/(?:^|[\s|&;<>()])(?:"([^"\r\n]+)"|'([^'\r\n]+)'|([^\s"'|&;<>()]+))(?=$|[\s|&;<>()])/g)) {
+            found.add(locate((word[1] ?? word[2] ?? word[3])!));
+          }
+          shellSearch = /^\s*(rg|grep|fd|find)\s/.exec(command)?.[1];
+        }
+        if (shellSearch || call.name === "grep" || call.name === "find") {
+          let base = locate(typeof path === "string" ? path : ".");
+          if (call.name === "grep" && await isFile(base)) base = dirname(base);
+          for (const part of message.content) {
+            if (part.type !== "text") continue;
+            for (const line of part.text.split("\n")) {
+              if (!line) continue;
+              if (shellSearch) {
+                // Shell output is only a hint: take absolute filenames in common search output formats.
+                const path = shellSearch === "rg" || shellSearch === "grep" ? line.split(":", 1)[0]! : line;
+                if (isAbsolute(path)) found.add(resolve(path));
+              } else if (call.name === "grep") {
+                // Pi grep prefixes matches (not context lines) with filename:line:.
+                const match = /^(.+?):\d+:/.exec(line)?.[1];
+                if (match) found.add(resolve(base, match));
+              } else if (!line.startsWith("[")) found.add(resolve(base, line));
+            }
           }
         }
       }

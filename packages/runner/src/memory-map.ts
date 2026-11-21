@@ -119,7 +119,7 @@ export async function memoryMap(root: string, files: MemoryFile[], reads: Memory
   }
   return [
     "# Memory map",
-    "Directories and filenames are relative to the memory root. Each row has [file, bytes, last committed change, last night-worker write, last daytime read, daytime reads in 30 days, incoming links, headings with line counts, broken link targets]. Dates are UTC; null means unknown or not recorded. Zero incoming links means no links from other files.",
+    "Directories and filenames are relative to the memory root. Each row has [file, bytes, last committed change, last night-worker write, last daytime reference, daytime references in 30 days, incoming links, headings with line counts, broken link targets]. References are a usage estimate, not an exact read count. Dates are UTC; null means unknown or not recorded. Zero incoming links means no links from other files.",
     ...[...groups].map(([dir, rows]) => `${JSON.stringify(dir === "." ? "./" : `${dir}/`)}\n${rows.join("\n")}`),
   ].join("\n\n");
 }
