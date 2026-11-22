@@ -146,7 +146,7 @@ RUN KUBECTL_VERSION=$KUBECTL_VERSION HELM_VERSION=$HELM_VERSION KUSTOMIZE_VERSIO
 # SDCTL_VERSION from the repository's GitHub releases.
 FROM --platform=$BUILDPLATFORM golang:1.27.4-trixie AS sandbox-sdctl
 ARG TARGETOS TARGETARCH
-ARG SDCTL_VERSION=v0.5.0
+ARG SDCTL_VERSION=v0.5.1
 RUN --mount=type=cache,target=/root/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
