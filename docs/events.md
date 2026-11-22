@@ -171,7 +171,7 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `jobs` | `job`（道具で使う名前）、`started_at`、`command`（先頭行の先頭 200 字まで）。`started_at` が古い順、同時なら `job` 順 |
 | `subagents` | `name`、`purpose`、`state`（`running`・`waiting`）、`since`（その状態になった時刻）。`since` が古い順、同時なら `name` 順 |
 
-`a2a_tasks` と `failures` は backend が heartbeat を列に入れるときに採る。`jobs` と `subagents` は runner が本体への行を組み立てるときに採り、backend から来た分に足す。採れない種類は省く。状態になった時刻を持たない旧いサブエージェントの記録は、次に状態が変わるまで一覧に載せない。
+`a2a_tasks` と `failures` は backend が heartbeat を列に入れるときに採る。`jobs` と `subagents` は runner が本体への行を組み立てるときに採り、backend から来た分に足す。採れない種類は省く。時刻を持たない旧い `waiting` の記録は、状態が変わった時刻の代わりに `agent.json` の最終更新時刻を `since` に載せる。最終更新時刻も読めなければ、そのサブエージェントは一覧に載せない。
 
 ### `batch` のまとめ
 

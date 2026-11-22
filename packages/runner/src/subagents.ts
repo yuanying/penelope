@@ -163,14 +163,20 @@ export class SubAgents {
       return;
     }
     for (const name of names.sort()) {
+      const path = join(this.config.subAgentDir, name, RECORD);
       let record: SubAgentRecord;
       try {
-        record = JSON.parse(await readFile(join(this.config.subAgentDir, name, RECORD), "utf8")) as SubAgentRecord;
+        record = JSON.parse(await readFile(path, "utf8")) as SubAgentRecord;
       } catch (error) {
         this.log(`sub-agent ${name} left out: its record cannot be read: ${failure(error)}`);
         continue;
       }
       record.pending ??= [];
+      if (record.state === "waiting" && record.since === undefined) {
+        // Approximate a legacy wait before sending notices can rewrite the record.
+        const file = await stat(path).catch(() => undefined);
+        if (file) record.since = file.mtime.toISOString();
+      }
       const live = this.live(record);
       this.agents.set(name, live);
       if (record.state !== "closed") {

@@ -3,7 +3,7 @@
 // stops the main agent gets a `self` event. These tests drive the main agent
 // with the scripted model, the way a deployment's model would.
 import assert from "node:assert/strict";
-import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, utimes, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -331,48 +331,24 @@ test("after a restart, a sub-agent that was running is waiting, interrupted, and
   assert.deepEqual(last.userTexts, ["the first request", "go on"]);
 });
 
-test("a legacy waiting sub-agent appears in heartbeats only after a known state change", async (t) => {
+test("a heartbeat shows a legacy waiting sub-agent with the record's last modification time", async () => {
   const { fake, start, calls, config } = await world({ turnFold: false });
-  const stop = await start(script(() => ({ text: "done" })));
-  await ask(fake, "subagent_start", { name: "legacy", purpose: "Check alerts", prompt: "Go" });
-  await until(() => notices(fake).length === 1);
-  await stop();
-  const path = join(config.subAgentDir, "legacy", "agent.json");
-  const oldRecord = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
-  delete oldRecord.since;
-  await writeFile(path, JSON.stringify(oldRecord));
-
-  const { held, release } = gate();
-  t.after(release);
-  await start(script(async () => {
-    await held;
-    return { text: "checked" };
+  const dir = join(config.subAgentDir, "legacy");
+  const path = join(dir, "agent.json");
+  await mkdir(dir, { recursive: true });
+  await writeFile(path, JSON.stringify({
+    name: "legacy", purpose: "Check alerts", cwd: config.home, session: join(dir, "session.jsonl"), state: "waiting", stops: 1, pending: [],
   }));
-  const pending = async () => {
-    const n = ++seq + 1000;
-    fake.push(heartbeat(n));
-    await until(() => acked(fake).includes(n));
-    const line = calls.filter((call) => isMain(call) && call.lastText.startsWith("<events>\n"))
-      .flatMap((call) => call.lastText.split("\n").slice(1, -1))
-      .map((line) => JSON.parse(line) as TurnEvent)
-      .find((line) => line.seq === n);
-    assert.ok(line, "heartbeat reached the model");
-    return line.pending;
-  };
-  assert.equal(await pending(), undefined);
+  const modified = new Date("2026-11-14T09:00:00.000Z");
+  await utimes(path, modified, modified);
 
-  const beforeSend = Date.now();
-  await ask(fake, "subagent_send", { name: "legacy", text: "Check again" });
-  const running = (await pending())?.subagents?.items[0];
-  assert.deepEqual(running, { name: "legacy", purpose: "Check alerts", state: "running", since: running?.since });
-  assert.ok(Date.parse(running.since) >= beforeSend);
-
-  const beforeStop = Date.now();
-  release();
-  await until(() => notices(fake).length === 2);
-  const waiting = (await pending())?.subagents?.items[0];
-  assert.deepEqual(waiting, { ...running, state: "waiting", since: waiting?.since });
-  assert.ok(Date.parse(waiting.since) >= beforeStop);
+  await start(() => ({ text: "noted" }));
+  fake.push(heartbeat(1));
+  await until(() => acked(fake).includes(1));
+  const line = JSON.parse(calls[0]!.lastText.split("\n")[1]!) as TurnEvent;
+  assert.deepEqual(line.pending?.subagents, {
+    items: [{ name: "legacy", purpose: "Check alerts", state: "waiting", since: modified.toISOString() }], omitted: 0,
+  });
 });
 
 test("a notice the backend did not take is sent again with the same id, after a restart too", async () => {
