@@ -8,6 +8,9 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   type Activity,
   type AgentId,
+  type HeartbeatFailure,
+  HEARTBEAT_PENDING_LIMIT,
+  type HeartbeatPendingList,
   type JobEnd,
   type NightStages,
   type NightTurnReport,
@@ -304,6 +307,32 @@ export class ActivityRecord {
       | { turn_id: string }
       | undefined;
     return row?.turn_id;
+  }
+
+  /** The newest failures learned of after the previous heartbeat, apart from the night's work. */
+  heartbeatFailures(since: string): HeartbeatPendingList<HeartbeatFailure> | undefined {
+    const rows = this.db.prepare(
+      `WITH failures AS (
+         SELECT 'turn' AS kind, recorded_at AS at, reason, NULL AS command, NULL AS exit_code, rowid AS tie
+           FROM turns WHERE result = 'failed' AND night_seq IS NULL AND recorded_at > ?
+         UNION ALL
+         SELECT 'job', received_at, NULL, command, exit_code, rowid
+           FROM record_jobs WHERE failed = 1 AND received_at > ?
+       )
+       SELECT kind, at, substr(reason, 1, 200) AS reason, command, exit_code, count(*) OVER () AS total
+         FROM failures ORDER BY at DESC, kind, tie DESC LIMIT ?`,
+    ).all(since, since, HEARTBEAT_PENDING_LIMIT) as Array<{
+      kind: HeartbeatFailure["kind"]; at: string; reason: string | null; command: string | null; exit_code: number | null; total: number;
+    }>;
+    if (rows.length === 0) return undefined;
+    return {
+      items: rows.map(({ kind, at, reason, command, exit_code }) =>
+        kind === "turn"
+          ? { kind, at, ...(reason === null ? {} : { reason }) }
+          : { kind, at, command: command!.split("\n", 1)[0]!, ...(exit_code === null ? {} : { exit_code }) }
+      ),
+      omitted: rows[0]!.total - rows.length,
+    };
   }
 
   // ── What the UI reads ──

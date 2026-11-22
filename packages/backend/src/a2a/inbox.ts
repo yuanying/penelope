@@ -4,7 +4,15 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { A2APayload, A2AReplyRequest, A2AReplyResponse, A2ATaskState } from "@penelope/contract";
+import {
+  type A2APayload,
+  type A2AReplyRequest,
+  type A2AReplyResponse,
+  type A2ATaskState,
+  type HeartbeatA2ATask,
+  HEARTBEAT_PENDING_LIMIT,
+  type HeartbeatPendingList,
+} from "@penelope/contract";
 
 import type { Assets, CheckedImage, StoredImage } from "../assets.ts";
 import { transaction } from "../db.ts";
@@ -108,6 +116,28 @@ export class Inbox {
     this.expire(this.now());
     const row = this.row(taskId);
     return row && row.sender === sender ? this.view(row) : undefined;
+  }
+
+  /** A read-only look at the oldest unexpired open tasks for a heartbeat. */
+  heartbeatTasks(now: number): HeartbeatPendingList<HeartbeatA2ATask> | undefined {
+    const rows = this.db.prepare(
+      `SELECT t.sender, t.task_id, t.state, t.received_ms, e.seq, e.summary, count(*) OVER () AS total
+         FROM a2a_tasks t
+         JOIN events e ON e.seq = (
+           SELECT m.seq FROM a2a_messages m WHERE m.task_id = t.task_id AND m.seq IS NOT NULL ORDER BY m.row DESC LIMIT 1
+         )
+        WHERE ${OPEN} AND t.received_ms > ?
+        ORDER BY t.received_ms, e.seq LIMIT ?`,
+    ).all(now - this.limits.deadlineMs, HEARTBEAT_PENDING_LIMIT) as
+      Array<Omit<HeartbeatA2ATask, "since"> & { received_ms: number; total: number }>;
+    if (rows.length === 0) return undefined;
+    return {
+      items: rows.map(({ total: _, received_ms, summary, ...task }) => {
+        const chars = Array.from(summary);
+        return { ...task, since: iso(received_ms), summary: chars.length > SUMMARY_LENGTH ? `${chars.slice(0, SUMMARY_LENGTH - 1).join("")}…` : summary };
+      }),
+      omitted: rows[0]!.total - rows.length,
+    };
   }
 
   /** How many open tasks a sender has. */

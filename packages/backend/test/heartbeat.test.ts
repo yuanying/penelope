@@ -5,11 +5,15 @@ import { describe, it } from "node:test";
 
 import type { Activity } from "@penelope/contract";
 
+import { Inbox } from "../src/a2a/inbox.ts";
+import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
 import { Heartbeat } from "../src/heartbeat.ts";
 import { Queue } from "../src/queue.ts";
+import { ActivityRecord } from "../src/record.ts";
+import { cronOf } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours, iso } from "../src/time.ts";
 import { FakeClock, tempDir } from "./support.ts";
@@ -33,8 +37,15 @@ function setup(
     awake: awakeHours,
     redeliverMs: 5 * 60_000,
   });
-  const conversation = new Conversation(db, new Feed(), { now: clock.now });
-  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, awake: awakeHours, log: () => {} });
+  const feed = new Feed();
+  const conversation = new Conversation(db, feed, { now: clock.now });
+  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 0 * * *", "UTC") });
+  const inbox = new Inbox(db, queue, {
+    assets: new Assets(db, path.join(dir, "assets"), { now: clock.now }),
+    now: clock.now,
+    limits: { maxOpenTasks: 3, deadlineMs: 120 * 60_000 },
+  });
+  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, awake: awakeHours, log: () => {}, inbox, record });
   let turns = 0;
   /** The runner's blocks of one turn: its start, or its end. */
   const turn = (kind: "turn_start" | "turn_end") => {
@@ -48,7 +59,7 @@ function setup(
     queue.ack(events.map((event) => event.seq));
     return events;
   };
-  return { clock, queue, conversation, heartbeat, turn, takeAll };
+  return { clock, queue, conversation, heartbeat, inbox, record, turn, takeAll };
 }
 
 describe("the heartbeat", () => {
@@ -70,6 +81,7 @@ describe("the heartbeat", () => {
     assert.equal(Date.parse(event!.occurred_at), clock.ms);
     assert.equal(event?.summary, "no turn for 60 minutes");
     assert.equal(event?.inline, false);
+    assert.ok(event && !("pending" in event));
   });
 
   it("writes since when it counted and how long it waited as the payload", (t) => {
@@ -82,6 +94,116 @@ describe("the heartbeat", () => {
     // The payload is not handed over (heartbeat is not inline); it is in /sources.
     const line = JSON.parse(readFileSync(appended.path, "utf8").split("\n")[appended.lines[0] - 1]!);
     assert.deepEqual(line.payload, { since: "2026-11-16T09:00:00.000Z", quiet_minutes: QUIET_MINUTES });
+  });
+
+  it("includes only unexpired open A2A tasks and points to the sender's latest event", (t) => {
+    const { clock, heartbeat, inbox, takeAll } = setup(t);
+    inbox.receive("old", { messageId: "expired", text: "Expired request" });
+    takeAll();
+    clock.advance(60);
+    const working = inbox.receive("helper", { messageId: "request", text: "Original request" });
+    const waiting = inbox.receive("helper", { messageId: "waiting", text: "Waiting request" });
+    const closed = inbox.receive("helper", { messageId: "closed", text: "Finished request" });
+    const [request, question, finished] = takeAll();
+    inbox.reply({ in_reply_to: request!.seq, state: "input-required", text: "Which one?" });
+    inbox.reply({ in_reply_to: question!.seq, state: "input-required", text: "When?" });
+    inbox.reply({ in_reply_to: finished!.seq, state: "completed" });
+    clock.advance(1);
+    const answerAt = iso(clock.ms);
+    inbox.receive("helper", { taskId: working.taskId, messageId: "answer", text: "x".repeat(201) + "\nDo not include this body" });
+    const [answer] = takeAll();
+    clock.advance(59);
+    heartbeat.tick();
+    const [event] = takeAll();
+    assert.deepEqual(event?.pending?.a2a_tasks, {
+      items: [
+        { sender: "helper", state: "input-required", task_id: waiting.taskId, since: question!.received_at, seq: question!.seq, summary: "Waiting request" },
+        { sender: "helper", state: "working", task_id: working.taskId, since: answerAt, seq: answer!.seq, summary: "x".repeat(199) + "…" },
+      ],
+      omitted: 0,
+    });
+  });
+
+  it("counts the open tasks that do not fit in the heartbeat", (t) => {
+    const { clock, heartbeat, inbox, takeAll } = setup(t);
+    for (let i = 0; i < 7; i++) inbox.receive(`helper-${i}`, { messageId: "request", text: `Request ${i}` });
+    const tasks = takeAll();
+    clock.advance(60);
+    heartbeat.tick();
+    const [event] = takeAll();
+    assert.deepEqual(event?.pending?.a2a_tasks?.items.map(({ seq }) => seq), tasks.slice(0, 5).map(({ seq }) => seq));
+    assert.equal(event?.pending?.a2a_tasks?.omitted, 2);
+  });
+
+  it("only includes failures recorded after the previous heartbeat was queued", (t) => {
+    const { clock, heartbeat, record, takeAll } = setup(t);
+    clock.advance(60);
+    record.turnEnded("main", { turn_id: "already-known", result: "failed", reason: "Previous failure" });
+    heartbeat.tick();
+    // The report comes while the heartbeat is still queued, not yet delivered or acked.
+    clock.advance(1);
+    const at = iso(clock.ms);
+    record.turnEnded("main", { turn_id: "new-failure", result: "failed", reason: "Model failed\nDetails" });
+    takeAll();
+    clock.advance(59);
+    heartbeat.tick();
+    const [event] = takeAll();
+    assert.deepEqual(event?.pending?.failures, { items: [{ kind: "turn", at, reason: "Model failed" }], omitted: 0 });
+  });
+
+  it("bounds the first heartbeat's failure lookup to one quiet interval", (t) => {
+    const { clock, heartbeat, record, takeAll } = setup(t);
+    clock.advance(1);
+    record.turnEnded("main", { turn_id: "older", result: "failed" });
+    clock.advance(60);
+    const at = iso(clock.ms);
+    record.turnEnded("main", { turn_id: "recent", result: "failed" });
+    heartbeat.tick();
+    assert.deepEqual(takeAll()[0]?.pending?.failures, { items: [{ kind: "turn", at }], omitted: 0 });
+  });
+
+  it("uses activity-record failures without including interrupted work or nightly results", (t) => {
+    const { clock, heartbeat, record, takeAll } = setup(t);
+    clock.advance(59);
+    const at = iso(clock.ms);
+    record.turnEnded("main", { turn_id: "stopped", result: "stopped" });
+    record.turnEnded("main", { turn_id: "night", result: "failed", night: { seq: 123, stage: "reflection" } });
+    const job = { command: "example command", started_at: at, ended_at: at, seconds: 0 };
+    record.jobEnded("interrupted", { ...job, end: "interrupted" });
+    record.jobEnded("failed", { ...job, end: "exited", exit_code: 2 });
+    clock.advance(1);
+    heartbeat.tick();
+    const [event] = takeAll();
+    assert.deepEqual(event?.pending?.failures, { items: [{ kind: "job", at, command: "example command", exit_code: 2 }], omitted: 0 });
+  });
+
+  it("shares the five newest failure slots between turns and jobs", (t) => {
+    const { clock, heartbeat, record, takeAll } = setup(t);
+    const times: string[] = [];
+    for (let i = 0; i < 8; i++) {
+      clock.advance(8);
+      const at = iso(clock.ms);
+      times.unshift(at);
+      if (i % 2 === 0) record.turnEnded("main", { turn_id: `failed-${i}`, result: "failed" });
+      else record.jobEnded(`failed-${i}`, { command: "example", started_at: at, ended_at: at, seconds: 0, end: "timed-out" });
+    }
+    heartbeat.tick();
+    const failures = takeAll()[0]?.pending?.failures;
+    assert.deepEqual(failures?.items.map(({ at }) => at), times.slice(0, 5));
+    assert.equal(failures?.omitted, 3);
+  });
+
+  it("still delivers the other pending work when one lookup fails", (t) => {
+    const { clock, heartbeat, inbox, record, takeAll } = setup(t);
+    t.mock.method(record, "heartbeatFailures", () => {
+      throw new Error("cannot read failures");
+    });
+    inbox.receive("helper", { messageId: "request", text: "Open request" });
+    takeAll();
+    clock.advance(60);
+    heartbeat.tick();
+    const [event] = takeAll();
+    assert.deepEqual(Object.keys(event?.pending ?? {}), ["a2a_tasks"]);
   });
 
   it("says its seconds when they are not whole minutes (the tests'), and ticks every second for them", (t) => {

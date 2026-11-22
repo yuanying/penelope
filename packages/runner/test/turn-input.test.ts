@@ -31,6 +31,22 @@ const mention: DeliveredEvent = {
   appended: { path: "/sources/slack/ops/2026-11-14.jsonl", lines: [3, 3] },
 };
 
+test("only the heartbeat line includes pending work alongside its summary and source location", () => {
+  const pending = { failures: { items: [{ kind: "turn" as const, at: mention.occurred_at, reason: "Model failed" }], omitted: 0 } };
+  const appended = { path: "/sources/heartbeat/2026-11-14.jsonl", lines: [1, 1] as [number, number] };
+  const [other, heartbeat] = lines(formatEvents([
+    { ...mention, pending },
+    {
+      seq: 14, id: "heartbeat", source: "heartbeat", delivery: "now", inline: false,
+      occurred_at: mention.occurred_at, received_at: mention.received_at, summary: "no turn for 60 minutes", appended, pending,
+    },
+  ]));
+  assert.ok(other && !("pending" in other));
+  assert.deepEqual(heartbeat, {
+    seq: 14, source: "heartbeat", delivery: "now", occurred_at: mention.occurred_at, summary: "no turn for 60 minutes", appended, pending,
+  });
+});
+
 function batch(seq: number, stream: string, path: string, line: number): DeliveredEvent {
   return {
     seq,

@@ -3,7 +3,7 @@
 // runner has acked.
 import type { DatabaseSync } from "node:sqlite";
 
-import type { DeliveredAttachment, DeliveredEvent, Delivery, Event } from "@penelope/contract";
+import type { DeliveredAttachment, DeliveredEvent, Delivery, Event, HeartbeatPayload } from "@penelope/contract";
 
 import { transaction } from "./db.ts";
 import type { Attachment, Sources } from "./sources.ts";
@@ -74,7 +74,7 @@ export class Queue {
 
       const now = this.options.now();
       const delivery = this.deliveryOf(event, builtin);
-      const inline = this.options.inline.has(event.source);
+      const inline = event.source !== "heartbeat" && this.options.inline.has(event.source);
       // The row comes first for its seq; the files are named after it.
       const { lastInsertRowid } = this.db
         .prepare(
@@ -176,6 +176,14 @@ export class Queue {
     return this.db.prepare("SELECT 1 FROM events WHERE acked_ms IS NULL AND due_ms IS NOT NULL LIMIT 1").get() !== undefined;
   }
 
+  /** When the last heartbeat entered the queue, even if it was not handed over yet. */
+  lastHeartbeatAt(): number | undefined {
+    const row = this.db.prepare("SELECT received_ms FROM events WHERE source = 'heartbeat' ORDER BY seq DESC LIMIT 1").get() as
+      | { received_ms: number }
+      | undefined;
+    return row?.received_ms;
+  }
+
   /** Calls `listener` whenever a new event is taken in. Returns the way to stop. */
   onChange(listener: () => void): () => void {
     this.listeners.add(listener);
@@ -238,5 +246,9 @@ function delivered(row: Row, occurred_at: string): DeliveredEvent {
     appended: { path: row.path, lines: [row.line, row.line] as [number, number] },
     ...(row.attachments === null ? {} : { attachments: JSON.parse(row.attachments) as DeliveredAttachment[] }),
   };
+  if (row.source === "heartbeat") {
+    const pending = (JSON.parse(row.payload) as HeartbeatPayload | null)?.pending;
+    return { ...base, inline: false, ...(pending === undefined ? {} : { pending }) };
+  }
   return row.inline === 1 ? { ...base, inline: true, payload: JSON.parse(row.payload) } : { ...base, inline: false };
 }

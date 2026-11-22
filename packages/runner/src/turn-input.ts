@@ -52,7 +52,9 @@ function single(event: DeliveredEvent, drawn?: string): TurnEvent {
     summary: event.summary,
   };
   const attachments = event.attachments?.length ? { attachments: event.attachments } : {};
-  return event.inline ? { ...head, text: drawn ?? text(event.payload), ...attachments } : { ...head, appended: event.appended, ...attachments };
+  if (event.inline) return { ...head, text: drawn ?? text(event.payload), ...attachments };
+  const pending = event.source === "heartbeat" ? event.pending : undefined;
+  return { ...head, appended: event.appended, ...attachments, ...(pending === undefined ? {} : { pending }) };
 }
 
 /** The ranges of each file, in the order the files first come, with touching ranges merged. */

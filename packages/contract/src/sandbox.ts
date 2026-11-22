@@ -2,6 +2,7 @@
 // Sentinel (docs/sandbox-api.md).
 
 import type { Delivery, Source } from "./events.ts";
+import type { HeartbeatPending } from "./heartbeat.ts";
 
 /** Which agent is calling. The main agent is `main`; a sub-agent's is the name its parent gives it. */
 export type AgentId = "main" | (string & {});
@@ -67,11 +68,11 @@ type DeliveredBase = {
 /**
  * An event as `GET /v1/events` hands it over. An inline source's event
  * carries its payload into the turn; any other carries only the summary and
- * where to read it.
+ * where to read it. Only a heartbeat can also carry pending work.
  */
 export type DeliveredEvent =
-  | (DeliveredBase & { inline: true; payload: unknown })
-  | (DeliveredBase & { inline: false; payload?: never });
+  | (DeliveredBase & { inline: true; payload: unknown; pending?: never })
+  | (DeliveredBase & { inline: false; payload?: never; pending?: HeartbeatPending });
 
 /** `GET /v1/events?agent=&after=&wait=` */
 export type PollResponse = { events: DeliveredEvent[] };

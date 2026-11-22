@@ -1,15 +1,19 @@
 // The heartbeat (ADR-0031): when the awake hours have gone the set minutes
 // since her last turn ended, with no turn since, the backend queues one event
-// that says so and nothing more.
-import type { HeartbeatPayload } from "@penelope/contract";
+// with the unfinished work the backend knows of (ADR-0055).
+import type { HeartbeatPayload, HeartbeatPending } from "@penelope/contract";
 
+import type { Inbox } from "./a2a/inbox.ts";
 import type { Conversation } from "./conversation.ts";
 import type { Queue } from "./queue.ts";
+import type { ActivityRecord } from "./record.ts";
 import { type AwakeHours, iso, tickMs } from "./time.ts";
 
 export class Heartbeat {
   private readonly queue: Queue;
   private readonly conversation: Conversation;
+  private readonly inbox: Inbox;
+  private readonly record: ActivityRecord;
   private readonly now: () => number;
   private readonly quietMs: number;
   private readonly awake: AwakeHours;
@@ -21,10 +25,12 @@ export class Heartbeat {
   constructor(
     queue: Queue,
     conversation: Conversation,
-    options: { now: () => number; quietMs: number; awake: AwakeHours; log?: (line: string) => void },
+    options: { now: () => number; quietMs: number; awake: AwakeHours; inbox: Inbox; record: ActivityRecord; log?: (line: string) => void },
   ) {
     this.queue = queue;
     this.conversation = conversation;
+    this.inbox = options.inbox;
+    this.record = options.record;
     this.now = options.now;
     this.quietMs = options.quietMs;
     this.awake = options.awake;
@@ -48,7 +54,15 @@ export class Heartbeat {
     if (now - from < this.quietMs) return;
     if (this.queue.hasUnacked()) return;
     const at = iso(now);
-    const payload: HeartbeatPayload = { since: iso(from), quiet_minutes: this.quietMs / 60_000 };
+    const a2a_tasks = this.gather("a2a_tasks", () => this.inbox.heartbeatTasks(now));
+    const failures = this.gather("failures", () => this.record.heartbeatFailures(iso(this.queue.lastHeartbeatAt() ?? now - this.quietMs)));
+    const payload: HeartbeatPayload = {
+      since: iso(from),
+      quiet_minutes: this.quietMs / 60_000,
+      ...(a2a_tasks === undefined && failures === undefined ? {} : {
+        pending: { ...(a2a_tasks === undefined ? {} : { a2a_tasks }), ...(failures === undefined ? {} : { failures }) },
+      }),
+    };
     try {
       this.queue.accept(
         { source: "heartbeat", id: `heartbeat@${at}`, occurred_at: at, summary: `no turn for ${quietText(this.quietMs)}`, payload },
@@ -57,6 +71,15 @@ export class Heartbeat {
     } catch (error) {
       // The next tick tries again.
       this.log(`heartbeat: not queued: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private gather<K extends keyof HeartbeatPending>(kind: K, read: () => HeartbeatPending[K]): HeartbeatPending[K] | undefined {
+    try {
+      return read();
+    } catch (error) {
+      this.log(`heartbeat: ${kind} not collected: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
     }
   }
 

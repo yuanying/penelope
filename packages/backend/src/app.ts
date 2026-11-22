@@ -148,7 +148,7 @@ export async function startBackend(
   const stopScheduler = scheduler.start();
   const stopRecord = record.start();
   const stopHeartbeat =
-    config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, log }).start();
+    config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, inbox, record, log }).start();
   const stopNotifier = notifier?.start() ?? (() => {});
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");

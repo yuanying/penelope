@@ -3,6 +3,7 @@
 // Types, and what both the runner and the backend check: the shape of a
 // sub-agent's name, the limits of a reply's images and of the activity record.
 export * from "./agents.ts";
+export * from "./heartbeat.ts";
 export * from "./images.ts";
 export * from "./record.ts";
 export * from "./settings.ts";

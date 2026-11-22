@@ -2,6 +2,7 @@
 // inside `<events>` and `</events>` (docs/events.md, "ターンに入る形").
 
 import type { Delivery, Source } from "./events.ts";
+import type { HeartbeatPending } from "./heartbeat.ts";
 import type { AgentId, Appended, DeliveredAttachment } from "./sandbox.ts";
 
 type TurnLineBase = {
@@ -25,15 +26,17 @@ type TurnEventBase = TurnLineBase & {
 
 /**
  * One event. An inline event carries its content as `text`; any other
- * carries where its content was appended under /sources.
+ * carries where its content was appended under /sources. Only a heartbeat
+ * can also carry pending work.
  */
 export type TurnEvent =
   | (TurnEventBase & {
       /** The payload's `text`, or the payload as JSON when it has none. */
       text: string;
       appended?: never;
+      pending?: never;
     })
-  | (TurnEventBase & { appended: Appended; text?: never });
+  | (TurnEventBase & { appended: Appended; text?: never; pending?: HeartbeatPending });
 
 /** The batched events of one source and stream, handed over together, as one line. */
 export type TurnBatch = TurnLineBase & {

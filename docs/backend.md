@@ -187,7 +187,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 ## heartbeat
 
-[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) の、backend が何もない時間に入れる出来事の細部を決める。形は [events.md](events.md) の「heartbeat の出来事」。
+[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) と [ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md) の、backend が何もない時間に入れる出来事の細部を決める。形は [events.md](events.md) の「heartbeat の出来事」。
 
 - `PENELOPE_HEARTBEAT_MINUTES`（テストでは `PENELOPE_HEARTBEAT_SECONDS`）があるときだけ動く。既定は無し（切ってある）。
 - backend は 15 秒ごとに確かめ、次のすべてが揃えば heartbeat の出来事を 1 件入れる。遅れは最大で 15 秒である。N が 1 分より短いとき（テストだけ）は 1 秒ごとに確かめる。
@@ -203,6 +203,13 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - heartbeat のターンが終わると、その `turn_end` からまた数える。何もない時間が続けば、N 分ごとに入る。
 - 起きている時間の外で N 分を過ぎたときは、次に起きている時間が始まった最初の確かめで入る。夜の切り替えのターンの終わりから数えるので、N が夜の切り替えから朝までより短ければ、朝いちばんに入る。
 - `/sources` に書けずに入れられなかったときは、次の 15 秒で入れ直す。
+
+### 残っている仕事
+
+- 列に入れるときに、期限内の A2A の `working`・`input-required` の Task を採る。期限と返事の宛先は送り手の最後のメッセージを基準にし、Task の状態はこの読み取りでは変えない。
+- 失敗は、前の heartbeat を列に入れた時刻より後（同時刻は含めない）に backend が知ったものを活動の記録から採る。前の heartbeat が無ければ、入れる時刻から N 分さかのぼった時刻を基準にする。受け渡しや ack の時刻、オーナーが記録を見た時刻は使わない。
+- 対象は `failed` の通常のターン（本体・サブエージェント）と、記録上失敗した裏の仕事（非ゼロ終了、タイムアウト、外部からのシグナル）。中断、夜の切り替えとその段のターン、逃した夜は含めない。
+- 種類ごとに最大 5 件を `pending` に入れ、残りは件数だけを添える。取得できない種類はログに残して省き、heartbeat の配送は続ける。配送し直すときは列に入れた時点の内容を再び渡す。
 
 ## 予約
 
