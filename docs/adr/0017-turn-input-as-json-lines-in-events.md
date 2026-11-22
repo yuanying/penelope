@@ -25,6 +25,8 @@ natsumi は、ターンの入力を `<events>` の中に 1 行 1 件の JSON を
 
 本 ADR は、ADR-0013 の Decision 項 2（ターンには要約と場所だけを渡す）の渡し方を具体にする。何を渡すか（inline の出来事は中身、ほかは要約と足された場所）は変えない。適用範囲は、エージェントの日中のセッションのターンの入力である。夜の振り返りと整理係の入力は出来事から作らないので、対象ではない。
 
+[ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) は、heartbeat の JSON の行にだけ残っている仕事を載せる。1 行 1 件の形式と型の契約は変えない。
+
 ### ターンの入力は、1 行 1 件の JSON を `<events>` で囲む
 
 - ターンの入力は、`<events>` と `</events>` の間に、1 行に 1 つの JSON を置いたものとする。
@@ -72,6 +74,7 @@ natsumi は、ターンの入力を `<events>` の中に 1 行 1 件の JSON を
 
 ## Related ADRs
 
+- Related: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)（heartbeat の行に載せる情報の例外）
 - Related: ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
 - Related: ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない

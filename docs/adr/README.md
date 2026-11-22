@@ -16,7 +16,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0010 | [人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる](0010-github-oauth-for-people-tokenreview-for-a2a.md) | Accepted（一部を ADR-0018 で置き換え） |
 | 0011 | [sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する](0011-a-full-dev-image-and-a-generic-user-home.md) | Accepted |
 | 0012 | [なつみベースのペネロペからは、並べて立ち上げてから切り替え、戻せる形を保つ](0012-move-penelope-side-by-side-and-keep-a-way-back.md) | Accepted |
-| 0013 | [出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md) | Accepted |
+| 0013 | [出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え） |
 | 0014 | [sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける](0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md) | Accepted |
 | 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 で置き換え） |
 | 0016 | [最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる](0016-show-the-avatar-and-expression-from-the-first-web-ui.md) | Accepted |
@@ -25,7 +25,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0019 | [ssh は別のコンテナの ssh-agent の socket で行い、鍵は sandbox に見せない](0019-ssh-through-an-agent-socket-keys-kept-out-of-the-sandbox.md) | Superseded by ADR-0021 |
 | 0020 | [コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す](0020-connectors-with-a-usage-document-listed-in-the-prompt.md) | Accepted（一部を ADR-0035 で置き換え） |
 | 0021 | [自分で作った VM への ssh の鍵は、エージェントが自分で HOME に作る](0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md) | Accepted |
-| 0022 | [サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする](0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) | Accepted |
+| 0022 | [サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする](0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え） |
 | 0023 | [receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける](0023-receivers-plugins-in-the-repository-and-alertmanager-first.md) | Accepted |
 | 0024 | [GitHub の webhook は状態を持たずに受け、レビューの依頼と取り消しの 2 つだけを出来事にする](0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md) | Accepted |
 | 0025 | [Sentinel のホストの登録に、左端の 1 ラベルだけのワイルドカードを書ける](0025-wildcard-host-registrations-for-one-left-most-label.md) | Accepted（一部を [ADR-0054](0054-share-surrogates-only-for-the-same-key-source.md) で置き換え） |
@@ -34,7 +34,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0028 | [Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す](0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) | Accepted |
 | 0029 | [Slack の出来事はターンに inline で載せ、前のターンからの変化をチャンネルとスレッドの形で描く](0029-slack-events-inline-drawn-as-channels-and-threads.md) | Accepted |
 | 0030 | [裏の仕事は runner が道具で起こし、終わったら出力の末尾を持つ出来事を本体に入れる](0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md) | Accepted |
-| 0031 | [起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) | Accepted |
+| 0031 | [起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え） |
 | 0032 | [返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md) | Accepted |
 | 0033 | [Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す](0033-slack-posts-through-slackctl-with-the-token-stand-in.md) | Accepted |
 | 0034 | [オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md) | Accepted |
@@ -56,3 +56,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0052 | [夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md) | Accepted |
 | 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |
 | 0054 | [同じ出どころの鍵に限り、複数の登録でサロゲートを共有できる](0054-share-surrogates-only-for-the-same-key-source.md) | Accepted |
+| 0055 | [残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) | Accepted |

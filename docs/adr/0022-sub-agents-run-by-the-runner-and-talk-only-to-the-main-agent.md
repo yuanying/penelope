@@ -1,7 +1,7 @@
 # 0022. サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする
 
 - Date: 2026-11-15
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え）
 
 ## Context
 
@@ -52,6 +52,8 @@
 - 実行が失敗したとき（モデルの API が答えないなど）も、サブエージェントは止まって待っている状態になり、失敗したことを本体に知らせる。続きを送れば、同じ文脈でやり直す。
 
 ### サブエージェントの寿命は、本体が閉じるまで
+
+[ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) で、本体への heartbeat に限り、開いたままのサブエージェントの状態とその状態になった時刻を入力に載せる。寿命や既存の道具は変えない。
 
 - サブエージェントは、本体が閉じるまで残る。夜の切り替えもまたぐ。夜の切り替えのときに走っているサブエージェントは、走らせたまま置く。結果は、翌日の本体に出来事として届く。
 - 翌日の本体は、一覧のツールで前の日のサブエージェントを知る。runner がサブエージェントの一覧をターンの入力やシステムプロンプトに差し込むことはしない。閉じ忘れは、エージェントが夜の振り返りで一覧を見て片付ける。
@@ -164,6 +166,7 @@ ADR-0008 の Decision（プロンプトは事実と環境だけを伝え、や�
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)（Decision 項 4「サブエージェントの寿命は、本体が閉じるまで」の、ターン入力には一覧を差し込まない点）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす（サブエージェントも同じ sandbox の中で runner が回す）
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（列は本体の 1 本のまま）
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する

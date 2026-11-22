@@ -1,7 +1,7 @@
 # 0013. 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え）
 
 ## Context
 
@@ -37,6 +37,8 @@ natsumi では、Slack・外のエージェントの返事・監視の警報を 
 - 出来事についてきたファイル（添付）も、取り込み口が受けて `/sources` に置く。
 
 ### ターンには要約と場所だけを渡す
+
+[ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) で、heartbeat の残っている仕事は、要約と場所に加えて直接載せる。通常の inline の設定は変えない。
 
 - ターンに入るのは、出来事ごとの 1 行の要約と、中身を足した場所（ファイルと行の範囲）だけである。中身は、エージェントが必要なときに sandbox の shell で読む。
 - 中身をそのままターンに載せるのは、inline の受信元の出来事だけである。どの受信元を inline にするかは backend の設定で決める。最初はオーナーのメッセージと制御の出来事だけとする。
@@ -89,6 +91,7 @@ natsumi では、Slack・外のエージェントの返事・監視の警報を 
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)（Decision 項 2「ターンには要約と場所だけを渡す」に、heartbeat の残っている仕事だけの例外を加える）
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（切り替えの出来事と担当）
 - Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（夜の段構成と段が失敗したときの扱い）

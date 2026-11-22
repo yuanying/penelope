@@ -1,7 +1,7 @@
 # 0031. 起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる
 
 - Date: 2026-11-16
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え）
 
 ## Context
 
@@ -29,6 +29,8 @@
 - 決めた時間は、配置の backend の設定で決める。設定が無ければ heartbeat は無い。
 
 ### 2. 何をするかはエージェントに任せる
+
+[ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) で、無活動に加えて、残っている仕事があれば、その事実を載せる。heartbeat の発生条件や、畳む前の頼みの扱いは変えない。
 
 - heartbeat の出来事が持つのは、何もない時間が続いたという事実だけである。何をすべきかは書かない。
 - システムプロンプトには、heartbeat の出来事が何かを、事実として 1 文で書く（ADR-0008）。何もしないで終わってもよいかどうかなどの指図は書かない。
@@ -63,6 +65,7 @@
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)（Decision 項 2「何をするかはエージェントに任せる」の、無活動の事実だけを持つ点）
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（backend の中の受信元）
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（夜の時刻は backend が持つ）
 - Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（段は増えるが、夜の時刻と切り替えの出来事は変えない）
