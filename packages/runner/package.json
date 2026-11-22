@@ -9,7 +9,7 @@
     "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "1.5.2",
+    "@earendil-works/pi-ai": "1.6.0",
     "@earendil-works/pi-coding-agent": "1.5.2",
     "@penelope/contract": "0.0.0",
     "@penelope/slack": "0.0.0",
