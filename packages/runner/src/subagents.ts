@@ -16,7 +16,7 @@ import { mkdir, readdir, readFile, rename, stat, writeFile } from "node:fs/promi
 import { join, resolve } from "node:path";
 
 import { type AgentSession, parseFrontmatter, SessionManager } from "@earendil-works/pi-coding-agent";
-import { type Activity, isSubAgentName, type SubAgentNotice, type SubAgentStopReason, type TurnEndRequest } from "@penelope/contract";
+import { type Activity, type HeartbeatSubAgent, isSubAgentName, type SubAgentNotice, type SubAgentStopReason, type TurnEndRequest } from "@penelope/contract";
 
 import { TurnRecorder } from "./activities.ts";
 import type { Backend } from "./backend.ts";
@@ -43,6 +43,8 @@ export interface SubAgentRecord {
   /** Its session file. */
   session: string;
   state: SubAgentState;
+  /** When the current open state began; absent on older records. */
+  since?: string;
   /** How many times it has stopped: the number of its last notice. */
   stops: number;
   /** The turn of the run it is in, while it is running. */
@@ -176,6 +178,7 @@ export class SubAgents {
         if (record.state === "running") {
           this.notice(record, "interrupted", "");
           record.state = "waiting";
+          record.since = new Date().toISOString();
           delete record.turn;
           await this.save(live);
         }
@@ -237,6 +240,7 @@ export class SubAgents {
         ...(request.role !== undefined ? { role: request.role } : {}),
         session: await newSessionFileIn(cwd, dir),
         state: "waiting",
+        since: new Date().toISOString(),
         stops: 0,
         pending: [],
       };
@@ -273,6 +277,15 @@ export class SubAgents {
       .map(({ record }) => ({ name: record.name, state: record.state, purpose: record.purpose, cwd: record.cwd }));
   }
 
+  /** The open sub-agents whose current state has a known start time. */
+  heartbeatState(): HeartbeatSubAgent[] {
+    const items: HeartbeatSubAgent[] = [];
+    for (const { record: { name, purpose, state, since } } of this.agents.values()) {
+      if ((state === "running" || state === "waiting") && since !== undefined) items.push({ name, purpose, state, since });
+    }
+    return items;
+  }
+
   /** Closes a sub-agent, cancelling the run it is in. */
   async close(name: string): Promise<string> {
     const live = this.find(name);
@@ -283,6 +296,7 @@ export class SubAgents {
       await live.run;
     }
     live.record.state = "closed";
+    delete live.record.since;
     delete live.record.turn;
     await this.save(live);
     live.session?.dispose();
@@ -377,6 +391,7 @@ export class SubAgents {
     const { record } = live;
     const turnId = randomUUID();
     record.state = "running";
+    record.since = new Date().toISOString();
     record.turn = turnId;
     await this.save(live);
     let sending = Promise.resolve();
@@ -420,6 +435,7 @@ export class SubAgents {
     if (!live.closing) {
       this.notice(record, reason, text);
       record.state = "waiting";
+      record.since = new Date().toISOString();
       delete record.turn;
       await this.save(live);
     }

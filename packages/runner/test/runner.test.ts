@@ -3,14 +3,14 @@ import { chmod, mkdir, readFile, readdir, stat, symlink, unlink, writeFile } fro
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { DeliveredEvent, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
+import type { DeliveredEvent, HeartbeatPending, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
 
 import type { Config } from "../src/config.ts";
 import { newSessionFile, writeState } from "../src/pi.ts";
 import { FOLDING, foldAskInput } from "../src/prompts.ts";
 import { until } from "./fake-backend.ts";
 import { MODEL, OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
-import { acked, activities, closers, ui, world } from "./world.ts";
+import { acked, activities, closers, heartbeat, ui, world } from "./world.ts";
 
 function slack(seq: number, delivery: "now" | "batch"): DeliveredEvent {
   return {
@@ -1226,19 +1226,22 @@ test("a turn with her own text is not asked", async () => {
   assert.equal(asks(calls).length, 0);
 });
 
-function heartbeat(seq: number): DeliveredEvent {
-  return {
-    seq,
-    source: "heartbeat",
-    id: `heartbeat@2026-11-14T10:00:00.000Z`,
-    occurred_at: "2026-11-14T10:00:00.000Z",
-    received_at: "2026-11-14T10:00:00.000Z",
-    summary: "no turn for 60 minutes",
-    delivery: "now",
-    inline: false,
-    appended: { path: "/sources/heartbeat/2026-11-14.jsonl", lines: [seq, seq] },
-  };
-}
+test("a heartbeat adds a live job using the name returned by job_start", async () => {
+  const { fake, start, calls } = await world();
+  await start((call) => call.lastRole === "user" && events(call.lastText).some((line) => line.seq === 1)
+    ? { calls: [{ tool: "job_start", args: { command: "exec tail -f /dev/null\n# not in the heartbeat" } }] }
+    : {});
+  fake.push(ui(1, "start a job"));
+  await until(() => acked(fake).includes(1));
+  const result = activities(fake).find((a) => a.kind === "tool_result");
+  assert.ok(result && !result.is_error);
+  const job = JSON.parse(result.output) as { id: string; started_at: string };
+
+  fake.push(heartbeat(2));
+  await until(() => acked(fake).includes(2));
+  const line = calls.flatMap((call) => events(call.lastText)).find((line) => line.seq === 2);
+  assert.deepEqual(line?.pending, { jobs: { items: [{ job: job.id, started_at: job.started_at, command: "exec tail -f /dev/null" }], omitted: 0 } } satisfies HeartbeatPending);
+});
 
 /** Stops at once: no tool, no word. */
 const idle: Script = (call) => (call.lastRole === "user" && isAsk(call.lastText) ? { text: "nothing" } : {});

@@ -31,6 +31,7 @@ import type { Config } from "./config.ts";
 import { type Connector, readConnectors } from "./connectors.ts";
 import { MemoryExtensionTrials } from "./extensions.ts";
 import { FOLD_ASK, foldExtension, TURN_END } from "./fold.ts";
+import { withHeartbeatPending } from "./heartbeat-pending.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
 import { memoryMap } from "./memory-map.ts";
@@ -310,7 +311,8 @@ export class Runner {
     const images = await inlineImages(events, this.config.imageMaxBytes);
     const slack = this.config.slack;
     const drawing = slack.sources.length > 0 ? { sources: new Set(slack.sources), sourcesDir: this.config.sourcesDir, maxChars: slack.maxChars, log: this.log } : undefined;
-    return [formatEvents(events, drawing), images.length > 0 ? images : undefined];
+    const enriched = withHeartbeatPending(events, this.jobs, this.subAgents, this.log);
+    return [formatEvents(enriched, drawing), images.length > 0 ? images : undefined];
   }
 
   // ── Making turns ──

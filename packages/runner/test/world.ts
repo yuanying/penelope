@@ -113,6 +113,20 @@ export function ui(seq: number, text: string, delivery: "now" | "batch" = "now")
   };
 }
 
+export function heartbeat(seq: number): Extract<DeliveredEvent, { inline: false }> {
+  return {
+    seq,
+    source: "heartbeat",
+    id: `heartbeat@2026-11-14T10:00:00.000Z`,
+    occurred_at: "2026-11-14T10:00:00.000Z",
+    received_at: "2026-11-14T10:00:00.000Z",
+    summary: "no turn for 60 minutes",
+    delivery: "now",
+    inline: false,
+    appended: { path: "/sources/heartbeat/2026-11-14.jsonl", lines: [seq, seq] },
+  };
+}
+
 /** The activities, with the agent each was sent for. */
 export function activities(fake: FakeBackend, agent = "main"): Activity[] {
   return (fake.sent("POST", "/v1/activity") as ActivityRequest[])

@@ -168,8 +168,10 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | --- | --- |
 | `a2a_tasks` | `sender`、`state`（`working`・`input-required`）、`task_id`、`since`（送り手の最後のメッセージの時刻）、その出来事の `seq`（`reply_to_agent` の `in_reply_to` に使える）と `summary`（省略記号を含めて最大 200 字）。`since` が古い順、同時なら `seq` 順 |
 | `failures` | `kind`、`at`（backend が失敗を知った時刻）。`kind: "turn"` は `reason`（あれば記録の 1 行を最大 200 字）、`kind: "job"` は `command`（活動の記録にあるコマンドの頭の 1 行目）と `exit_code`（あれば）。`at` が新しい順 |
-| `jobs` | `job`、`started_at`、`command`（コマンドの頭）。runner が足すための欄 |
-| `subagents` | `name`、`purpose`、`state`（`running`・`waiting`）、`since`（その状態になった時刻）。runner が足すための欄 |
+| `jobs` | `job`（道具で使う名前）、`started_at`、`command`（先頭行の先頭 200 字まで）。`started_at` が古い順、同時なら `job` 順 |
+| `subagents` | `name`、`purpose`、`state`（`running`・`waiting`）、`since`（その状態になった時刻）。`since` が古い順、同時なら `name` 順 |
+
+`a2a_tasks` と `failures` は backend が heartbeat を列に入れるときに採る。`jobs` と `subagents` は runner が本体への行を組み立てるときに採り、backend から来た分に足す。採れない種類は省く。状態になった時刻を持たない旧いサブエージェントの記録は、次に状態が変わるまで一覧に載せない。
 
 ### `batch` のまとめ
 

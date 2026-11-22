@@ -7,11 +7,11 @@ import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { SelfEventRequest, SubAgentStatus, TurnEndRequest } from "@penelope/contract";
+import type { SelfEventRequest, SubAgentStatus, TurnEndRequest, TurnEvent } from "@penelope/contract";
 
 import { type FakeBackend, until } from "./fake-backend.ts";
 import { OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
-import { acked, activities, ui, world } from "./world.ts";
+import { acked, activities, heartbeat, ui, world } from "./world.ts";
 
 const SUB_AGENT_TOOLS = ["subagent_close", "subagent_list", "subagent_send", "subagent_start"];
 const MAIN_ONLY_TOOLS = [...SUB_AGENT_TOOLS, "reply", "reply_to_agent", "schedule_add", "schedule_list", "schedule_remove", "self_event", "job_start", "job_list", "job_stop"];
@@ -329,6 +329,50 @@ test("after a restart, a sub-agent that was running is waiting, interrupted, and
   assert.equal(notices(fake)[1]!.id, "cut/2");
   const last = calls.filter((call) => !isMain(call)).at(-1)!;
   assert.deepEqual(last.userTexts, ["the first request", "go on"]);
+});
+
+test("a legacy waiting sub-agent appears in heartbeats only after a known state change", async (t) => {
+  const { fake, start, calls, config } = await world({ turnFold: false });
+  const stop = await start(script(() => ({ text: "done" })));
+  await ask(fake, "subagent_start", { name: "legacy", purpose: "Check alerts", prompt: "Go" });
+  await until(() => notices(fake).length === 1);
+  await stop();
+  const path = join(config.subAgentDir, "legacy", "agent.json");
+  const oldRecord = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+  delete oldRecord.since;
+  await writeFile(path, JSON.stringify(oldRecord));
+
+  const { held, release } = gate();
+  t.after(release);
+  await start(script(async () => {
+    await held;
+    return { text: "checked" };
+  }));
+  const pending = async () => {
+    const n = ++seq + 1000;
+    fake.push(heartbeat(n));
+    await until(() => acked(fake).includes(n));
+    const line = calls.filter((call) => isMain(call) && call.lastText.startsWith("<events>\n"))
+      .flatMap((call) => call.lastText.split("\n").slice(1, -1))
+      .map((line) => JSON.parse(line) as TurnEvent)
+      .find((line) => line.seq === n);
+    assert.ok(line, "heartbeat reached the model");
+    return line.pending;
+  };
+  assert.equal(await pending(), undefined);
+
+  const beforeSend = Date.now();
+  await ask(fake, "subagent_send", { name: "legacy", text: "Check again" });
+  const running = (await pending())?.subagents?.items[0];
+  assert.deepEqual(running, { name: "legacy", purpose: "Check alerts", state: "running", since: running?.since });
+  assert.ok(Date.parse(running.since) >= beforeSend);
+
+  const beforeStop = Date.now();
+  release();
+  await until(() => notices(fake).length === 2);
+  const waiting = (await pending())?.subagents?.items[0];
+  assert.deepEqual(waiting, { ...running, state: "waiting", since: waiting?.since });
+  assert.ok(Date.parse(waiting.since) >= beforeStop);
 });
 
 test("a notice the backend did not take is sent again with the same id, after a restart too", async () => {
