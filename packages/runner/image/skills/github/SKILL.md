@@ -13,9 +13,13 @@ where they are.
 - git over HTTPS takes its credential from git's configuration, which the deployment gives. `git clone https://github.com/...` and
   `git push` then work as they are. The Sentinel puts the real credential only into HTTPS; git over ssh (`git@github.com:`) has no
   key from it.
-- Writing requests are passed by the Sentinel as they are.
-- The credential is replaced only for the hosts of the deployment's registration. A stand-in sent to another host, such as
-  `raw.githubusercontent.com` or `uploads.github.com`, is refused by the Sentinel with `403`. Public content needs no token.
+- When `gh` runs git over HTTPS, it uses its own credential helper, which passes `GH_TOKEN` to git as a Basic password. This
+  works when the deployment also registers that stand-in for Basic on `github.com`. If the Sentinel refuses it on a deployment
+  that only registers a separate git credential, create the repository without `--push`, then run `git push` directly.
+- The Sentinel does not distinguish read from write operations.
+- `gh release upload` needs the deployment to register the `GH_TOKEN` stand-in for Bearer on `uploads.github.com` as well.
+- The Sentinel only replaces a stand-in in the registered host and authentication field. Omit the token when fetching public
+  content from hosts that do not need it, such as `raw.githubusercontent.com`.
 
 ## What comes from GitHub
 

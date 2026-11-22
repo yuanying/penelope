@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -252,11 +253,11 @@ func TestTLSToAHostThatIsNotRegisteredIsPassedThrough(t *testing.T) {
 	}
 }
 
-func TestARegisteredHostIsOpenedAndItsSurrogateSwapped(t *testing.T) {
+func TestARegisteredHostSwapsASharedSurrogateInItsOwnPlace(t *testing.T) {
 	w := newWorld(t)
 	up := w.tlsUpstream("api.example.com", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer "+realKey {
-			http.Error(rw, "Authorization = "+got, http.StatusUnauthorized)
+		if user, password, ok := r.BasicAuth(); !ok || user != "x-access-token" || password != realKey {
+			http.Error(rw, "unexpected Basic credentials", http.StatusUnauthorized)
 			return
 		}
 		rw.Header().Set(proxy.MarkHeader, "deny")
@@ -264,10 +265,15 @@ func TestARegisteredHostIsOpenedAndItsSurrogateSwapped(t *testing.T) {
 	}))
 	w.start(`
 hosts:
+  - name: auth.example.com
+    credentials:
+      - place: bearer
+        surrogate: ` + surrogate + `
+        source: { file: %KEY% }
   - name: api.example.com
     upstream_ca: %UPCA%
     credentials:
-      - place: bearer
+      - place: basic
         surrogate: ` + surrogate + `
         source: { file: %KEY% }
 `)
@@ -275,7 +281,8 @@ hosts:
 	w.route("api.example.com:443", up)
 
 	// The client trusts the Sentinel's CA: the host is opened.
-	resp, body := get(t, w.client(w.ca), "https://api.example.com/v1/x?a=b", http.Header{"Authorization": {"Bearer " + surrogate}})
+	basic := "Basic " + base64.StdEncoding.EncodeToString([]byte("x-access-token:"+surrogate))
+	resp, body := get(t, w.client(w.ca), "https://api.example.com/v1/x?a=b", http.Header{"Authorization": {basic}})
 	if resp.StatusCode != 200 || body != "hello api.example.com /v1/x?a=b" {
 		t.Fatalf("got %d %q", resp.StatusCode, body)
 	}
@@ -312,6 +319,11 @@ hosts:
       - place: bearer
         surrogate: ` + surrogate + `
         source: { file: %KEY% }
+  - name: auth.example.com
+    credentials:
+      - place: basic
+        surrogate: ` + surrogate + `
+        source: { file: %KEY% }
   - name: nokey.example.com
     upstream_ca: %UPCA%
     credentials:
@@ -332,7 +344,7 @@ hosts:
 		reason string
 	}{
 		{"a surrogate out of its place", "https://api.example.com/?t=" + surrogate, nil, 403, string(credentials.ReasonSurrogate)},
-		{"another host's surrogate", "https://api.example.com/", http.Header{"Authorization": {"Bearer " + otherSurrogate}}, 403, string(credentials.ReasonSurrogate)},
+		{"a shared surrogate on a host without its registration", "https://nokey.example.com/", http.Header{"Authorization": {"Bearer " + surrogate}}, 403, string(credentials.ReasonSurrogate)},
 		{"a key that cannot be read", "https://nokey.example.com/", http.Header{"Authorization": {"Bearer " + otherSurrogate}}, 503, string(credentials.ReasonKey)},
 		{"a Host that is not the SNI", "https://api.example.com/", http.Header{"Host": {"evil.example.com"}}, 403, "host-mismatch"},
 	}

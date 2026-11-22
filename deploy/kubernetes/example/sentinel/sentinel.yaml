@@ -2,7 +2,7 @@
 # made up. By default everything passes through and is only recorded; the hosts
 # below are opened, and the surrogate the sandbox sends is replaced by the real key.
 # Each surrogate is also written where the sandbox reads it (sandbox/surrogates.env,
-# sandbox/models.json), and each is different (the Sentinel does not start otherwise).
+# sandbox/models.json). A surrogate may be shared only by registrations with the same source.
 #
 # Where the keys are (all mounted in the Sentinel only; base/statefulset.yaml and
 # patches/statefulset.yaml):

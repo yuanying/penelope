@@ -28,7 +28,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0022 | [サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする](0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) | Accepted |
 | 0023 | [receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける](0023-receivers-plugins-in-the-repository-and-alertmanager-first.md) | Accepted |
 | 0024 | [GitHub の webhook は状態を持たずに受け、レビューの依頼と取り消しの 2 つだけを出来事にする](0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md) | Accepted |
-| 0025 | [Sentinel のホストの登録に、左端の 1 ラベルだけのワイルドカードを書ける](0025-wildcard-host-registrations-for-one-left-most-label.md) | Accepted |
+| 0025 | [Sentinel のホストの登録に、左端の 1 ラベルだけのワイルドカードを書ける](0025-wildcard-host-registrations-for-one-left-most-label.md) | Accepted（一部を [ADR-0054](0054-share-surrogates-only-for-the-same-key-source.md) で置き換え） |
 | 0026 | [なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない](0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md) | Accepted |
 | 0027 | [本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ](0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md) | Accepted |
 | 0028 | [Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す](0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) | Accepted |
@@ -55,3 +55,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0051 | [照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) | Accepted |
 | 0052 | [夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md) | Accepted |
 | 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |
+| 0054 | [同じ出どころの鍵に限り、複数の登録でサロゲートを共有できる](0054-share-surrogates-only-for-the-same-key-source.md) | Accepted |

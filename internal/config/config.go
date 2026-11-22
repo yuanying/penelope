@@ -174,9 +174,9 @@ func Parse(b []byte) (*Config, error) {
 	if len(raw.Allow) > 0 {
 		return nil, errors.New("allow: is for default ask, which this version does not serve; leave it empty")
 	}
-	seen := map[string]bool{}
+	sourceBySurrogate := map[string]string{}
 	for i, rh := range raw.Hosts {
-		h, err := parseHost(rh, seen)
+		h, err := parseHost(rh, sourceBySurrogate)
 		if err != nil {
 			return nil, fmt.Errorf("hosts[%d]: %w", i, err)
 		}
@@ -216,7 +216,7 @@ func (c *Config) setServing(raw *rawConfig) error {
 	return nil
 }
 
-func parseHost(rh rawHost, seen map[string]bool) (*Host, error) {
+func parseHost(rh rawHost, sourceBySurrogate map[string]string) (*Host, error) {
 	if rh.Connector != "" {
 		return nil, fmt.Errorf("connector %q is not known: this version of the Sentinel has no connectors", rh.Connector)
 	}
@@ -255,10 +255,10 @@ func parseHost(rh rawHost, seen map[string]bool) (*Host, error) {
 		if err != nil {
 			return nil, fmt.Errorf("credentials[%d]: %w", j, err)
 		}
-		if seen[cr.Surrogate] {
-			return nil, fmt.Errorf("credentials[%d]: the surrogate is registered already", j)
+		if file, ok := sourceBySurrogate[cr.Surrogate]; ok && file != cr.File {
+			return nil, fmt.Errorf("credentials[%d]: the surrogate is registered with a different source", j)
 		}
-		seen[cr.Surrogate] = true
+		sourceBySurrogate[cr.Surrogate] = cr.File
 		h.Credentials = append(h.Credentials, cr)
 	}
 	return h, nil

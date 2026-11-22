@@ -186,9 +186,7 @@ func TestAConfigurationThatCannotBeServedIsRefused(t *testing.T) {
 		"a short surrogate":        cred("place: bearer", "short"),
 		"a surrogate with a space": cred("place: bearer", "'surrogate example 0001'"),
 		"no source":                "hosts:\n  - name: api.example.com\n    credentials:\n      - place: bearer\n        surrogate: surrogate-example-0001\n",
-		"the same surrogate twice": "hosts:\n  - name: a.example.com\n" + creds("surrogate-example-0001") +
-			"  - name: b.example.com\n" + creds("surrogate-example-0001"),
-		"no proxy listener": "",
+		"no proxy listener":        "",
 	}
 	for name, rest := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -240,15 +238,23 @@ func TestTheSentinelsOwnPartIsRequired(t *testing.T) {
 	}
 }
 
-func TestErrorsNeverHoldASurrogate(t *testing.T) {
-	_, err := parse(t, "hosts:\n  - name: a.example.com\n"+creds("surrogate-example-0001")+
-		"  - name: b.example.com\n"+creds("surrogate-example-0001"))
+func TestHostsMayShareASurrogateFromTheSameSource(t *testing.T) {
+	mustParse(t, "hosts:\n  - name: a.example.com\n"+creds("/run/k")+
+		"  - name: b.example.com\n"+creds("/run/k"))
+}
+
+func TestASurrogateWithDifferentSourcesIsRefusedWithoutQuotingIt(t *testing.T) {
+	_, err := parse(t, "hosts:\n  - name: a.example.com\n"+creds("/run/k")+
+		"  - name: b.example.com\n"+creds("/run/other"))
 	if err == nil {
-		t.Fatal("Parse returned no error")
+		t.Fatal("Parse accepted a surrogate with different sources")
 	}
 	if strings.Contains(err.Error(), "surrogate-example-0001") {
 		t.Errorf("the error holds the surrogate: %v", err)
 	}
+}
+
+func TestErrorsNeverHoldASurrogate(t *testing.T) {
 	for _, rest := range []string{
 		"hosts:\n  - name: api.example.com\n    port: surrogate-example-0001\n",
 		"hosts:\n  - name: api.example.com\n    credentials: surrogate-example-0001\n",
@@ -297,8 +303,8 @@ func cred(place, surrogate string) string {
 		"\n        surrogate: " + surrogate + "\n        source: { file: /run/k }\n"
 }
 
-func creds(surrogate string) string {
-	return "    credentials:\n      - place: bearer\n        surrogate: " + surrogate + "\n        source: { file: /run/k }\n"
+func creds(file string) string {
+	return "    credentials:\n      - place: bearer\n        surrogate: surrogate-example-0001\n        source: { file: " + file + " }\n"
 }
 
 // A wildcard registration answers for one label in place of its '*', as a
