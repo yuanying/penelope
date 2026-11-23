@@ -179,6 +179,8 @@ export interface MemoryRepairRequest {
   agent: AgentId;
   paths: string[];
   moves: MemoryMove[];
+  /** The curator turn that made these moves and its nightly control event. */
+  night?: { seq: number; turn_id: string };
 }
 
 /**
@@ -240,7 +242,10 @@ export type NightStages = {
  * the event came again after its switch was made. A runner that sends
  * neither has switched to a new session, the steps unknown.
  */
-export type SessionRotatedRequest = FromAgent & { seq?: number; stages?: NightStages };
+export type SessionRotatedRequest = FromAgent & { seq?: number; stages?: NightStages; memory_reads?: MemoryReadsSnapshot };
+
+/** One complete daytime read snapshot at rotation, with UTC dates and no memory text. */
+export type MemoryReadsSnapshot = { day: string; files: Array<{ path: string; dates: string[] }> };
 
 /** Where a task an agent sent over A2A is (docs/a2a.md). `working` and `input-required` are open. */
 export type A2ATaskState = "working" | "input-required" | "completed" | "failed" | "rejected";

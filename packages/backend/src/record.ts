@@ -746,7 +746,7 @@ function normal(at: string): string {
   return Number.isNaN(ms) ? at : iso(ms);
 }
 
-function isTimeZone(timeZone: string): boolean {
+export function isTimeZone(timeZone: string): boolean {
   try {
     new Intl.DateTimeFormat("en-US", { timeZone });
     return true;
@@ -756,7 +756,7 @@ function isTimeZone(timeZone: string): boolean {
 }
 
 /** `YYYY-MM-DD` of the instant in the time zone. */
-function dayOf(ms: number, timeZone: string): string {
+export function dayOf(ms: number, timeZone: string): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
 }
 

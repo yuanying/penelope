@@ -251,7 +251,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 ## ターンの終わり
 
-- body は `{agent, turn_id, result?, reason?, seqs?, night?}`（型は `TurnEndRequest`）。`turn_id` のほかは活動の記録のための欄である（下の「ターンの結果ときっかけ」）。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
+- body は `{agent, turn_id, result?, reason?, seqs?, night?}`（型は `TurnEndRequest`）。`turn_id` は前後に空白がない 1 行の文字列。`night` はコミットの印にもなり、それ以外の追加欄は活動の記録のためである（下の「ターンの結果ときっかけ」）。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
 - backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。本体の夜のターン（`night` あり）では backend がコミットの変更量も数える。数を取れなくても応答は変えず、runner に数は返さない。
 - UI の流れでは、エージェントを `waiting` にする。
 - runner は、ターンの `turn_end` の途中経過を送り終えてから、この口を呼ぶ。`turn_end` を送れなかったとき（途中経過は送り直さない）は、流れでは `waiting` になるが、記録から引く `state`（`GET /api/agents`）は次のターンの `turn_start` か `turn_end` まで `thinking` のままである。
@@ -260,8 +260,9 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 ### 夜の移動に伴う記憶の参照の修正をコミット
 
-- `POST /v1/memory/repairs` の body は `{agent, paths, moves}`（型は `MemoryRepairRequest`）。`agent` は `main` のみ。`paths` は runner が参照を直した Markdown ファイルのパス、`moves` は `{from, to}` の一覧で、連続した移動の `to` は最後の行き先を指す。どちらも空にはしない。
-- パスは `/memory` からの相対パスで、大文字・小文字を問わず `paths` は `.md` で終わる。絶対パス、空の成分、`.`、`..`、`.git`、NUL は受けない。形が違えば `400`。
+- `POST /v1/memory/repairs` の body は `{agent, paths, moves, night?}`（型は `MemoryRepairRequest`）。`agent` は `main` のみ。`paths` は runner が参照を直した Markdown ファイルのパス、`moves` は `{from, to}` の一覧で、連続した移動の `to` は最後の行き先を指す。どちらも空にはしない。
+- パスは `/memory` からの相対パスで、大文字・小文字を問わず `paths` は `.md` で終わる。絶対パス、空の成分、`.`、`..`、`.git`（大文字小文字の違いを含む）、バックスラッシュ、NUL は受けない。形が違えば `400`。
+- `night: {seq, turn_id}` には、その夜の制御の出来事の正の `seq` と、移動を行った整理係のターンの ID を渡す。整理係の `POST /v1/turns/end` の値と同じものを使う。週の棚卸しでは移動した方のターンを指定する。旧 runner が `night` を省くと今までどおり修正をコミットするが、UI ではその夜に結び付けない。
 - runner は整理係のターンの終わりに `204` を受け取ってから参照を書き換え、変更したパスだけをこの口で別コミットにする。backend はコミットの完了後に `204`（コミット不要の場合も同じ）、失敗時は `500` を返す。この口はターンの終了や活動の記録を更新しない。
 
 ## ターンの結果ときっかけ
@@ -306,7 +307,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 ## セッションの切り替えの知らせ
 
-- 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
+- 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?, memory_reads?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
 - 新しいセッションが動き出したら、そのあと runner は、制御の出来事を ack する。
 - `seq` はその夜の制御の出来事の `seq`、`stages` は段ごとの結果 `{reflection, verifier, curator, session}` で、1 つの段は `{result, reason?, turn_id?}`（型は `NightTurnReport`。`session` は `turn_id` の無い `NightStage`）である（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。
   - `result` は `done`（済んだ）・`failed`（失敗した）・`skipped`（行われなかった）。`reason` は `failed` のときの理由の 1 行。
@@ -340,6 +341,13 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 - 毎晩、振り返り前に日中の本体セッションの未折り畳みの記録を調べる。成功した `read` の対象、`grep`・`find` の出力、および `bash` のコマンドに現れる実在の記憶ファイル（絶対パス、`~/` または作業ディレクトリからの相対パス）を、1 回の呼び出しにつきパスごとに 1 回数える。`rg`・`grep`・`fd`・`find` から始まるシェルコマンドでは、出力から特定できる絶対パスも拾う。シェルの構文や展開は解釈しない。リダイレクトによる書き込みなども数えうるため、日中に触れられた目安であり、厳密な読み取り回数ではない。振り返りや夜の係の参照は含めない。
 - 新しいセッションへの切り替え時に、セッション置き場の `current.json` に次のセッション・夜の `seq`・差分の基準とともに、参照された相対パスと参照日（UTC）を保存する。当日を含む直近 30 日分の参照日を残し、期間内に参照が無ければ最後の日だけを残す。検索語・コマンド・本文は集計には保存しない。整理係の見取り図には最終参照日と直近 30 日の参照回数を添える。
 - 照合係・整理係は Pi の標準ツール一式や拡張、MCP、skill を読み込まず、専用のファイル操作だけを使う。記憶の読み書き（`.git` は対象外、`extensions/` は読み取りのみ）ができ、整理係はファイルの移動・削除もできる。日中のセッションとサブエージェントの記録、`/sources` は照合係だけが読み取る。ファイル名の `find`、文字列の `grep` も同じ範囲を検索し、セッションの置き場では渡された記録だけを対象にする。`read` は行と列で続きが読めるため、長い JSONL の行も末尾まで読める。JSONL に埋め込まれた画像データは `read` と `grep` の表示から省くが、画像と同じ行にあるテキストは保持する。この制限はツールの境界であり、同じ UID の別プロセスからの並行変更や、後から記憶を読む日中のセッションの動作までは隔離しない。
+
+### 記憶の参照のスナップショット
+
+- 日中の本体セッションから収集した `memoryReads` を、手順を実行した夜の `POST /v1/sessions/rotated` にオプションの `memory_reads` として付ける（型は `MemoryReadsSnapshot`）。新しいセッションが開けなかった夜でも、収集できたなら段の報告と一緒に送ってよい。段を回さずに `{agent, seq}` だけ再送するときと、収集できなかったときは省く。
+- 形は `{day: "2026-11-23", files: [{path: "guide.md", dates: ["2026-11-22", "2026-11-22"]}]}`。 `day` は収集時に使った UTC の日付、 `files` はスナップショット全体で、参照がなければ空配列。 `path` は記憶からの相対パス（参照の修正をコミットする口と同じパスの決まり）で重複させない。 `dates` は参照 1 回につき UTC 日付を 1 つとし、同じ日の繰り返しを残す。当日を含む 30 日分を残し、その期間に参照がないパスは最後の日だけを残す。本文・検索語・コマンド・ツール出力は送らない。
+- backend は `seq` と `stages` がある場合だけ受け付ける。 `day` と `dates` は実在する日付の `YYYY-MM-DD`、 `dates` は空でなく `day` より後の値を含めない。形が違えば `400` で報告全体を受け取らない。通常の sandbox API の body 上限に従う。
+- 正しい報告は従来どおり `204`。backend が保持するのは最大の `seq` のスナップショット 1 組だけ。同じ `seq` の再送も加算せず置き換える。 `memory_reads` を省いた報告や後から届いた古い `seq` の報告は既存のスナップショットを消さない。未送信の配置は UI では件数不明になる。記録の保存に失敗しても夜の切り替えは断らない。
 
 ## モデルの設定
 

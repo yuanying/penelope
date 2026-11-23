@@ -6,7 +6,7 @@ import { existsSync } from "node:fs";
 import path from "node:path";
 import { promisify } from "node:util";
 
-import type { RecordMemoryChange } from "@penelope/contract";
+import type { NightTurnStage, RecordMemoryChange } from "@penelope/contract";
 
 const run = promisify(execFile);
 
@@ -26,13 +26,13 @@ export class Memory {
   }
 
   /** Commits everything that changed in the work tree. `clean` when nothing did. */
-  commit({ agent, turnId, nightWorker, onChange }: {
-    agent: string; turnId: string; nightWorker?: "verifier" | "curator";
+  commit({ agent, turnId, night, onChange }: {
+    agent: string; turnId: string; night?: { stage: NightTurnStage; seq: number };
     onChange?: (change: RecordMemoryChange | undefined) => void;
   }): Promise<"committed" | "clean"> {
     return this.queue(async () => {
       const message = [`Turn ${turnId}`, `Agent: ${agent}`];
-      if (nightWorker) message.push(`Night-stage: ${nightWorker}`);
+      if (night) message.push(`Night-stage: ${night.stage}\nNight: ${night.seq}`);
       const result = await this.commitNow(message);
       if (onChange !== undefined) {
         // Measure before another queued commit can move HEAD. A failed

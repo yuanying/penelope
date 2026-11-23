@@ -64,9 +64,9 @@ export async function seedAvatar(
   log(`avatar: copied ${source} to ${dest}`);
   try {
     await memory.commitPaths([AVATAR_DIR], [`Avatar ${settings.chosen}`, `Copied from ${source}`]);
-  } catch (error) {
+  } catch {
     // Committed with the end of the next turn instead.
-    log(`avatar: ${dest} not committed: ${error instanceof Error ? error.message : String(error)}`);
+    log("avatar: the copy could not be committed");
   }
   return dest;
 }

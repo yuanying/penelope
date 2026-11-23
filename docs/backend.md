@@ -40,6 +40,9 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
+| `PENELOPE_MEMORY_OWNER_NAME`・`PENELOPE_MEMORY_OWNER_EMAIL` | なし | 記憶の画面で手動コミットをオーナー名義と識別するための Git 作者の名前・メール。設定した方が完全一致すること（両方なら両方）。ログインの認証とは無関係 |
+| `PENELOPE_PROMPT_LAYER_TARGET_BYTES` | 16384 | 記憶の画面で毎回読む層の合計に示す目安。runner の同名設定を上書きする配置は backend にも同じ値を渡す |
+| `PENELOPE_PROMPT_FILE_MAX_BYTES` | 65536 | 記憶の画面に示す 1 ファイルの上限。runner の同名設定を上書きする配置は backend にも同じ値を渡す |
 | `PENELOPE_AVATAR` | なし | 選んだアバターの名前。`/memory/avatar/` が無いとき、この名前のアバターを写す（下の「アバター」）。image に入っているのは `penelope`・`natsumi`・`myao`・`aki`・[`sayaka`](../assets/avatars/sayaka/README.md) |
 | `PENELOPE_AVATARS_DIR` | なし | 配置のアバターの置き場所。写すアバターを、image の `/app/avatars`（リポジトリの `assets/avatars/`）より先にここで探す |
 | `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。`/memory/avatar/avatar.json` の名前より優先する |
@@ -123,12 +126,22 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - ターンの終わり（`POST /v1/turns/end`）ごとに、作業ツリーの変わったものをすべて（足したもの・変えたもの・消したもの）、検査せずにそのままコミットする。変わったものが無ければコミットしない。
 - 作者とコミッターは `PENELOPE_GIT_AUTHOR_NAME` と `PENELOPE_GIT_AUTHOR_EMAIL`。
 - メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。サブエージェントのターンの終わりでは `<agent>` はサブエージェントの名前で、本体のターンの途中の変更も一緒に入る（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。
+- 本体の夜のターンは、振り返りを含め `Night-stage: reflection`・`verifier`・`curator` のいずれかと、夜の制御の出来事の `Night: <seq>` の 2 行を末尾に付ける。棚卸しの 2 回はともに `curator`。夜の報告にある各ターンの ID から画面では中身と構成を区別する。
 - ターンの終わりに `.git/HEAD` が無ければ（`.git` が無い、または Pod が別に mount した空の `.git`）、変わったものを見る前に `git init` で `main` を枝にしてリポジトリを作る。変わったものが無くても作る。`HEAD` があれば、そのリポジトリと今の枝をそのまま使う。
 - git は backend の git の設定を読まない。hook も署名も使わない。作業ツリーの持ち主は sandbox のユーザーなので、その場所を `safe.directory` として渡す。
-- 夜の移動に伴う参照の修正（[ADR-0052](adr/0052-repair-memory-references-after-nightly-moves.md)）は、整理係のターンとは別に `POST /v1/memory/repairs` でコミットする。runner が指定したパスだけを Git のパターンとして解釈せずに指定する。題は `Runner: repair memory references`、本文は `"古いパス" → "新しいパス"` の一覧（各パスは JSON 文字列）。`Night-stage` の印は付けず、整理係の変更量にも加えない。
+- 夜の移動に伴う参照の修正（[ADR-0052](adr/0052-repair-memory-references-after-nightly-moves.md)）は、整理係のターンとは別に `POST /v1/memory/repairs` でコミットする。runner が指定したパスだけを Git のパターンとして解釈せずに指定する。題は `Runner: repair memory references`、本文は `"古いパス" → "新しいパス"` の一覧（各パスは JSON 文字列）。要求に `night` があれば `Night-stage: reference-repair`・`Night: <seq>`・`Repair-turn: <turn_id>` を末尾に付ける。整理係ターンの変更量には加えない。
 - このほかに、起動のときにアバターを写したら、`avatar/` だけをコミットする（上の「アバター」）。
 - コミットは 1 つずつ順に行う。本体の夜のターンは、次のコミットに進む前に、そのコミットの差分から変わったファイルと増減した行を数える。移動は削除と追加として数え、バイナリはファイル数にだけ含める。コミットが不要なら、変更量は 0 である。計測に失敗してもコミットは失敗にしない。
 - コミットに失敗したら `500` で答える。変わったものは作業ツリーに残り、次のターンの終わりにコミットされる。
+
+## コミット済みの記憶の閲覧
+
+[ADR-0056](adr/0056-read-committed-memory.md) と [UI API の「記憶」](ui-api.md#記憶)。 `packages/backend/src/memory-view.ts` が Git と活動の記録を読み合わせる。
+
+- Git の要求は先に取得した HEAD のハッシュを使い、作業ツリーと index は読まない。第一親の履歴を初回だけ 1 回走査し、以降は前の HEAD に接続する差分だけを読む。枝の切り替え等で接続しなければ作り直す。パス別の変更・コミット ID の索引はメモリに置き、SQLite にコミットの写しは持たない。ファイルの一覧には版の木をまとめて読む。Markdown はバッチで読み、同じパス・blob のリンクの解析結果を再利用する。
+- 読み取りでは Git のグローバル設定や外部差分・textconv を使わず、版に含まれる属性によっても差分の読み方を変えない。パス指定はリテラル。Git の標準出力・標準エラー・記憶の本文はログに載せない。記憶を読めない場合、UI は汎用のエラーを返し、活動の記録は記憶へのリンクだけを省く。
+- 書き手はコミットの印を優先し、活動の記録からきっかけとリンク先、棚卸しの中身・構成を補う。印のない古い振り返りは一致するターンが分かった場合だけ夜に含める。古い Natsumi 形式など、確かな印のない履歴は、設定したオーナー作者の完全一致を除き「分からない」。記憶のコミットメッセージや Git 作者名を UI には出さない。
+- 読まれた記録は最新 1 組の UTC 日付とパスだけを `memory_reads` に保存する。段のある夜の報告で読んだ最後の版は `session_rotations.memory_head` に保存する。SQLite のマイグレーションは前へだけ進める（ダウングレード用のマイグレーションは置かない）。
 
 ## 夜の切り替え
 
@@ -150,8 +163,8 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - `turns`: 1 ターン 1 行。途中経過の `turn_start`（始まり）・`tool_call`（ツールの回数）・`turn_end`（終わり）と、ターンの終わりの口（結果・理由・きっかけ・夜の段）から作る。始まりを受けていないターンも、最初に受けたものの時刻で行を作る。きっかけは、ターンの終わりで受けた `seq` を出来事の列と引き合わせ、`source`・`stream`・`summary` を写して持つ。出来事の列の行が後で消えても、きっかけは残るようにするためである。
 - 返事は、会話の履歴の行の `turn_id` でターンに結び付ける。ターンの返事の数は、そこから数える。
 - 夜のターンの `turns.memory_change` には、コミットのファイル数と増減行数、振り返りに限りルートの `handoff.md` が変わったかを持つ。記憶の本文・ファイル名・コミットメッセージはここに残さない。
-- 照合・整理で記憶に変更があったとき、記憶のコミットの末尾に `Night-stage: verifier` または `Night-stage: curator` を付ける。runner はこの印で夜の係が最後に書いた日を見取り図に出す。変更のないターンにコミットを作らない。
-- `session_rotations`: 夜の切り替えの知らせ 1 回が 1 行。夜の制御の出来事の `seq`（同じ `seq` は 1 行で、後の知らせが置き換える）、段の結果の JSON、予定の時刻（出来事の `occurred_at`）、始まり（その夜の段のターンの最初の始まり、無ければ知らせの時刻）、段に失敗があるかを持つ。段の知らせにあるターン ID が同じ夜の同じ段に一致したときだけ、そのターンの変更量を段の JSON に写す。前の試行の変更量は引き継がない。毎回読む層の超過、対象から外れた未照合の記録の件数、棚卸しの各ターンの ID・成否・理由・変更量もこの JSON に足す。新しい列は作らない。棚卸しの詳細では、同じ夜の整理係に属する、知らせに記された ID のターンだけを返す。
+- runner は `Night-stage: verifier`・`curator` の印で、夜の係が最後に書いた日を見取り図に出す。振り返りと参照の修正はここには数えない。
+- `session_rotations`: 夜の切り替えの知らせ 1 回が 1 行。夜の制御の出来事の `seq`（同じ `seq` は 1 行で、後の知らせが置き換える）、段の結果の JSON、予定の時刻（出来事の `occurred_at`）、始まり（その夜の段のターンの最初の始まり、無ければ知らせの時刻）、段に失敗があるかを持つ。段の知らせにあるターン ID が同じ夜の同じ段に一致したときだけ、そのターンの変更量を段の JSON に写す。前の試行の変更量は引き継がない。毎回読む層の超過、対象から外れた未照合の記録の件数、棚卸しの各ターンの ID・成否・理由・変更量もこの JSON に足す。記憶の画面が夜の最後の版を区別するため、段を報告したときに読んだ HEAD は `memory_head` に別に持つ。棚卸しの詳細では、同じ夜の整理係に属する、知らせに記された ID のターンだけを返す。
 - `record_jobs`: 裏の仕事の終わり 1 件が 1 行。終わりの出来事の `payload` から、コマンドの頭・始まり・終わり・秒・終わり方・exit code・シグナル・失敗か・受けた時刻を写す。
 - `record_state`: 記録が始まった時刻（この版の backend が初めて立ち上がった時刻。逃した夜をここから数える）と、オーナーが記録を開いた時刻（オーナーの GitHub の user ID ごと）。
 - 閉じたサブエージェントは、`sub_agents` の閉じた行を使う。閉じた時刻は、閉じた知らせを受けた時刻（`updated_at`）である。

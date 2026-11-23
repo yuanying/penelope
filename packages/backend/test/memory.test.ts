@@ -59,7 +59,7 @@ describe("the memory", () => {
   it("identifies writes by a night worker in the memory history", async (t) => {
     const dir = tempDir(t);
     writeFileSync(path.join(dir, "topic.md"), "current\n");
-    await new Memory(dir, author).commit({ agent: "main", turnId: "v-1", nightWorker: "verifier" });
+    await new Memory(dir, author).commit({ agent: "main", turnId: "v-1", night: { stage: "verifier", seq: 7 } });
     assert.equal(git(dir, "log", "-1", "--format=%(trailers:key=Night-stage,valueonly)").trim(), "verifier");
   });
 

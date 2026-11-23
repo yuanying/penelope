@@ -19,6 +19,8 @@ import type { Feed } from "./feed.ts";
 import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
 import { CALLBACK_PATH, type GitHubLogin } from "./login/github.ts";
 import type { LoginSessions, Session } from "./login/sessions.ts";
+import { MEMORY_PATH, memoryRoute } from "./memory-api.ts";
+import type { MemoryView } from "./memory-view.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PushSubscriptions } from "./push/notifier.ts";
 import { webPushSubscriptionOf } from "./push/web-push.ts";
@@ -52,6 +54,7 @@ export type UiOptions = {
   schedules: Schedules;
   /** The activity record (ADR-0038). */
   record: ActivityRecord;
+  memoryView: MemoryView;
   feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
@@ -73,7 +76,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, assets, agents, schedules, record, feed, login, sessions, ownerId, now } = options;
+  const { queue, conversation, assets, agents, schedules, record, memoryView, feed, login, sessions, ownerId, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -172,9 +175,19 @@ export function uiHandler(options: UiOptions): Handler {
       await sendAsset(assets, url.pathname.slice(ASSETS_PATH.length), request, response);
       return;
     }
+    if (url.pathname === MEMORY_PATH || url.pathname.startsWith(`${MEMORY_PATH}/`)) {
+      try {
+        await memoryRoute(memoryView, url, request, response);
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        // The ordinary error handler logs the URL, which can contain private search text.
+        throw new HttpError(500, "committed memory could not be read");
+      }
+      return;
+    }
     if (url.pathname === RECORD_PATH || url.pathname.startsWith(`${RECORD_PATH}/`)) {
       try {
-        await recordRoute(record, request, response, url);
+        await recordRoute(record, memoryView, request, response, url);
       } catch (error) {
         if (error instanceof RecordQueryError) throw new HttpError(error.status, error.message);
         throw error;
@@ -270,7 +283,7 @@ export function uiHandler(options: UiOptions): Handler {
 }
 
 /** The activity record (docs/ui-api.md "活動の記録"): read only, but for the time the owner opened it. */
-async function recordRoute(record: ActivityRecord, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
+async function recordRoute(record: ActivityRecord, memory: MemoryView, request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<void> {
   const rest = url.pathname.slice(RECORD_PATH.length);
   const query = url.searchParams;
   if (rest === "/seen") {
@@ -312,10 +325,17 @@ async function recordRoute(record: ActivityRecord, request: http.IncomingMessage
     }
   });
   const [kind, id, results, callId] = parts;
-  if (kind === "turns" && id && parts.length === 2) sendJson(response, 200, record.turn(id));
-  else if (kind === "turns" && id && results === "results" && callId && parts.length === 4) sendJson(response, 200, { output: record.result(id, callId) } satisfies RecordResultResponse);
-  else if (kind === "nights" && id && parts.length === 2) sendJson(response, 200, record.night(id));
-  else if (kind === "sub-agents" && id && parts.length === 2) sendJson(response, 200, record.subAgent(id, query.get("before") ?? undefined));
+  if (kind === "turns" && id && parts.length === 2) {
+    const detail = record.turn(id);
+    const change = await memory.turnChange(id).catch(() => undefined);
+    sendJson(response, 200, { ...detail, ...(change ? { memory_change: change } : {}) });
+  } else if (kind === "turns" && id && results === "results" && callId && parts.length === 4) {
+    sendJson(response, 200, { output: record.result(id, callId) } satisfies RecordResultResponse);
+  } else if (kind === "nights" && id && parts.length === 2) {
+    const detail = record.night(id);
+    const changes = await memory.nightChanges(detail.night.id).catch(() => []);
+    sendJson(response, 200, { ...detail, ...(changes.length ? { memory_changes: changes } : {}) });
+  } else if (kind === "sub-agents" && id && parts.length === 2) sendJson(response, 200, record.subAgent(id, query.get("before") ?? undefined));
   else throw new HttpError(404, "no such path");
 }
 

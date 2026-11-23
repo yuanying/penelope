@@ -2,7 +2,7 @@
 // screens are agreed with the owner.
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId, JobEndKind, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
+import type { Activity, AgentId, JobEndKind, MemoryMove, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };
@@ -333,6 +333,8 @@ export type RecordReply = {
 /** `GET /api/record/turns/<id>` */
 export type RecordTurnResponse = {
   turn: RecordTurn;
+  /** The committed memory change, when still reachable. */
+  memory_change?: MemoryChange;
   /** Its blocks in order. Empty when `expired`. */
   flow: RecordFlowItem[];
   /** Whether its flow is gone with time (30 days), only the summary left. */
@@ -344,8 +346,63 @@ export type RecordTurnResponse = {
 export type RecordResultResponse = { output: string };
 
 /** `GET /api/record/nights/<id>`: the night, its stage turns and the individual weekly review turns. */
+// Read-only memory (docs/ui-api.md). IDs are full Git object IDs.
+export type MemoryNightStage = NightTurnStage | NightReviewPhase;
+export type MemoryWriter =
+  | { kind: "daytime"; agent: string; turn_id?: string; trigger?: RecordTrigger }
+  | { kind: "night"; stage: MemoryNightStage; turn_id?: string; night_id?: string; night_seq?: number }
+  | { kind: "system"; operation: "reference_repair" | "avatar_seed"; night_id?: string; turn_id?: string; night_seq?: number }
+  | { kind: "owner" | "unknown" };
+
+export type MemoryCounts = { files: number; added: number; removed: number };
+export type MemoryChange = MemoryCounts & { id: string; at: string; writer: MemoryWriter; paths: string[] };
+export type MemoryFileChange = { path: string; kind: "added" | "deleted" | "modified" | "moved"; from?: string; added: number; removed: number };
+export type MemoryChangeResponse = { change: MemoryChange; files: MemoryFileChange[]; moves: MemoryMove[] };
+export type MemoryNight = MemoryCounts & {
+  id: string; at: string; ended_at: string; changes: MemoryChangeResponse[];
+};
+export type MemoryReadCount = { count_30_days: number; last_day: string | null };
+export type MemoryFile = {
+  path: string; bytes: number; always_read: boolean; reads: MemoryReadCount | null;
+  last_change: { id: string; at: string; writer: MemoryWriter } | null;
+};
+export type MemoryBrokenLink = { path: string; line: number; destination: string };
+export type MemoryOverviewResponse = {
+  head: string | null;
+  files: MemoryFile[];
+  always_read: { bytes: number; target_bytes: number; file_limit_bytes: number; over_target_nights: string[] };
+  broken_links: MemoryBrokenLink[];
+  links_incomplete: boolean;
+  last_night: MemoryNight | null;
+};
+export type MemoryFileResponse = {
+  head: string; file: MemoryFile; history_count: number; broken_links: MemoryBrokenLink[];
+  moved_from?: string; kind: "markdown" | "text" | "image" | "unavailable"; text?: string; image_url?: string;
+};
+export type MemoryWriterFilter = "all" | "daytime" | "night" | "owner";
+export type MemoryChangesResponse = {
+  head: string | null;
+  days: Array<{ day: string; changes: number; files: number; items: MemoryChange[] }>;
+  next?: string;
+};
+export type MemoryHistoryResponse = { head: string | null; changes: MemoryChange[]; next?: string };
+export type MemoryDiffLine =
+  | { kind: "context"; old_line: number; new_line: number; text: string }
+  | { kind: "added"; new_line: number; text: string }
+  | { kind: "removed"; old_line: number; text: string };
+export type MemoryFileDiff =
+  | { kind: "text"; hunks: Array<{ old_start: number; new_start: number; lines: MemoryDiffLine[] }>; truncated: boolean }
+  | { kind: "image" | "binary" | "too_large" };
+export type MemoryCompareResponse = { from: string; to: string; changes: number; added: number; removed: number; diff: MemoryFileDiff };
+export type MemorySearchResponse = {
+  head: string | null; files: Array<{ path: string; lines: Array<{ line: number; text: string }> }>;
+  line_limit: number; truncated: boolean;
+};
+
 export type RecordNightResponse = {
   night: RecordNight;
+  /** Each committed change in the order it was made, including reference repairs. */
+  memory_changes?: MemoryChange[];
   turns: Partial<Record<NightTurnStage | NightReviewPhase, RecordTurn>>;
 };
 

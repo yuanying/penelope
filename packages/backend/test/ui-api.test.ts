@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createECDH, createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -15,6 +15,8 @@ import { Feed } from "../src/feed.ts";
 import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
+import { MemoryView } from "../src/memory-view.ts";
+import { Memory } from "../src/memory.ts";
 import { ModelSettings } from "../src/model-settings.ts";
 import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
@@ -103,6 +105,7 @@ async function setup(
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
   const subscriptions = new PushSubscriptions(db, { now });
+  const memoryDir = path.join(dir, "memory");
   const push = pushKey === undefined ? undefined : { publicKey: pushKey, subscriptions };
   const server = await listenTcp(
     uiHandler({
@@ -112,6 +115,7 @@ async function setup(
       agents,
       schedules,
       record,
+      memoryView: new MemoryView(memoryDir, db, { now, timeZone: "UTC" }),
       feed,
       login,
       sessions,
@@ -137,8 +141,27 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions };
+  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, memoryDir };
 }
+
+it("requires an owner session even on the committed memory image endpoint", async (t) => {
+  const { call } = await setup(t);
+  assert.equal((await call("/api/memory/image?path=avatar%2Fsample.png", undefined)).status, 401);
+});
+
+it("links the activity turn to its committed memory change", async (t) => {
+  const { call, signIn, record, memoryDir } = await setup(t);
+  mkdirSync(memoryDir);
+  writeFileSync(path.join(memoryDir, "guide.md"), "Guide\n");
+  const writer = new Memory(memoryDir, { name: "Example", email: "example@example.com" });
+  record.turnEnded("main", { turn_id: "turn-1" });
+  await writer.commit({ agent: "main", turnId: "turn-1" });
+  const cookie = signIn();
+  const turn = await call("/api/record/turns/turn-1", cookie);
+  const id = turn.json().memory_change.id;
+  const detail = await call(`/api/memory/changes/${id}`, cookie);
+  assert.deepEqual(detail.json().change.writer, { kind: "daytime", agent: "main", turn_id: "turn-1" });
+});
 
 const modelChoice = { model: "example/org/chat", thinking: "low" } as const;
 

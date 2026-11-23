@@ -326,6 +326,16 @@ export const MIGRATIONS: readonly string[] = [
   -- Outbound images: ordered references to files in the backend's assets directory.
   ALTER TABLE a2a_tasks ADD COLUMN response_images TEXT;
   `,
+  `
+  -- A rotation's final committed memory version. NULL means it was not captured.
+  ALTER TABLE session_rotations ADD COLUMN memory_head TEXT;
+  -- Only the most recent complete snapshot, ordered by the rotation event.
+  CREATE TABLE memory_reads (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    seq INTEGER NOT NULL,
+    snapshot TEXT NOT NULL
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

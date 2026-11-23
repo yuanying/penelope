@@ -39,6 +39,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
 | `GET /api/settings`・`PUT /api/settings` | モデルと思考の深さの設定 |
 | `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
+| `GET /api/memory` および `/api/memory/…` | コミット済みの記憶の閲覧（「記憶」） |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -246,6 +247,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - `GET /api/record/turns/<id>/results/<call_id>` は `{output}`（型は `RecordResultResponse`）。そのツールの結果の本文の全部（runner が切った 16,000 文字まで）。流れが消えたもの、無いものは `404`。
 - `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, verifier?, curator?, content?, structure?}`（一覧の `turn` の行と同じ形）。通常はその段の最後のターン、棚卸しでは `content`・`structure` に報告された各ターンを返し、`curator` は旧 UI 向けにうち最後のものを返す。
 - `GET /api/record/sub-agents/<name>?before=` は `{sub_agent, turns, before?}`（型は `RecordSubAgentResponse`）。`sub_agent` は一覧の行と同じ形（閉じていなければ `closed_at` が無い）。`turns` はそのサブエージェントのターンの新しい順で、1 ページ 20 件。`before` は次のページの不透明な cursor で、最後のページには無い。backend の渡していない `before` は `400`。
+- 記憶の変更が辿れるときだけ、ターンの詳細に `memory_change`（`MemoryChange`）を、夜の詳細に `memory_changes`（`MemoryChange[]`、コミット順）を加える。後者は参照の修正を含む。リンク先は `GET /api/memory/changes/<id>`（下の「記憶」）。
 - 無い `id`・名前は `404`。どの口も GET のほかの method は `405`。
 
 ### まだ見ていない失敗と「見た」
@@ -278,6 +280,46 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - Web UI は返事の文の下に縮小して並べ、押すと大きく見せる（[docs/design](design/README.md) の「返事の画像」）。オーナーの画像は吹き出しの上に並べる。送った直後はブラウザの持つファイルで出し、backend が受け付けたら応答の `images` の写しに替える。読み込み直した後と同じ見た目にするためである。
 - 返事の知らせには画像を載せず、数だけを `images` に入れる（「知らせの中身」）。
 - 写しの一覧の口はまだ無い。写しは返事と別の表に、種類・作った時刻・作ったエージェントとともに持つので（[backend.md](backend.md) の「作ったものの写し」）、作ったものの一覧の画面を作るときに `GET /api/assets` のような口を足せる。
+
+## 記憶
+
+ログインしたオーナーだけが、コミット済みの `/memory` を読める（[ADR-0056](adr/0056-read-committed-memory.md)）。すべて GET で、保存・編集・復元の口はない。型は `packages/contract/src/ui.ts` の `Memory…`。まだコミットのない配置では、一覧・履歴・検索は `head: null` と空の結果、個別のファイル・変更は `404`。
+
+- パスはルートからの UTF-8 の相対パス。query には `URLSearchParams` で入れる。絶対パス、空の成分、`.`・`..`・`.git`（大文字小文字の違いを含む）、バックスラッシュ、NUL を含むパスは `400`。通常ファイルだけを扱い、リンクやサブモジュールは開かない。
+- `head` は各応答が読んだ版。本文・画像・検索・履歴・変更一覧の `head` に一覧で受け取った値を渡せば、途中で新しいコミットができても同じ版を参照できる。省略時は要求ごとにそのときの HEAD を使う。版・変更 ID は完全な Git のオブジェクト ID（小文字の 40 または 64 桁の 16 進数）。形式違いは `400`、現在の HEAD の第一親の履歴にない ID は `404`。
+- 以下の `tz` は活動の記録と同じ IANA タイムゾーンで、省略時は backend の設定。無効なら `400`。時刻は RFC 3339（UTC）、日付は `YYYY-MM-DD`。GET 以外は `405`、未認証は `401`、応答は `no-store`。
+
+| 口 | 応答 |
+| --- | --- |
+| `GET /api/memory?tz=` | `MemoryOverviewResponse`: 全ファイルのメタデータ、毎回読む層、切れたリンク、直近に報告された夜 |
+| `GET /api/memory/file?path=&head=` | `MemoryFileResponse`: ファイルのメタデータ、本文または画像への URL、履歴の件数 |
+| `GET /api/memory/image?path=&head=` | 画像のバイト列。本文の応答の `image_url` を使う |
+| `GET /api/memory/changes?writer=&tz=&head=&before=` | `MemoryChangesResponse`: 変更の一覧（50 件ずつ） |
+| `GET /api/memory/changes/<id>` | `MemoryChangeResponse`: 1 変更の見出し、変更したファイルの一覧、移動。差分の本文は含まない |
+| `GET /api/memory/changes/<id>/diff?path=` | `MemoryFileDiff`: 1 変更の 1 ファイルの差分。移動は新しい方のパス、削除は消したパスを指定 |
+| `GET /api/memory/history?path=&head=&before=` | `MemoryHistoryResponse`: 1 パスを変えたコミット（50 件ずつ） |
+| `GET /api/memory/compare?path=&from=&to=` | `MemoryCompareResponse`: 1 パスの 2 版の差分。履歴の変更 ID を古い方から `from`、`to` に指定 |
+| `GET /api/memory/search?q=&head=` | `MemorySearchResponse`: 版の本文に一致した行、パスと行番号 |
+
+### ファイルとゆうべの変更
+
+- `files` は `path`・`bytes`・`always_read`・`last_change`（`{id, at, writer}` または不明なら `null`）・`reads`。フォルダの分類や畳みは UI がパスから組み立てる。読まれた記録がまだ届いていなければ `reads: null`。届いていれば `{count_30_days, last_day}`（該当なしなら 0 回・`null`）。パス単位で、移動前の回数は引き継がない。夜の収集時点までに分かった参照を、要求時の UTC の当日と前 29 日に絞って数える。何回かは事実の目安であり、必要性の判定には使わない。
+- `always_read` の `bytes` は `PURPOSE.md`・`always.md`・`personality.md`・`handoff.md` の合計。無いファイルは 0、1 ファイルの上限を越えても合計には入る。 `target_bytes` は既定 16384、`file_limit_bytes` は既定 65536。 `over_target_nights` は夜の**終了時点のコミット済みの版**で合計が目安を超えていた夜の開始日（`tz`、新しい報告順・重複なし）。整理前に計った活動の記録の注意事項とは別の数である。最終版の記録がない古い夜は報告時刻以前の Git の版を使う（同じ秒の境目は近似）。
+- `broken_links` は Markdown の相対リンク・画像参照のうち、リンク先がその版にないものの `{path, line, destination}`（行番号は 1 始まり。参照形式でも使用箇所の行と宣言されたリンク先を返す）。URL、絶対パス、記憶の外へ出るリンク、ページ内アンカーの有無は調べない。出力は 1000 件まで、読む Markdown は 1 ファイル 1 MiB、総量 32 MiB まで。上限で省いた場合は `links_incomplete: true`。
+- `last_night` が `null` なら、報告された夜はない。それ以外は `{id, at, ended_at, files, added, removed, changes}`。 `id` は活動の記録の夜の ID。 `changes` に書き手の段ごとの変更と参照の修正をコミット順で並べる。同じ段の複数の試行もコミットがあれば載る。変更が無い段の行は無い。合計の `files` は各変更のパスの重複を除いた数、加減行は各変更の合計。移動は `changes[].moves` の `{from,to}`。
+- `file` の `kind` は `markdown`・`text`（元の UTF-8 の文を `text` に返す）、`image`（`image_url` に認証の必要な画像の URL を返す）、`unavailable`（本文や URL を返さない）のいずれか。本文は 1 MiB まで、画像は `avatar/` 下の PNG・JPEG・GIF・WebP を先頭バイトで判定し 16 MiB まで。画像以外の `avatar/` 下のデータは本文にしない。画像には正しい `content-type` と `x-content-type-options: nosniff` を付ける。ファイルが最新の夜に移動していれば `moved_from` が付く。他の読めるファイルへの相対リンクは UI が解決する。Markdown は信頼できる HTML ではないので、生の HTML は描画しない。
+
+### 変更と差分
+
+- `MemoryChange` は `id`・コミッター時刻の `at`・`writer`・変わったパスの `paths`・`files` 件・`added` 行・`removed` 行。バイナリはファイル数だけに入れる。変更の詳細にはこれに加え、1 ファイルずつの `files`（`kind: added | deleted | modified | moved`、移動なら `from`）と、`moves` がある。移動は Git が見つけたもの、参照の修正コミットでは runner が送った対応を返す。
+- `writer.kind` は `daytime`（`agent` は `main` またはサブエージェント名。活動の記録があれば `turn_id` と、最初のきっかけの `trigger` を付ける）、`night`（`stage` は `reflection`・`verifier`・`curator`、棚卸しで区別できれば `content` または `structure`）、`owner`、`system`（`operation: reference_repair | avatar_seed`）、`unknown`。夜と参照の修正には分かる場合だけ `night_seq`、リンクできる場合に `night_id`・`turn_id` が付く。古いコミットの自由文や Git 作者の名義は返さない。
+- `writer=all`（既定）・`daytime`・`night`・`owner` で絞れる。 `night` は参照の修正を含み、アバターの初期化を含めない。一覧は新しい順で、 `days` の日ごとの `items` に分かれる。各日の `changes` と `files`（重複を除いた変更パス数）はそのページ内でなく同じ絞り込みの一日全体の数。同じ日は次のページでも続きうる。
+- `next` があれば、そのページの `head`、同じ絞り込みとともに `before` に渡す。 `next` が無いページで終わり、その一覧にない cursor は `400`。履歴は第一親の新しい側から、指定の**パス**が変わった変更を並べる。移動のコミットは両側のパスの履歴に出るが、移動前の別名は追わない。消えたパスの履歴も読める。比較の `changes` は `from` を除き `to` を含む間の変更数で、増減は 2 つの版の正味の差分。
+- 差分の `kind: text` は連続した区間 `hunks` に分け、区間の頭に `old_start`・`new_start` を返す（存在しない側は 0 になりうる）。各行は `context`（両側の番号）、`added`（`new_line`）、`removed`（`old_line`）と、追加・削除の記号を含まない `text`。行番号は 1 始まり。区間の間には未表示の行がありうる。返すのは最大 2000 行とパッチ出力 1 MiB までで、途中で切れば `truncated: true`。 `image`・`binary`・`too_large` なら行を返さない。
+
+### 検索
+
+`q` は改行・NUL を含まない 1〜512 UTF-8 バイトの固定文字列。大文字・小文字、全角・半角を区別し、正規表現ではない。現在の版にある通常ファイルのみを対象にし、バイナリと `avatar/` は検索しない。 `files[]` に `path` と `lines[]: {line, text}` を Git の出力順で返す。上限は全体で `line_limit: 100` 行と 1 MiB。上限で結果を省いた場合には `truncated: true`。
 
 ## これから足すもの
 

@@ -43,6 +43,7 @@ describe("the configuration", () => {
       builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now", job: "now" },
       inline: new Set(["ui", "job", "control"]),
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
+      memoryView: { ownerEmail: undefined, ownerName: undefined, targetBytes: 16384, fileLimitBytes: 65536 },
       avatar: { name: undefined, chosen: undefined, from: ["/app/avatars"] },
       webDir: "/app/web",
       a2a: undefined,

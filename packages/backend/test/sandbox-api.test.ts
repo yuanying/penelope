@@ -14,6 +14,7 @@ import { openDatabase } from "../src/db.ts";
 import { ModelSettings } from "../src/model-settings.ts";
 import { Feed } from "../src/feed.ts";
 import { close, listenUnix } from "../src/http.ts";
+import { MemoryView } from "../src/memory-view.ts";
 import { Memory } from "../src/memory.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
@@ -51,13 +52,14 @@ async function setup(
   const memoryDir = path.join(dir, "memory");
   mkdirSync(memoryDir);
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
+  const memoryView = new MemoryView(memoryDir, db, { now: clock.now, timeZone: "UTC" });
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
   const inbox = new Inbox(db, queue, { assets, now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const socketPath = path.join(dir, "sandbox.sock");
   const modelSettings = new ModelSettings(db, clock.now);
   const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, inbox, record, modelSettings, now: Date.now, log: () => {} }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, now: Date.now, log: () => {} }),
     socketPath,
   );
   t.after(async () => {
@@ -66,7 +68,7 @@ async function setup(
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, agents, record, streamed, memoryDir, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir, modelSettings };
+  return { queue, conversation, agents, record, streamed, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir, modelSettings };
 }
 
 /** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
@@ -514,6 +516,22 @@ describe("the sandbox's API", () => {
       assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages } })).status, 204);
       const [night] = record.day({ day: new Date(clock.now()).toISOString().slice(0, 10), kind: "night" }).rows;
       assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
+    });
+
+    it("keeps the latest read snapshot when an older night or a legacy report arrives later", async (t) => {
+      const { call, memoryDir, memoryView } = await setup(t);
+      writeFileSync(path.join(memoryDir, "guide.md"), "A sample guide\n");
+      assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "day" } })).status, 204);
+      const done = { result: "done" };
+      const stages = { reflection: done, verifier: done, curator: done, session: done };
+      const day = "2026-11-14";
+      const body = { agent: "main", stages };
+      for (const json of [
+        { ...body, seq: 8, memory_reads: { day, files: [{ path: "guide.md", dates: [day, day, "2026-10-01"] }] } },
+        { ...body, seq: 7, memory_reads: { day, files: [] } },
+        { agent: "main", seq: 8 },
+      ]) assert.equal((await call("/v1/sessions/rotated", { json })).status, 204);
+      assert.deepEqual((await memoryView.overview()).files[0]?.reads, { count_30_days: 2, last_day: day });
     });
 
     it("accepts optional memory warnings and weekly review reports without keeping extra fields", async (t) => {

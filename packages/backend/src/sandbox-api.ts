@@ -12,6 +12,9 @@ import { AssetStoreError, checkImages, ImageRefusal } from "./assets.ts";
 import type { Conversation } from "./conversation.ts";
 import { isTime } from "./envelope.ts";
 import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.ts";
+import { memoryPath } from "./memory-git.ts";
+import { readSnapshot } from "./memory-record.ts";
+import type { MemoryView } from "./memory-view.ts";
 import type { Memory } from "./memory.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { Queue } from "./queue.ts";
@@ -35,6 +38,7 @@ export type SandboxOptions = {
   agents: SubAgents;
   schedules: Schedules;
   memory: Memory;
+  memoryView: MemoryView;
   /** The tasks other agents sent over A2A, which her replies close or ask in. */
   inbox: Inbox;
   /** The activity record (ADR-0038). */
@@ -48,7 +52,7 @@ export type SandboxOptions = {
 };
 
 export function sandboxHandler(options: SandboxOptions): Handler {
-  const { queue, conversation, agents, schedules, memory, inbox, record, now } = options;
+  const { queue, conversation, agents, schedules, memory, memoryView, inbox, record, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
   const maxReplyBytes = options.maxReplyBytes ?? DEFAULT_REPLY_BYTES;
@@ -202,45 +206,51 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         keep(() => record.turnEnded(agent, end));
         conversation.turnEnded(agent);
         try {
-          const stage = agent === "main" ? end.night?.stage : undefined;
+          const night = agent === "main" ? end.night : undefined;
           await memory.commit({
             agent, turnId: turn_id,
-            ...(stage === "verifier" || stage === "curator" ? { nightWorker: stage } : {}),
-            ...(agent !== "main" || end.night === undefined ? {} : {
+            ...(night === undefined ? {} : { night,
               onChange: (change) => {
                 if (change === undefined) log("memory: nightly change counts not measured");
                 else keep(() => record.nightMemoryChanged(end, change));
               },
             }),
           });
-        } catch (error) {
-          log(`memory: turn ${turn_id} not committed: ${error instanceof Error ? error.message : String(error)}`);
+        } catch {
+          log("memory: a turn could not be committed");
           throw new HttpError(500, "/memory could not be committed");
         }
         sendEmpty(response, 204);
         return;
       }
       case "POST /v1/memory/repairs": {
-        const { agent, paths, moves } = withAgent(await body());
+        const { agent, paths, moves, night } = withAgent(await body());
         mainOnly(agent, "commits memory reference repairs");
-        if (!Array.isArray(paths) || !paths.length || !paths.every((path) => memoryRelativePath(path) && /\.md$/i.test(path))) {
+        if (!Array.isArray(paths) || !paths.length || !paths.every((path) => memoryPath(path) && /\.md$/i.test(path))) {
           throw new HttpError(400, "paths must be a nonempty list of memory-relative Markdown paths");
         }
         if (!Array.isArray(moves) || !moves.length) throw new HttpError(400, "moves must be a nonempty list");
         const mapping = moves.map((value): MemoryMove => {
           const { from, to } = object(value);
-          if (!memoryRelativePath(from) || !memoryRelativePath(to) || from === to) {
+          if (!memoryPath(from) || !memoryPath(to) || from === to) {
             throw new HttpError(400, "each move needs distinct memory-relative from and to paths");
           }
           return { from, to };
         });
+        let trailers: string[] = [];
+        if (night !== undefined) {
+          const { seq, turn_id } = object(night);
+          if (!positiveInteger(seq) || !turnId(turn_id)) throw new HttpError(400, "night needs the control seq and the curator turn_id");
+          trailers = [`Night-stage: reference-repair\nNight: ${seq}\nRepair-turn: ${turn_id}`];
+        }
         try {
           await memory.commitPaths([...new Set<string>(paths)], [
             "Runner: repair memory references",
             mapping.map(({ from, to }) => `${JSON.stringify(from)} → ${JSON.stringify(to)}`).join("\n"),
+            ...trailers,
           ]);
-        } catch (error) {
-          log(`memory: reference repairs not committed: ${error instanceof Error ? error.message : String(error)}`);
+        } catch {
+          log("memory: reference repairs could not be committed");
           throw new HttpError(500, "/memory reference repairs could not be committed");
         }
         sendEmpty(response, 204);
@@ -277,12 +287,24 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         return;
       }
       case "POST /v1/sessions/rotated": {
-        const { agent, seq, stages } = withAgent(await body());
+        const { agent, seq, stages, memory_reads } = withAgent(await body());
         mainOnly(agent, "has a nightly switch");
-        if (seq !== undefined && !Number.isSafeInteger(seq)) throw new HttpError(400, "seq must be the seq of the night's control event");
+        if (seq !== undefined && !positiveInteger(seq)) throw new HttpError(400, "seq must be the seq of the night's control event");
         if (stages !== undefined && seq === undefined) throw new HttpError(400, "stages come with the seq of their night");
+        if (memory_reads !== undefined && stages === undefined) throw new HttpError(400, "memory_reads comes with the night's stages");
         const steps = stages === undefined ? undefined : nightStages(stages);
-        keep(() => record.nightReported({ ...(seq === undefined ? {} : { seq: seq as number }), ...(steps === undefined ? {} : { stages: steps }) }));
+        const reads = memory_reads === undefined ? undefined : readSnapshot(memory_reads);
+        const head = steps === undefined ? undefined : await memoryView.head().catch(() => {
+          log("memory: final night version could not be read");
+          return undefined;
+        });
+        keep(() => record.nightReported({ ...(seq === undefined ? {} : { seq }), ...(steps === undefined ? {} : { stages: steps }) }));
+        try {
+          if (seq !== undefined && head !== undefined) memoryView.reports.saveNightHead(seq, head);
+          if (seq !== undefined && reads !== undefined) memoryView.reports.saveReads(seq, reads);
+        } catch {
+          log("memory: nightly snapshot could not be kept");
+        }
         log(`session: the nightly switch${seq === undefined ? "" : ` of ${String(seq)}`} was reported${steps === undefined ? "" : ` (${steps.reflection.result}, ${steps.verifier.result}, ${steps.curator.result}, ${steps.session.result})`}`);
         sendEmpty(response, 204);
         return;
@@ -406,24 +428,23 @@ function activity(value: unknown): Activity {
   }
 }
 
-/** The end of a turn: its id, and what the runner said of it for the record (ADR-0038). */
-function memoryRelativePath(value: unknown): value is string {
-  return typeof value === "string" && !value.includes("\0") &&
-    value.split("/").every((part) => part !== "" && part !== "." && part !== ".." && part !== ".git");
+function turnId(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "" && value.trim() === value && !/[\0\r\n]/.test(value);
 }
 
+/** The end of a turn: its id, and what the runner said of it for the record (ADR-0038). */
 function turnEnd(body: Record<string, unknown>): TurnEnd {
   const { turn_id, result, reason, seqs, night } = body;
-  if (typeof turn_id !== "string" || turn_id === "") throw new HttpError(400, "turn_id must be a non-empty string");
+  if (!turnId(turn_id)) throw new HttpError(400, "turn_id must be a nonempty single-line identifier");
   if (result !== undefined && result !== "done" && result !== "failed" && result !== "stopped") throw new HttpError(400, "result must be done, failed or stopped");
   if (reason !== undefined && typeof reason !== "string") throw new HttpError(400, "reason must be a string");
   if (seqs !== undefined && (!Array.isArray(seqs) || !seqs.every((seq) => Number.isSafeInteger(seq)))) throw new HttpError(400, "seqs must be a list of integers");
   let step: TurnEnd["night"];
   if (night !== undefined) {
     const { seq, stage } = object(night);
-    if (!Number.isSafeInteger(seq)) throw new HttpError(400, "night needs the seq of its control event");
+    if (!positiveInteger(seq)) throw new HttpError(400, "night needs the seq of its control event");
     if (stage !== "reflection" && stage !== "verifier" && stage !== "curator") throw new HttpError(400, "night's stage must be reflection, verifier or curator");
-    step = { seq: seq as number, stage };
+    step = { seq, stage };
   }
   return {
     turn_id,

@@ -23,6 +23,7 @@ import { close, listenTcp, listenUnix } from "./http.ts";
 import { intakeHandler } from "./intake.ts";
 import { type GitHubEndpoints, GitHubLogin } from "./login/github.ts";
 import { LoginSessions } from "./login/sessions.ts";
+import { MemoryView } from "./memory-view.ts";
 import { Memory } from "./memory.ts";
 import { ModelSettings } from "./model-settings.ts";
 import { Notifier, PushSubscriptions } from "./push/notifier.ts";
@@ -56,6 +57,7 @@ export async function startBackend(
   memory.afterCommit(() => avatar.reload());
   const agent = avatar.settings();
   const db = openDatabase(config.databasePath);
+  const memoryView = new MemoryView(config.memoryDir, db, { ...config.memoryView, now, timeZone: config.timeZone, backendEmail: config.gitAuthor.email });
   const modelSettings = new ModelSettings(db, now);
   const awake = new AwakeHours(config.awakeHours, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
@@ -109,7 +111,7 @@ export async function startBackend(
     intake = await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
     sandbox = await opening(
       listenUnix(
-        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, inbox, record, modelSettings, now, log }),
+        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, now, log }),
         config.sandboxSocket,
         log,
       ),
@@ -123,6 +125,7 @@ export async function startBackend(
           agents,
           schedules,
           record,
+          memoryView,
           feed,
           login,
           sessions,

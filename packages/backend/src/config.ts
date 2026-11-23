@@ -39,6 +39,7 @@ export type Config = {
   builtinDelivery: Record<"ui" | "cron" | "a2a" | "self" | "job", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
+  memoryView?: { ownerEmail?: string; ownerName?: string; targetBytes?: number; fileLimitBytes?: number };
   avatar: AvatarSettings;
   /** Where the built Web UI is. */
   webDir: string;
@@ -96,6 +97,12 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     }
     if (value === "") throw new ConfigError(`${name}: ${file} is empty`);
     return value;
+  };
+  const bytes = (name: string, fallback: number) => {
+    const value = get(name);
+    if (value === undefined) return fallback;
+    if (!/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) throw new ConfigError(`${name} must be a positive integer`);
+    return Number(value);
   };
   const minutes = (name: string, fallback: number) => {
     const value = get(name);
@@ -214,6 +221,12 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     gitAuthor: {
       name: get("PENELOPE_GIT_AUTHOR_NAME") ?? "penelope-backend",
       email: get("PENELOPE_GIT_AUTHOR_EMAIL") ?? "backend@penelope.invalid",
+    },
+    memoryView: {
+      ownerEmail: get("PENELOPE_MEMORY_OWNER_EMAIL"),
+      ownerName: get("PENELOPE_MEMORY_OWNER_NAME"),
+      targetBytes: bytes("PENELOPE_PROMPT_LAYER_TARGET_BYTES", 16384),
+      fileLimitBytes: bytes("PENELOPE_PROMPT_FILE_MAX_BYTES", 65536),
     },
     // The deployment's own avatars come first (ADR-0036).
     avatar: { name: get("PENELOPE_AGENT_NAME"), chosen, from: avatarsDir === undefined ? [IMAGE_AVATARS_DIR] : [avatarsDir, IMAGE_AVATARS_DIR] },
