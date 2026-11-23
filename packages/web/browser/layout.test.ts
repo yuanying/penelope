@@ -17,6 +17,8 @@ import { type Browser, chromium, type Page } from "playwright-core";
 
 import type { HistoryEntry, Trigger } from "@penelope/contract";
 
+import { LONG_PATH, MEMORY_DAY, memoryDiff, memoryScene } from "../dev/memory.ts";
+
 const executablePath = process.env.CHROMIUM;
 if (!executablePath) throw new Error("set CHROMIUM to the path of a Chromium or Chrome");
 
@@ -37,6 +39,7 @@ const reply = (id: string, text: string, trigger?: Trigger): HistoryEntry => ({
 /** What the stub of the backend answers: her name, and the history newest first. */
 let agentName = "ペネロペ";
 let history: HistoryEntry[] = [];
+const memory = memoryScene(Date.now());
 
 const TYPES: Record<string, string> = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".woff2": "font/woff2" };
 
@@ -51,6 +54,9 @@ function stub(): Server {
     if (url.pathname === "/api/agents") return json({ agents: [] });
     if (url.pathname === "/api/history") return json({ entries: history });
     if (url.pathname === "/api/push") return json({});
+    if (url.pathname === "/api/memory") return json(memory.overview);
+    if (url.pathname === `/api/memory/changes/${MEMORY_DAY}`) return json(memory.changes[0]);
+    if (url.pathname === `/api/memory/changes/${MEMORY_DAY}/diff`) return json(memoryDiff(url.searchParams.get("path") ?? ""));
     if (url.pathname === "/api/stream") {
       // Kept open and quiet, as when nothing happens.
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -112,6 +118,24 @@ for (const [screen, width] of [
   ["a PC", 1400],
   ["a phone", 390],
 ] as const) {
+  it(`wraps an unbroken diff line and path within the memory pane on ${screen}`, async () => {
+    const page = await browser.newPage({ viewport: { width, height: 900 } });
+    try {
+      await page.goto(`${origin}/#/memory/changes/${MEMORY_DAY}`);
+      const added = page.locator('.memory-diff-line[data-kind="added"] code').first();
+      await added.waitFor();
+      assert.equal(await page.locator(".memory-diff-title code").first().textContent(), LONG_PATH);
+      const measured = await added.evaluate((code) => {
+        const pane = code.closest(".memory-scroll")!;
+        return { wraps: code.getBoundingClientRect().height > parseFloat(getComputedStyle(code).lineHeight), overflow: pane.scrollWidth - pane.clientWidth };
+      });
+      assert.ok(measured.wraps, "the long line takes more than one line");
+      assert.ok(measured.overflow <= 0, `the memory pane overflows by ${measured.overflow}px`);
+    } finally {
+      await page.close();
+    }
+  });
+
   describe(`the mark of what made her speak, on ${screen}`, () => {
     it("is cut within the reply's column when its words are long", async () => {
       agentName = "ペネロペ";

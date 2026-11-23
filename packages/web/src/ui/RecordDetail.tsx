@@ -12,7 +12,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { Markdown } from "@astryxdesign/core/Markdown";
 import { type ReactNode, useEffect, useState } from "react";
 
-import type { Activity, RecordFlowItem, RecordNightResponse, RecordSubAgentResponse, RecordTurn, RecordTurnResponse } from "@penelope/contract";
+import type { Activity, MemoryChange, RecordFlowItem, RecordNightResponse, RecordSubAgentResponse, RecordTurn, RecordTurnResponse } from "@penelope/contract";
 
 import { type Api, Refused } from "../model/api.ts";
 import { ChevronLeftIcon } from "./icons.tsx";
@@ -106,7 +106,7 @@ function Head({ title, mono = false, mark, result, reason, bad }: { title: strin
   );
 }
 
-function Facts({ facts }: { facts: Array<[string, string]> }) {
+function Facts({ facts, memory, origin }: { facts: Array<[string, string]>; memory?: readonly MemoryChange[]; origin?: RecordPage }) {
   return (
     <dl className="record-facts">
       {facts.map(([key, value]) => (
@@ -115,6 +115,10 @@ function Facts({ facts }: { facts: Array<[string, string]> }) {
           <dd>{value}</dd>
         </div>
       ))}
+      {memory?.length && origin ? <div className="record-memory-facts">
+        <dt>記憶</dt>
+        {memory.map((change) => <dd key={change.id}><a href={hashOf({ place: "memory", page: { kind: "change", id: change.id, from: origin } })}>記憶 {change.files} ファイル +{change.added} −{change.removed}</a></dd>)}
+      </div> : null}
     </dl>
   );
 }
@@ -137,7 +141,7 @@ function TurnPage({ api, data }: { api: Api; data: RecordTurnResponse }) {
     <>
       <Head title={headlineText(turn)} mark={<RecordMark mark={TURN_MARKS[turn.result]} />} result={TURN_RESULTS[turn.result]} reason={turn.reason} bad={turn.result === "failed"} />
       {turn.result !== "failed" && turn.reason !== undefined ? <p className="muted">{turn.reason}</p> : null}
-      <Facts facts={turnFacts(turn)} />
+      <Facts facts={turnFacts(turn)} {...(data.memory_change ? { memory: [data.memory_change], origin: { kind: "turn", id: turn.id } } : {})} />
       {expired ? (
         <p className="record-expired">{w.expired}</p>
       ) : (
@@ -203,7 +207,7 @@ function NightPage({ data }: { data: RecordNightResponse }) {
   return (
     <>
       <Head title={nightTitle(night)} mark={<RecordMark mark={night.result === "failed" ? "fail" : "night"} />} result={result} reason={failed?.reason} bad={night.result === "failed"} />
-      <Facts facts={facts} />
+      <Facts facts={facts} {...(data.memory_changes?.length ? { memory: data.memory_changes, origin: { kind: "night", id: night.id } } : {})} />
       {warnings === undefined ? null : <p className="record-note">{warnings}</p>}
       <ol className="record-steps">
         {stagesOf(night).map((stage, index) => {

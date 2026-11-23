@@ -3,6 +3,15 @@
 import type {
   AgentResponse,
   HistoryResponse,
+  MemoryChangeResponse,
+  MemoryChangesResponse,
+  MemoryCompareResponse,
+  MemoryFileDiff,
+  MemoryFileResponse,
+  MemoryHistoryResponse,
+  MemoryOverviewResponse,
+  MemorySearchResponse,
+  MemoryWriterFilter,
   ModelSelection,
   PostMessageResponse,
   PushResponse,
@@ -69,6 +78,14 @@ export type Api = {
   recordUnseen(): Promise<RecordUnseenResponse>;
   /** The owner opened the record now: what was unseen until now, and when she opened it before. */
   recordSeen(): Promise<RecordSeenResponse>;
+  memory(tz: string): Promise<MemoryOverviewResponse>;
+  memoryFile(path: string, head?: string): Promise<MemoryFileResponse>;
+  memoryChanges(writer: MemoryWriterFilter, tz: string, head?: string, before?: string): Promise<MemoryChangesResponse>;
+  memoryChange(id: string): Promise<MemoryChangeResponse>;
+  memoryDiff(id: string, path: string): Promise<MemoryFileDiff>;
+  memoryHistory(path: string, head?: string, before?: string): Promise<MemoryHistoryResponse>;
+  memoryCompare(path: string, from: string, to: string): Promise<MemoryCompareResponse>;
+  memorySearch(q: string, head?: string): Promise<MemorySearchResponse>;
 };
 
 /** The narrowing of `GET /api/record` (docs/ui-api.md, "活動の記録"). */
@@ -90,7 +107,21 @@ export function createApi(fetch: Fetch): Api {
     return response;
   };
 
+  const memory = async <T,>(path: string, params: Record<string, string | undefined> = {}): Promise<T> => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) if (value !== undefined) query.set(key, value);
+    return (await call(`/api/memory${path}${query.size === 0 ? "" : `?${query}`}`)).json() as Promise<T>;
+  };
+
   return {
+    memory: (tz) => memory("", { tz }),
+    memoryFile: (path, head) => memory("/file", { path, head }),
+    memoryChanges: (writer, tz, head, before) => memory("/changes", { writer, tz, head, before }),
+    memoryChange: (id) => memory(`/changes/${encodeURIComponent(id)}`),
+    memoryDiff: (id, path) => memory(`/changes/${encodeURIComponent(id)}/diff`, { path }),
+    memoryHistory: (path, head, before) => memory("/history", { path, head, before }),
+    memoryCompare: (path, from, to) => memory("/compare", { path, from, to }),
+    memorySearch: (q, head) => memory("/search", { q, head }),
     agent: async () => (await call("/api/agent")).json() as Promise<AgentResponse>,
     agents: async () => (await call("/api/agents")).json() as Promise<SubAgentsResponse>,
     history: async (before) =>

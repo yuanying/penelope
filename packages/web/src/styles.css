@@ -1230,6 +1230,166 @@ button.record-row-body:hover {
     text-align: end;
   }
 }
+/* Memory is a reading place. Only additions and removals have a colored ground. */
+.memory-place {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.memory-place [hidden] { display: none; }
+.memory-inset { padding-top: 124px; }
+.memory-header, .memory-tabs {
+  width: 100%;
+  max-width: 760px;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding-inline: 20px;
+}
+.memory-header {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-block: 12px;
+}
+.memory-header form { width: min(57%, 240px); }
+.memory-tabs { display: flex; gap: 16px; }
+.memory-tabs a, .memory-controls > button, .memory-hit {
+  display: inline-flex;
+  min-height: 44px;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 6px;
+  color: inherit;
+  font: inherit;
+}
+.memory-tabs a {
+  padding-inline: 10px;
+  border-bottom: 2px solid transparent;
+  text-decoration: none;
+}
+.memory-tabs a[aria-current] { border-color: currentColor; font-weight: 600; }
+.memory-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 20px 48px;
+}
+.memory-scroll .page-body, .memory-scroll .record-main, .memory-scroll section { min-width: 0; }
+.memory-scroll a:not(.record-row-body) { color: inherit; }
+.memory-scroll .record-back { align-self: flex-start; }
+.memory-scroll p, .memory-scroll h2, .memory-scroll h3 { margin: 0; }
+.memory-scroll h2 { font-size: 1rem; }
+.memory-scroll h3 { font-size: 0.875rem; }
+.memory-scroll p.muted { font-size: 0.875rem; }
+.memory-card, .memory-diff {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+.memory-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: var(--color-background-surface);
+}
+.memory-card > .record-row-body:last-of-type { border-bottom: 0; }
+.memory-section-head, .memory-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+}
+.memory-section-head { justify-content: space-between; }
+.memory-section-head .muted, .memory-file-row .muted { font-size: 0.8125rem; }
+.memory-hit, .memory-controls > button {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding-inline: 10px;
+}
+.memory-hit:where(a) { text-decoration: none; }
+.memory-scroll button, .memory-fold summary { cursor: pointer; }
+.memory-controls > button[aria-pressed="true"] { border-color: currentColor; font-weight: 600; }
+.memory-controls > * { min-height: 44px; }
+.memory-meter {
+  position: relative;
+  height: 8px;
+  margin-block: 6px;
+  border-radius: 4px;
+  background: var(--color-border);
+}
+.memory-meter span { display: block; height: 100%; border-radius: inherit; background: var(--color-text-secondary); }
+.memory-meter i { position: absolute; left: 75%; top: -3px; bottom: -3px; border-left: 1px solid currentColor; }
+.memory-place code { font-family: ui-monospace, monospace; overflow-wrap: anywhere; }
+.memory-paths { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 0.75rem; }
+.memory-file-row { flex-wrap: wrap; align-items: center; }
+.memory-file-row > code { font-weight: 600; }
+.memory-file-row svg, .memory-fold svg, .memory-change-row svg { flex: none; }
+.memory-file-meta { margin-left: auto; }
+.memory-fold summary { list-style: none; align-items: center; flex-wrap: wrap; }
+.memory-fold summary::-webkit-details-marker { display: none; }
+.memory-fold[open] > summary svg, .memory-diff-head [aria-expanded="true"] svg { transform: rotate(90deg); }
+.memory-fold-tail { margin-left: auto; }
+.memory-nested { padding-inline-start: 12px; }
+.memory-topics { margin-block: 12px; }
+.memory-broken { padding-block: 6px; }
+.memory-document { display: block; }
+.memory-document img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; }
+.memory-document .memory-text-link { text-decoration: underline; }
+.memory-document pre, .memory-source { max-width: 100%; }
+.memory-source { margin: 0; }
+.memory-source > span, .memory-diff-line {
+  display: grid;
+  grid-template-columns: 3em minmax(0, 1fr);
+  gap: 4px;
+  font: 0.8125rem/1.6 ui-monospace, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.memory-source > span > :first-child, .memory-diff-line > [aria-hidden] { color: var(--color-text-secondary); text-align: end; }
+.memory-source > [data-selected] { background: var(--color-neutral); outline: 1px solid var(--color-border); }
+.memory-diff-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  min-height: 44px;
+  gap: 8px;
+  padding: 4px 8px;
+  font-size: 0.875rem;
+}
+.memory-diff-head button { justify-content: center; min-width: 44px; border-color: transparent; }
+.memory-diff-title { display: flex; flex-direction: column; }
+.memory-diff-title > a { display: flex; min-height: 44px; align-items: center; }
+.memory-diff-note { padding: 6px 12px; }
+.memory-diff-content { border-top: 1px solid var(--color-border); }
+.memory-diff-line { grid-template-columns: 2.8em 2.8em 1em minmax(0, 1fr); padding: 2px 8px; }
+.memory-diff-line > code { white-space: pre-wrap; }
+.memory-diff-line[data-kind="added"] { background: color-mix(in srgb, var(--color-text-success) 12%, transparent); }
+.memory-diff-line[data-kind="removed"] { background: color-mix(in srgb, var(--color-text-error) 12%, transparent); }
+.memory-moves { list-style: none; margin: 0; padding: 0; }
+.memory-moves a { display: inline-flex; align-items: center; min-height: 44px; }
+.memory-version { display: flex; align-items: stretch; min-width: 0; gap: 4px; }
+.memory-version label { min-width: 44px; justify-content: center; align-self: stretch; }
+.memory-version input { accent-color: currentColor; }
+.memory-version .record-row-body { min-width: 0; }
+.memory-search-line code { white-space: pre-wrap; }
+.record-memory-facts dd { grid-column: 2; }
+.record-memory-facts a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; }
+@media (max-width: 767px) {
+  .memory-header, .memory-tabs, .memory-scroll { padding-inline: 12px; }
+  .memory-file-meta { flex-basis: 100%; order: 2; }
+  .memory-diff-line { grid-template-columns: 2.5em 2.5em 1em minmax(0, 1fr); }
+  .memory-scroll .record-group-rows { padding-inline-start: 10px; }
+}
+
 .record-detail-head h1 code {
   padding: 0;
   background: none;

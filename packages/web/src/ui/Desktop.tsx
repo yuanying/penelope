@@ -13,6 +13,7 @@ import type { FlowItem, Status, SubAgentView } from "../model/store.ts";
 import { AgentAvatar, useAgent } from "./agent.tsx";
 import { StatusLabel } from "./Now.tsx";
 import { LogoutIcon } from "./icons.tsx";
+import { MemoryPlace } from "./memory/Memory.tsx";
 import { type Notices, NoticesButton } from "./Notices.tsx";
 import { AgentNow } from "./Panel.tsx";
 import { RecordPlace } from "./Record.tsx";
@@ -20,7 +21,7 @@ import { type Route, useRoute } from "./route.ts";
 import { Schedules } from "./Schedules.tsx";
 import { Settings } from "./Settings.tsx";
 import { SubAgentCount } from "./SubAgents.tsx";
-import { PlaceItems, Placeholder } from "./places.tsx";
+import { PlaceItems } from "./places.tsx";
 import { Talk, type TalkProps } from "./Talk.tsx";
 import { words } from "./words.ts";
 
@@ -64,8 +65,8 @@ export function PlaceBody({ route, props, topInset = false }: { route: Route; pr
       );
     case "talk":
       return null;
-    default:
-      return <Placeholder place={route.place} />;
+    case "memory":
+      return <MemoryPlace api={props.api} onUnauthorized={props.onUnauthorized} page={route.page} topInset={topInset} />;
   }
 }
 

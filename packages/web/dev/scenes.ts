@@ -21,6 +21,7 @@ import type {
   Trigger,
 } from "@penelope/contract";
 
+import { MEMORY_TURN, type MemoryScene, memoryScene } from "./memory.ts";
 import { MORNING_TRIGGERS, morning } from "./morning.ts";
 
 export type Scene = {
@@ -33,6 +34,7 @@ export type Scene = {
   record: RecordRow[];
   /** The turns of the nightly switch: on the night's page only, never rows of the list (docs/ui-api.md). */
   nightTurns: RecordTurn[];
+  memory?: MemoryScene;
   unseen: number;
   /** When the owner opened the record before, as POST /api/record/seen answers. */
   previousSeenAt: string;
@@ -306,6 +308,27 @@ function ordinary(now: number): Scene {
   return { agent, history, schedules: schedules(c), ...normalDay(c, history), previousSeenAt: c.ago(600), agents: [], unseen: 0, stream: [], script: [] };
 }
 
+function withMemory(now: number, state: "normal" | "over" | "broken" | "empty" = "normal"): Scene {
+  const memory = memoryScene(now, state);
+  const night = memory.overview.last_night;
+  const c = clock(now);
+  if (!night) return { agent, memory, history: [], schedules: [], record: [], nightTurns: [], agents: [], unseen: 0, previousSeenAt: c.ago(600), stream: [], script: [] };
+  const stage = (key: "reflection" | "verifier" | "curator") => {
+    const change = night.changes.find(({ change }) => change.writer.kind === "night" && change.writer.stage === key)!.change;
+    return { result: "done" as const, memory_change: { files: change.files, added: change.added, removed: change.removed } };
+  };
+  return {
+    agent, memory, history: [], schedules: [], nightTurns: [], agents: [], unseen: 0, previousSeenAt: c.ago(600), stream: [], script: [],
+    record: [
+      turnRow(MEMORY_TURN, c.at(9, 39), 60, { ...given("cron", "朝の道具の点検"), tools: 2 }),
+      {
+        id: night.id, kind: "night", at: night.at, started_at: night.at, ended_at: night.ended_at, seconds: 480, result: "done",
+        stages: { reflection: stage("reflection"), verifier: stage("verifier"), curator: stage("curator"), session: { result: "done" } },
+      },
+    ],
+  };
+}
+
 export type SceneDef = { about: string; make: (now: number) => Scene };
 
 export const scenes: Record<string, SceneDef> = {
@@ -368,6 +391,10 @@ export const scenes: Record<string, SceneDef> = {
       };
     },
   },
+  memory: { about: "memory: an ordinary day, a night with moves, a year of diaries", make: withMemory },
+  "memory-over": { about: "memory: the always-read layer exceeds its target", make: (now) => withMemory(now, "over") },
+  "memory-broken": { about: "memory: two missing link destinations", make: (now) => withMemory(now, "broken") },
+  "memory-empty": { about: "memory: only personality.md, no night yet", make: (now) => withMemory(now, "empty") },
   "memory-review": {
     about: "a weekly review with two curator turns, an over-target prompt layer and dropped records",
     make: (now) => {

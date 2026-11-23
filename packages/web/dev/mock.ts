@@ -13,6 +13,12 @@ import { modelRef } from "@penelope/contract";
 import type {
   HistoryEntry,
   HistoryResponse,
+  MemoryChangesResponse,
+  MemoryCompareResponse,
+  MemoryFileResponse,
+  MemoryHistoryResponse,
+  MemoryOverviewResponse,
+  MemorySearchResponse,
   ModelSelection,
   SettingsResponse,
   PostMessageResponse,
@@ -29,6 +35,7 @@ import type {
   StreamEvent,
 } from "@penelope/contract";
 
+import { memoryDiff, type MemoryScene } from "./memory.ts";
 import { AVATAR_DIR, AVATAR_ICONS, DAY_IMAGE, PLACEHOLDER_IMAGE, type Scene, scenes } from "./scenes.ts";
 
 const COOKIE = "penelope-dev-scene";
@@ -170,6 +177,17 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
   if (method === "GET" && path === "/api/push") return (json(200, {}), true);
   if (method === "POST" && path === "/api/push/subscriptions") return (json(503, { error: "web-push-not-configured" }), true);
   if (method === "POST" && path === "/api/push/subscriptions/delete") return (empty(), true);
+  if (path === "/api/memory" || path.startsWith("/api/memory/")) {
+    if (method !== "GET") return (json(405, { error: "read only" }), true);
+    if (path === "/api/memory/image" && url.searchParams.get("path") === "avatar/sample.png" && w.memory?.overview.files.some((f) => f.path === "avatar/sample.png")) {
+      response.writeHead(200, { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" });
+      response.end(SAMPLE_IMAGE);
+      return true;
+    }
+    const answer = memory(w.memory, url);
+    response.setHeader("cache-control", "no-store");
+    return (answer === undefined ? json(404, { error: "not found" }) : json(200, answer), true);
+  }
   if (path.startsWith("/api/record")) {
     const answer = record(w, method, url);
     if (answer !== undefined) return (json(200, answer), true);
@@ -318,6 +336,81 @@ function sendAsset(w: World, id: string, response: ServerResponse): boolean {
   return true;
 }
 
+// ── Committed memory ──
+
+// A small drawn icon, with no external dependency.
+const SAMPLE_IMAGE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XxQ0YAAAAABJRU5ErkJggg==", "base64");
+const EMPTY_MEMORY: MemoryOverviewResponse = { head: null, files: [], broken_links: [], links_incomplete: false, last_night: null, always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] } };
+const MEMORY_PAGE = 50;
+
+function memory(scene: MemoryScene | undefined, url: URL): unknown {
+  const parts = url.pathname.split("/").slice(3);
+  const { searchParams: q } = url;
+  const overview = scene?.overview ?? EMPTY_MEMORY;
+  const head = overview.head;
+  const path = q.get("path") ?? "";
+  if (head !== q.get("head") && q.has("head")) return;
+  const changes = (scene?.changes ?? []).map((entry) => entry.change);
+  const versions = changes.filter((c) => c.paths.includes(path));
+  const before = q.get("before");
+  const page = <T extends { id: string },>(items: T[]) => {
+    const start = before === null ? 0 : items.findIndex((item) => item.id === before) + 1;
+    const data = items.slice(start, start + MEMORY_PAGE);
+    return { data, ...(start + MEMORY_PAGE < items.length ? { next: data.at(-1)!.id } : {}) };
+  };
+  if (!parts.length) return overview;
+  if (parts[0] === "file") {
+    const file = overview.files.find((f) => f.path === path);
+    if (!head || !file) return;
+    const moved = overview.last_night?.changes.flatMap((c) => c.moves).find((move) => move.to === path);
+    return {
+      head, file, history_count: versions.length, broken_links: overview.broken_links.filter((link) => link.path === path), ...(moved ? { moved_from: moved.from } : {}),
+      ...(path.startsWith("avatar/") ? { kind: "image", image_url: `/api/memory/image?${new URLSearchParams({ path, head })}` } : { kind: "markdown", text: scene?.text[path] ?? "" }),
+    } satisfies MemoryFileResponse;
+  }
+  if (parts[0] === "changes" && parts.length === 1) {
+    const writer = q.get("writer") ?? "all";
+    const matches = changes.filter((c) => writer === "all" || c.writer.kind === writer || (writer === "night" && c.writer.kind === "system" && c.writer.operation === "reference_repair"));
+    const { data, ...cursor } = page(matches);
+    const iso = new Intl.DateTimeFormat("sv-SE", { dateStyle: "short", ...(q.has("tz") ? { timeZone: q.get("tz")! } : {}) });
+    const dayOf = (c: { at: string }) => iso.format(new Date(c.at));
+    const days = [...new Set(data.map(dayOf))].map((day) => {
+      const all = matches.filter((c) => dayOf(c) === day);
+      return { day, items: data.filter((c) => dayOf(c) === day), changes: all.length, files: new Set(all.flatMap((c) => c.paths)).size };
+    });
+    return { head, days, ...cursor } satisfies MemoryChangesResponse;
+  }
+  if (parts[0] === "changes") {
+    const change = scene?.changes.find((c) => c.change.id === parts[1]);
+    if (parts.length === 2) return change;
+    if (parts[2] === "diff" && change?.files.some((f) => f.path === path)) return memoryDiff(path);
+  }
+  if (parts[0] === "history") {
+    const { data, ...cursor } = page(versions);
+    return { head, changes: data, ...cursor } satisfies MemoryHistoryResponse;
+  }
+  if (parts[0] === "compare") {
+    const from = q.get("from") ?? "";
+    const to = q.get("to") ?? "";
+    const oldest = versions.findIndex((c) => c.id === from);
+    const newest = versions.findIndex((c) => c.id === to);
+    if (newest < 0 || oldest <= newest) return;
+    const diff = memoryDiff(path);
+    const lines = diff.kind === "text" ? diff.hunks.flatMap((h) => h.lines) : [];
+    return { from, to, changes: oldest - newest, diff, added: lines.filter((l) => l.kind === "added").length, removed: lines.filter((l) => l.kind === "removed").length } satisfies MemoryCompareResponse;
+  }
+  if (parts[0] === "search") {
+    const query = q.get("q");
+    if (!query) return;
+    let hits = 0;
+    const files = Object.entries(scene?.text ?? {}).flatMap(([path, text]) => {
+      const lines = text.split("\n").flatMap((text, i) => text.includes(query) && ++hits <= 100 ? [{ line: i + 1, text }] : []);
+      return lines.length ? [{ path, lines }] : [];
+    });
+    return { head, files, truncated: hits > 100, line_limit: 100 } satisfies MemorySearchResponse;
+  }
+}
+
 // ── The activity record ──
 
 type RecordAnswer = RecordDayResponse | RecordTurnResponse | { output: string } | RecordNightResponse | RecordSubAgentResponse | { unseen: number } | RecordSeenResponse;
@@ -337,7 +430,10 @@ function record(w: World, method: string, url: URL): RecordAnswer | undefined {
   if (parts[0] === "turns") {
     const turn = turns.find((t) => t.id === parts[1]);
     if (turn === undefined) return undefined;
-    if (parts.length === 2) return { turn, flow: flowOf(turn), expired: false, replies: repliesOf(w, turn.id) };
+    if (parts.length === 2) {
+      const memory_change = w.memory?.changes.find(({ change: { writer } }) => "turn_id" in writer && writer.turn_id === turn.id)?.change;
+      return { turn, flow: flowOf(turn), expired: false, replies: repliesOf(w, turn.id), ...(memory_change ? { memory_change } : {}) };
+    }
     if (parts.length === 4 && parts[2] === "results") {
       const call = flowOf(turn).find((item) => item.kind === "tool_call" && item.call_id === parts[3]);
       return call?.kind === "tool_call" ? { output: outputOf(call.arguments) } : undefined;
@@ -355,7 +451,9 @@ function record(w: World, method: string, url: URL): RecordAnswer | undefined {
         if (turn !== undefined) nightTurns[phase] = turn;
       }
     }
-    return { night, turns: nightTurns };
+    const last = w.memory?.overview.last_night;
+    const memory_changes = last?.id === night.id ? last.changes.map(({ change }) => change) : undefined;
+    return { night, turns: nightTurns, ...(memory_changes ? { memory_changes } : {}) };
   }
   if (parts[0] === "sub-agents" && parts.length === 2) {
     const name = parts[1]!;
