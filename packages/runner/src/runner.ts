@@ -18,6 +18,7 @@ import type {
   Activity,
   ControlPayload,
   DeliveredEvent,
+  MemoryReadsSnapshot,
   NightStage,
   NightStages,
   NightTurnReport,
@@ -91,7 +92,7 @@ interface TurnOptions {
   seqs?: number[];
   /** For a turn of the nightly switch: its control event and step. The turn is not ordinary. */
   night?: { seq: number; stage: NightTurnStage };
-  afterCommit?: () => Promise<void>;
+  afterCommit?: (turnId: string) => Promise<void>;
   images?: ImageContent[];
   heartbeat?: boolean;
 }
@@ -441,11 +442,12 @@ export class Runner {
     await this.sending;
     this.turnId = undefined;
     try {
+      const { afterCommit } = options;
       await this.backend.turnEnd({
         turn_id: recorder.turnId,
         ...outcome,
         ...(ordinary ? { seqs: turn.seqs } : { night }),
-      }, options.afterCommit);
+      }, afterCommit && (() => afterCommit(recorder.turnId)));
     } catch (error) {
       this.log(`turn end not sent: ${failure(error)}`);
     }
@@ -507,12 +509,12 @@ export class Runner {
     }
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
-    const stages = made ? undefined : await this.nightly(event.seq, payload.review_date);
+    const report = made ? undefined : await this.nightly(event.seq, payload.review_date);
     await this.backend
-      .rotated({ seq: event.seq, ...(stages ? { stages } : {}) })
+      .rotated({ seq: event.seq, ...report })
       .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
     // Without a new session the event is not acked: it comes again, and the night is run again.
-    if (stages && stages.session.result !== "done") {
+    if (report && report.stages.session.result !== "done") {
       this.taken.delete(event.seq);
       return;
     }
@@ -520,16 +522,19 @@ export class Runner {
   }
 
   /** Each step is attempted even if one before it failed (ADR-0044). */
-  private async nightly(seq: number, reviewDate?: string): Promise<NightStages> {
+  private async nightly(seq: number, reviewDate?: string): Promise<{ stages: NightStages; memory_reads?: MemoryReadsSnapshot }> {
     const nightStarted = new Date().toISOString();
     const { memoryDir, identity, promptLayerTargetBytes, nightCarryDays } = this.config;
     const manager = this.session!.session.sessionManager;
     const today = nightStarted.slice(0, 10);
     const previousReads = this.state?.memoryReads ?? [];
-    const reads = await memoryReads(memoryDir, manager.getCwd(), manager.getEntries(), previousReads, today).catch(() => {
+    let snapshot: MemoryReadsSnapshot | undefined;
+    try {
+      snapshot = { day: today, files: await memoryReads(memoryDir, manager.getCwd(), manager.getEntries(), previousReads, today) };
+    } catch {
       this.log("night memory reads could not be collected");
-      return previousReads;
-    });
+    }
+    const reads = snapshot?.files ?? previousReads;
     const reflection = await this.nightStage("reflection", async () => {
       const layer = await alwaysReadLayer(memoryDir, promptLayerTargetBytes);
       manager.appendCustomEntry(NIGHT_REFLECTION, true);
@@ -656,10 +661,13 @@ export class Runner {
       session = { result: "failed", reason: `The new session could not start: ${failure(error)}` };
     }
     return {
-      reflection,
-      verifier: { ...verifier, ...(droppedRecords ? { dropped_records: droppedRecords } : {}) },
-      curator: { ...curator, ...(overTarget === undefined ? {} : { always_read_over_target: overTarget }) },
-      session,
+      stages: {
+        reflection,
+        verifier: { ...verifier, ...(droppedRecords ? { dropped_records: droppedRecords } : {}) },
+        curator: { ...curator, ...(overTarget === undefined ? {} : { always_read_over_target: overTarget }) },
+        session,
+      },
+      ...(snapshot === undefined ? {} : { memory_reads: snapshot }),
     };
   }
 
@@ -695,18 +703,18 @@ export class Runner {
     try {
       return stageOf(await this.turnOf(session, input, {
         night: { seq, stage },
-        ...(moves === undefined ? {} : { afterCommit: () => this.repairMoves(moves) }),
+        ...(moves === undefined ? {} : { afterCommit: (turnId) => this.repairMoves(moves, { seq, turn_id: turnId }) }),
       }));
     } finally {
       session.dispose();
     }
   }
 
-  private async repairMoves(moves: MemoryMoves): Promise<void> {
+  private async repairMoves(moves: MemoryMoves, night: { seq: number; turn_id: string }): Promise<void> {
     const report = (error: unknown) => this.log(`night memory reference repair: ${failure(error)}`);
     try {
       const repair = await repairMemoryReferences(this.config.memoryDir, moves, report);
-      if (repair.paths.length > 0) await this.backend.commitMemoryRepairs(repair);
+      if (repair.paths.length > 0) await this.backend.commitMemoryRepairs({ ...repair, night });
     } catch (error) {
       report(error);
     }

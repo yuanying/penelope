@@ -3,7 +3,7 @@ import { chmod, mkdir, readFile, readdir, stat, symlink, unlink, writeFile } fro
 import { join } from "node:path";
 import { test } from "node:test";
 
-import type { DeliveredEvent, HeartbeatPending, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
+import type { DeliveredEvent, HeartbeatPending, MemoryRepairRequest, SessionRotatedRequest, TurnEndRequest, TurnLine } from "@penelope/contract";
 
 import type { Config } from "../src/config.ts";
 import { newSessionFile, writeState } from "../src/pi.ts";
@@ -472,7 +472,8 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   );
   const order = fake.order().filter((r) => r === "POST /v1/sessions/rotated" || r === "POST /v1/events/ack");
   assert.deepEqual(order, ["POST /v1/events/ack", "POST /v1/sessions/rotated", "POST /v1/events/ack"]);
-  assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [
+  const rotations = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  assert.deepEqual(rotations.map(({ agent, seq, stages }) => ({ agent, seq, stages })), [
     { agent: "main", seq: 2, stages: {
       reflection: { result: "done", turn_id: turnEnds[1]!.turn_id },
       verifier: { result: "done", turn_id: turnEnds[2]!.turn_id },
@@ -491,6 +492,28 @@ test("the nightly event runs reflection, verifier and curator in separate contex
   const sessionsAfter = await readdir(config.sessionDir);
   assert.ok(sessionsBefore.every((name) => sessionsAfter.includes(name)), "the day's record is kept");
   assert.equal(sessionsAfter.filter((name) => !sessionsBefore.includes(name) && name.endsWith(".jsonl")).length, 1, "one new record");
+});
+
+test("the rotation reports only the relative path and UTC date of a daytime read", async () => {
+  const { fake, start, config } = await world();
+  const path = join(config.memoryDir, "topic.md");
+  await writeFile(path, "example body\n");
+  await start((call) => call.lastRole === "user" && events(call.lastText).some(({ seq }) => seq === 1)
+    ? { calls: [{ tool: "read", args: { path } }] }
+    : { text: "ok" });
+  const startDay = new Date().toISOString().slice(0, 10);
+  fake.push(ui(1, "read the topic"));
+  await until(() => acked(fake).includes(1));
+  fake.push(nightly(2));
+  await until(() => acked(fake).includes(2));
+  const endDay = new Date().toISOString().slice(0, 10);
+  const [rotation] = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
+  const snapshot = rotation?.memory_reads;
+  assert.ok(snapshot);
+  assert.ok([startDay, endDay].includes(snapshot.day));
+  const date = snapshot.files[0]?.dates[0];
+  assert.ok(date && [startDay, snapshot.day].includes(date));
+  assert.deepEqual(snapshot, { day: snapshot.day, files: [{ path: "topic.md", dates: [date] }] });
 });
 
 test("weekly review rebuilds the map after content review and gives it to a fresh structure session", async () => {
@@ -521,6 +544,10 @@ test("weekly review rebuilds the map after content review and gives it to a fres
   assert.doesNotMatch(structure!.userTexts[0]!, /"old\.md"/);
   assert.match(structure!.userTexts[0]!, /PURPOSE\.md.*答えられるべき問い/);
   assert.equal(await readFile(join(config.memoryDir, "always.md"), "utf8"), "[topic](final.md)\n");
+  // Each repair belongs to the review turn that moved the file, not the final curator turn.
+  const turnEnds = (fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).filter(({ night }) => night?.stage === "curator");
+  const repairs = fake.sent("POST", "/v1/memory/repairs") as MemoryRepairRequest[];
+  assert.deepEqual(repairs.map(({ night }) => night), turnEnds.map(({ turn_id }) => ({ seq: 1, turn_id })));
 });
 
 test("an unchanged topic counts as reviewed so the next week reaches another topic after a restart", async () => {
@@ -595,9 +622,9 @@ test("a curator move is repaired after its turn commit and before the next night
   const repair = "POST /v1/memory/repairs";
   const order = fake.order().filter((r) => r === "POST /v1/turns/end" || r === repair || r === "POST /v1/sessions/rotated");
   assert.deepEqual(order.slice(-3), ["POST /v1/turns/end", repair, "POST /v1/sessions/rotated"]);
-  assert.deepEqual(fake.sent("POST", "/v1/memory/repairs"), [{
-    agent: "main", paths: ["always.md"], moves: [{ from: "old.md", to: "topics/new.md" }],
-  }]);
+  const [repairRequest] = fake.sent("POST", "/v1/memory/repairs") as MemoryRepairRequest[];
+  assert.deepEqual(repairRequest?.paths, ["always.md"]);
+  assert.deepEqual(repairRequest?.moves, [{ from: "old.md", to: "topics/new.md" }]);
   assert.equal(await readFile(join(config.memoryDir, "always.md"), "utf8"), "[topic](topics/new.md)\n");
 
   fake.push(nightly(2));
@@ -965,6 +992,8 @@ test("a new session that cannot be opened is told as the night's last step, and 
   const [first] = fake.sent("POST", "/v1/sessions/rotated") as SessionRotatedRequest[];
   assert.equal(first!.stages?.session.result, "failed");
   assert.ok(first!.stages?.session.reason);
+  // A new session is not required to report a successfully collected empty snapshot.
+  assert.deepEqual(first!.memory_reads?.files, []);
   assert.ok(!acked(fake).includes(1), "the nightly event is not acked");
 
   await chmod(config.sessionDir, 0o755);

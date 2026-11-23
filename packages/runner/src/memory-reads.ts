@@ -14,6 +14,17 @@ export function memoryPath(root: string, absolute: string): string | undefined {
   return path;
 }
 
+// The sandbox API expects slash-separated paths relative to /memory.
+function snapshotPath(path: string): boolean {
+  return !/[\\\0]/.test(path) && path.split("/").every((part) => part && part !== "." && part !== ".." && part.toLowerCase() !== ".git");
+}
+
+function isDay(date: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const time = Date.parse(date);
+  return Number.isFinite(time) && new Date(time).toISOString().slice(0, 10) === date;
+}
+
 export function recentReadCutoff(today: string): string {
   const date = new Date(today);
   date.setUTCDate(date.getUTCDate() - 29);
@@ -86,7 +97,9 @@ export async function memoryReads(
           }
         }
       }
-      const day = entry.timestamp.slice(0, 10);
+      const time = Date.parse(entry.timestamp);
+      if (!Number.isFinite(time)) continue;
+      const day = new Date(time).toISOString().slice(0, 10);
       for (const absolute of found) {
         const path = memoryPath(root, absolute);
         if (!path || (!read && !await isFile(absolute))) continue;
@@ -97,9 +110,13 @@ export async function memoryReads(
     }
   }
   const cutoff = recentReadCutoff(today);
-  return [...reads].map(([path, dates]) => {
-    dates.sort();
-    const recent = dates.filter((date) => date >= cutoff);
-    return { path, dates: recent.length ? recent : dates.slice(-1) };
-  });
+  const history: MemoryRead[] = [];
+  for (const [path, dates] of reads) {
+    if (!snapshotPath(path)) continue;
+    const valid = dates.filter((date) => isDay(date) && date <= today).sort();
+    if (!valid.length) continue;
+    const recent = valid.filter((date) => date >= cutoff);
+    history.push({ path, dates: recent.length ? recent : valid.slice(-1) });
+  }
+  return history;
 }

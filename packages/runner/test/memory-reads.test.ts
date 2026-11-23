@@ -53,6 +53,22 @@ test("one successful shell call contributes one reference per existing memory pa
   ]);
 });
 
+test("the read history drops paths that would invalidate a snapshot", async () => {
+  const day = "2026-11-21";
+  const paths = [".GiT/config", "topic\\notes.md", "topic//notes.md", "../notes.md", "topic\0.md", "/notes.md", "topics/notes.md"];
+  const reads = await memoryReads("/example/memory", "/example", [], paths.map((path) => ({ path, dates: [day] })), day);
+  assert.deepEqual(reads, [{ path: "topics/notes.md", dates: [day] }]);
+});
+
+test("the read history drops invalid and future dates without dropping valid reads", async () => {
+  const day = "2026-11-21";
+  const reads = await memoryReads("/example/memory", "/example", [], [
+    { path: "topic.md", dates: [day, "2026-11-22"] },
+    { path: "old.md", dates: ["2026-02-30"] },
+  ], day);
+  assert.deepEqual(reads, [{ path: "topic.md", dates: [day] }]);
+});
+
 test("the map keeps the last read but counts only the current day and previous 29 days", async (t) => {
   const root = await mkdtemp(join(tmpdir(), "memory-reads-"));
   t.after(() => rm(root, { recursive: true, force: true }));
