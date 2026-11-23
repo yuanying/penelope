@@ -15,7 +15,9 @@ export type MemoryScene = {
   text: Record<string, string>;
 };
 
-export function memoryScene(now: number, state: "normal" | "over" | "broken" | "empty" = "normal"): MemoryScene {
+/** `lastNight` is the record's night that her last night's changes belong to, and how many days before today it ran. */
+export function memoryScene(now: number, state: "normal" | "over" | "broken" | "empty" = "normal", lastNight_: { id: string; daysBefore: number } = { id: MEMORY_NIGHT_RECORD, daysBefore: 1 }): MemoryScene {
+  const { id: nightId, daysBefore: nightDay } = lastNight_;
   const at = (hour: number, minute: number, daysBefore = 0) => {
     const t = new Date(now);
     t.setDate(t.getDate() - daysBefore);
@@ -64,16 +66,16 @@ export function memoryScene(now: number, state: "normal" | "over" | "broken" | "
     }
     for (let i = 1; i <= 31; i++) text[`archive/box-${i}.md`] = `# 箱 ${i}\n\n以前の点検表を保管した。\n`;
     if (state === "broken") text[TOPIC] += "\n[移す前の控え](old.md) と [古い索引](../../old-index.md)。\n";
-    const night = (stage: "reflection" | "verifier" | "curator"): MemoryWriter => ({ kind: "night", stage, night_id: MEMORY_NIGHT_RECORD, night_seq: 7 });
+    const night = (stage: "reflection" | "verifier" | "curator"): MemoryWriter => ({ kind: "night", stage, night_id: nightId, night_seq: 7 });
     const moves = [{ from: "machines/notes.md", to: TOPIC }];
     const nightChanges = [
-      change(894, at(3, 1, 1), night("reflection"), [file("handoff.md", 4, 1)]),
-      change(896, at(3, 3, 1), night("verifier"), [file("INDEX.md", 3, 1)]),
-      change(898, at(3, 6, 1), night("curator"), [file(TOPIC, 4, 2, { kind: "moved", from: moves[0]!.from }), ...Array.from({ length: 31 }, (_, i) => file(`archive/box-${i + 1}.md`)), file("always.md", 12, 37), file("avatar/sample.png", 0, 0)], moves),
-      change(899, at(3, 7, 1), { kind: "system", operation: "reference_repair", night_id: MEMORY_NIGHT_RECORD, night_seq: 7 }, [file("goals/today.md", 1, 1)], moves),
+      change(894, at(3, 1, nightDay), night("reflection"), [file("handoff.md", 4, 1)]),
+      change(896, at(3, 3, nightDay), night("verifier"), [file("INDEX.md", 3, 1)]),
+      change(898, at(3, 6, nightDay), night("curator"), [file(TOPIC, 4, 2, { kind: "moved", from: moves[0]!.from }), ...Array.from({ length: 31 }, (_, i) => file(`archive/box-${i + 1}.md`)), file("always.md", 12, 37), file("avatar/sample.png", 0, 0)], moves),
+      change(899, at(3, 7, nightDay), { kind: "system", operation: "reference_repair", night_id: nightId, night_seq: 7 }, [file("goals/today.md", 1, 1)], moves),
     ];
     lastNight = {
-      id: MEMORY_NIGHT_RECORD, at: at(3, 0, 1), ended_at: at(3, 8, 1), changes: nightChanges,
+      id: nightId, at: at(3, 0, nightDay), ended_at: at(3, 8, nightDay), changes: nightChanges,
       files: new Set(nightChanges.flatMap((c) => c.change.paths)).size,
       added: nightChanges.reduce((n, c) => n + c.change.added, 0), removed: nightChanges.reduce((n, c) => n + c.change.removed, 0),
     };

@@ -21,4 +21,6 @@
 | `/?scene=memory#/record/turns/t-memory-day` | 活動の記録のターン → 記憶の差分 → ターンに戻る。 |
 | `/?scene=memory#/record/nights/n-memory` | 活動の記録の夜 → 段ごとの差分 → 夜に戻る。 |
 
-`memory-review` は活動の記録の既存の棚卸し場面。記憶の閲覧には上の `memory`・`memory-*` を使う。
+`?scene=` なしの既定の場面と、記憶以外の場面（`busy`・`subagents`・`memory-review`・`failures`）にも、`memory` と同じ「ふつうの日」の記憶が入る。前夜の切り替えは、その場面の活動の記録の夜につながる（`failures` は整理係が落ちた夜の 1 つ前の夜）。`empty` の記憶は `personality.md` だけ。
+
+`memory-review` は活動の記録の既存の棚卸し場面。記憶の状態ごとの確かめには上の `memory`・`memory-*` を使う。

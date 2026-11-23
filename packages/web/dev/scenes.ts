@@ -301,31 +301,44 @@ function badDay(c: Clock, history: HistoryEntry[]): Pick<Scene, "record" | "nigh
 
 const main = (activity: Activity): StreamEvent => ({ event: "activity", data: { agent: "main", activity } });
 
-/** What every scene but `empty` has: the conversation, the schedules and a normal day. */
-function ordinary(now: number): Scene {
-  const c = clock(now);
-  const history = conversation(c);
-  return { agent, history, schedules: schedules(c), ...normalDay(c, history), previousSeenAt: c.ago(600), agents: [], unseen: 0, stream: [], script: [] };
-}
-
-function withMemory(now: number, state: "normal" | "over" | "broken" | "empty" = "normal"): Scene {
-  const memory = memoryScene(now, state);
+/** The rows of the record that the memory's changes name: the turn of the day's change, and the night of last night's. */
+function memoryRows(c: Clock, memory: MemoryScene): { turn: RecordTurn; night: Extract<RecordRow, { kind: "night" }> } | undefined {
   const night = memory.overview.last_night;
-  const c = clock(now);
-  if (!night) return { agent, memory, history: [], schedules: [], record: [], nightTurns: [], agents: [], unseen: 0, previousSeenAt: c.ago(600), stream: [], script: [] };
+  if (!night) return undefined;
   const stage = (key: "reflection" | "verifier" | "curator") => {
     const change = night.changes.find(({ change }) => change.writer.kind === "night" && change.writer.stage === key)!.change;
     return { result: "done" as const, memory_change: { files: change.files, added: change.added, removed: change.removed } };
   };
   return {
+    turn: turnRow(MEMORY_TURN, c.at(9, 39), 60, { ...given("cron", "朝の道具の点検"), tools: 2 }),
+    night: {
+      id: night.id, kind: "night", at: night.at, started_at: night.at, ended_at: night.ended_at, seconds: 480, result: "done",
+      stages: { reflection: stage("reflection"), verifier: stage("verifier"), curator: stage("curator"), session: { result: "done" } },
+    },
+  };
+}
+
+/**
+ * What every scene but `empty` has: the conversation, the schedules, a normal
+ * day and the memory of an ordinary day, whose last night is the day's night.
+ */
+function ordinary(now: number): Scene {
+  const c = clock(now);
+  const history = conversation(c);
+  const day = normalDay(c, history);
+  const memory = memoryScene(now, "normal", { id: "n-1", daysBefore: 0 });
+  const rows = memoryRows(c, memory)!;
+  const record = [...day.record.map((row) => row.kind === "night" && row.id === rows.night.id ? { ...row, stages: rows.night.stages } : row), rows.turn];
+  return { agent, history, schedules: schedules(c), ...day, record, memory, previousSeenAt: c.ago(600), agents: [], unseen: 0, stream: [], script: [] };
+}
+
+function withMemory(now: number, state: "normal" | "over" | "broken" | "empty" = "normal"): Scene {
+  const memory = memoryScene(now, state);
+  const c = clock(now);
+  const rows = memoryRows(c, memory);
+  return {
     agent, memory, history: [], schedules: [], nightTurns: [], agents: [], unseen: 0, previousSeenAt: c.ago(600), stream: [], script: [],
-    record: [
-      turnRow(MEMORY_TURN, c.at(9, 39), 60, { ...given("cron", "朝の道具の点検"), tools: 2 }),
-      {
-        id: night.id, kind: "night", at: night.at, started_at: night.at, ended_at: night.ended_at, seconds: 480, result: "done",
-        stages: { reflection: stage("reflection"), verifier: stage("verifier"), curator: stage("curator"), session: { result: "done" } },
-      },
-    ],
+    record: rows ? [rows.turn, rows.night] : [],
   };
 }
 
@@ -338,7 +351,8 @@ export const scenes: Record<string, SceneDef> = {
   },
   empty: {
     about: "no history, no schedules, no record",
-    make: (now) => ({ ...ordinary(now), history: [], schedules: [], record: [], nightTurns: [], previousSeenAt: new Date(now).toISOString() }),
+    // Nothing has happened yet, so the memory is what she starts with: personality.md alone.
+    make: (now) => ({ ...ordinary(now), history: [], schedules: [], record: [], nightTurns: [], memory: memoryScene(now, "empty"), previousSeenAt: new Date(now).toISOString() }),
   },
   busy: {
     about: "she is in a turn; the stream sends her thoughts and tools over a few seconds",
@@ -429,7 +443,11 @@ export const scenes: Record<string, SceneDef> = {
       const scene = ordinary(now);
       const c = clock(now);
       // Opened before last night, so that the night, the turn and the job are new to her; the missed night is older.
-      return { ...scene, ...badDay(c, scene.history), unseen: 3, previousSeenAt: c.at(2, 0) };
+      // Last night's curator failed, so the memory's last night is the one before, which went well.
+      const memory = memoryScene(now, "normal", { id: "n-0", daysBefore: 1 });
+      const rows = memoryRows(c, memory)!;
+      const bad = badDay(c, scene.history);
+      return { ...scene, ...bad, record: [...bad.record, rows.turn, rows.night], memory, unseen: 3, previousSeenAt: c.at(2, 0) };
     },
   },
 };
