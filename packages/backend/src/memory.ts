@@ -22,6 +22,7 @@ export class Memory {
   private readonly author: Author;
   /** Commits run one after another; a turn's end waits for the one before. */
   private last: Promise<unknown> = Promise.resolve();
+  private maintainedAt = -Infinity;
   /** Called after each commit that made one. */
   private readonly listeners: (() => void)[] = [];
 
@@ -90,6 +91,17 @@ export class Memory {
     }, (result) => result.kind === "saved");
   }
 
+  /** Pack loose objects without overlapping a turn commit or an owner save. */
+  maintain(now: number): Promise<void> {
+    return this.queue(async () => {
+      if (now - this.maintainedAt < 86_400_000 || !existsSync(path.join(this.dir, ".git", "HEAD"))) return;
+      this.maintainedAt = now;
+      // The mounted .git inherits the shared group from its setgid directories.
+      // Keep new packs and indexes readable even under a restrictive umask.
+      await this.git("-c", "core.sharedRepository=0640", "gc", "--quiet");
+    });
+  }
+
   /** `listener` is called after each commit that made one. */
   afterCommit(listener: () => void): void {
     this.listeners.push(listener);
@@ -156,6 +168,8 @@ export class Memory {
         "commit.gpgsign=false",
         "-c",
         "core.hooksPath=/dev/null",
+        "-c",
+        "maintenance.auto=false",
         ...args,
       ],
       {

@@ -9,7 +9,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0003 | [sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する](0003-all-egress-through-the-sentinel-passthrough-by-default.md) | Accepted（一部を ADR-0014 で置き換え） |
 | 0004 | [本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする](0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md) | Accepted（一部を ADR-0021 で置き換え） |
 | 0005 | [承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md) | Accepted |
-| 0006 | [記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md) | Accepted（一部を ADR-0049 で置き換え） |
+| 0006 | [記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md) | Accepted（一部を ADR-0049 で置き換え。ADR-0058 で保守を追加） |
 | 0007 | [セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md) | Accepted（一部を ADR-0044 で置き換え） |
 | 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted（一部を ADR-0045 と ADR-0049 で置き換え） |
 | 0009 | [最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md) | Accepted（一部を ADR-0016 で置き換え） |
@@ -57,5 +57,6 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |
 | 0054 | [同じ出どころの鍵に限り、複数の登録でサロゲートを共有できる](0054-share-surrogates-only-for-the-same-key-source.md) | Accepted |
 | 0055 | [残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) | Accepted |
-| 0056 | [記憶の画面はコミット済みの版を読み、活動の記録と行き来できるようにする](0056-read-committed-memory.md) | Accepted（一部を ADR-0057 で置き換え） |
+| 0056 | [記憶の画面はコミット済みの版を読み、活動の記録と行き来できるようにする](0056-read-committed-memory.md) | Accepted（一部を ADR-0057・ADR-0058 で置き換え） |
 | 0057 | [オーナーによる記憶の編集と復元は、backend が 1 ファイルずつ確定する](0057-edit-existing-memory-in-the-backend.md) | Accepted |
+| 0058 | [記憶の差分統計は必要な変更だけを計算し、Git の保守は backend が行う](0058-read-memory-history-on-demand.md) | Accepted |

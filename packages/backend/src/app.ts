@@ -58,6 +58,8 @@ export async function startBackend(
   const agent = avatar.settings();
   const db = openDatabase(config.databasePath);
   const memoryView = new MemoryView(config.memoryDir, db, { ...config.memoryView, now, timeZone: config.timeZone, backendEmail: config.gitAuthor.email });
+  const warmMemory = () => { void memoryView.warmLastChanges().catch(() => log("memory: last changes could not be prepared")); };
+  memory.afterCommit(warmMemory);
   const modelSettings = new ModelSettings(db, now);
   const awake = new AwakeHours(config.awakeHours, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
@@ -149,6 +151,7 @@ export async function startBackend(
     db.close();
     throw error;
   }
+  warmMemory();
   const stopScheduler = scheduler.start();
   const stopRecord = record.start();
   const stopHeartbeat =

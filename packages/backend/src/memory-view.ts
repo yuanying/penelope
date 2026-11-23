@@ -7,7 +7,7 @@ import type {
 } from "@penelope/contract";
 
 import { HttpError } from "./http.ts";
-import { type GitChange, MemoryGit, memoryPath, OBJECT_ID, type TreeEntry, type TreeFile } from "./memory-git.ts";
+import { type GitChange, type GitCommit, MemoryGit, memoryPath, OBJECT_ID, type TreeEntry, type TreeFile } from "./memory-git.ts";
 import { type LocalLink, localLinks } from "./memory-links.ts";
 import { DAY_MS, MemoryRecord, type MemoryRecordNight } from "./memory-record.ts";
 import { dayOf, isTimeZone } from "./record.ts";
@@ -24,8 +24,7 @@ const SEARCH_LINES = 100;
 const DIFF_LINES = 2000;
 const PAGE = 50;
 
-type Entry = GitChange & { order: number };
-type Index = { head: string; entries: Entry[]; byId: Map<string, Entry>; byTurn: Map<string, Entry>; byPath: Map<string, Entry[]> };
+type LastChanges = { head: string; paths: Map<string, GitCommit> };
 type LinkCache = { head: string; links: Map<string, LocalLink[]>; broken: MemoryBrokenLink[]; incomplete: boolean };
 type SavePlan = { kind: "write"; head: string; file: TreeEntry; original: Buffer; body: Buffer; author: { name: string; email: string } };
 
@@ -35,7 +34,7 @@ export class MemoryView {
   private readonly options: {
     now: () => number; timeZone: string; targetBytes?: number; fileLimitBytes?: number; ownerEmail?: string; ownerName?: string; backendEmail?: string;
   };
-  private indexed: { head: string; value: Promise<Index> } | undefined;
+  private latest: { head: string; value: Promise<LastChanges> } | undefined;
   private tree: { head: string; value: Promise<Map<string, TreeEntry>> } | undefined;
   private links: { head: string; value: Promise<LinkCache> } | undefined;
   private readonly layerSizes = new Map<string, number>();
@@ -47,6 +46,11 @@ export class MemoryView {
   }
 
   head() { return this.git.head(); }
+
+  async warmLastChanges(): Promise<void> {
+    const head = await this.head();
+    if (head) await this.lastChanges(head);
+  }
 
   private ownerAuthor() {
     const { ownerEmail, ownerName } = this.options;
@@ -63,17 +67,16 @@ export class MemoryView {
     if (!author) return { kind: "editing_disabled" };
     this.checkPath(path);
     if (path.startsWith("avatar/")) return { kind: "file_not_editable" };
-    const index = await this.index();
-    if (!index) return { kind: "file_not_editable" };
-    const base = this.entry(index, base_head);
-    const old = (await this.filesAt(base.id)).get(path);
+    const head = await this.head();
+    if (!head) return { kind: "file_not_editable" };
+    await this.requireVersions(head, base_head);
+    const old = (await this.filesAt(base_head)).get(path);
     if (!old || old.bytes > MEMORY_TEXT_BYTES) return { kind: "file_not_editable" };
     const original = await this.blob(old);
     if (textOf(original) === undefined) return { kind: "file_not_editable" };
-    const { head } = index;
     const file = (await this.filesAt(head)).get(path);
     if (!file || file.id !== old.id || file.mode !== old.mode) {
-      const last = index.byPath.get(path)?.[0];
+      const last = (await this.pathChanges(head, path))[0];
       const last_change = last ? { id: last.id, at: last.at, writer: this.activity().writer(last) } : null;
       return { kind: "head_conflict", head, exists: file !== undefined, last_change, diff: await this.fileDiff(path, path, old.id, file?.id) };
     }
@@ -85,39 +88,43 @@ export class MemoryView {
 
   async overview(tz?: string): Promise<MemoryOverviewResponse> {
     const zone = this.zone(tz);
-    const index = await this.index();
+    const head = await this.head();
     const target = this.options.targetBytes ?? 16384;
     const can_edit = this.ownerAuthor() !== undefined;
     const empty = { bytes: 0, target_bytes: target, file_limit_bytes: this.fileLimit(), over_target_nights: [] as string[] };
-    if (!index) return { head: null, can_edit, files: [], always_read: empty, broken_links: [], links_incomplete: false, last_night: null };
-    const files = await this.filesAt(index.head);
+    if (!head) return { head: null, can_edit, files: [], always_read: empty, broken_links: [], links_incomplete: false, last_night: null };
     const activity = this.activity();
     const reads = this.readCounts();
-    const [links, overTarget] = await Promise.all([this.broken(index.head, files), this.overTarget(index, activity.nights, target, zone)]);
     const last = activity.nights[0];
+    const [files, { paths }, overTarget, lastNight] = await Promise.all([
+      this.filesAt(head), this.lastChanges(head), this.overTarget(head, activity.nights, target, zone),
+      last ? this.night(last, head, activity) : null,
+    ]);
+    const links = await this.broken(head, files);
     return {
-      head: index.head, can_edit,
-      files: [...files].map(([path, file]) => this.fileInfo(path, file, index.byPath.get(path)?.[0], reads, activity)),
+      head, can_edit,
+      files: [...files].map(([path, file]) => this.fileInfo(path, file, paths.get(path), reads, activity)),
       always_read: {
         ...empty, bytes: [...LAYER].reduce((sum, path) => sum + (files.get(path)?.bytes ?? 0), 0), over_target_nights: overTarget,
       },
-      broken_links: links.broken, links_incomplete: links.incomplete, last_night: last ? this.night(last, index, activity) : null,
+      broken_links: links.broken, links_incomplete: links.incomplete, last_night: lastNight,
     };
   }
 
   async file(path: string, head?: string): Promise<MemoryFileResponse> {
     this.checkPath(path);
-    const { index, version, file } = await this.findFile(path, head);
+    const { version, file } = await this.findFile(path, head);
     const activity = this.activity();
-    const history = this.fileHistory(index, version, path);
     const reads = this.readCounts();
-    const broken_links = /\.md$/i.test(path)
-      ? (await this.broken(version, await this.filesAt(version))).broken.filter((link) => link.path === path) : [];
     const last = activity.nights[0];
-    const movedFrom = last && this.night(last, index, activity, version).changes.flatMap(({ moves }) => moves)
-      .findLast(({ to }) => to === path)?.from;
+    const history = this.pathChanges(version, path);
+    const [changes, links, movedFrom] = await Promise.all([
+      history, /\.md$/i.test(path) ? this.filesAt(version).then((files) => this.broken(version, files)) : null,
+      last ? this.movedFrom(last, version, path, history, activity) : undefined,
+    ]);
+    const broken_links = links?.broken.filter((link) => link.path === path) ?? [];
     const metadata = {
-      head: version, file: this.fileInfo(path, file, history[0], reads, activity), history_count: history.length,
+      head: version, file: this.fileInfo(path, file, changes[0], reads, activity), history_count: changes.length,
       broken_links, ...(movedFrom ? { moved_from: movedFrom } : {}),
     };
     if (path.startsWith("avatar/")) {
@@ -147,36 +154,45 @@ export class MemoryView {
   async changes({ head, before, tz, writer = "all" }: { head?: string; before?: string; tz?: string; writer?: MemoryWriterFilter }): Promise<MemoryChangesResponse> {
     const zone = this.zone(tz);
     if (!["all", "daytime", "night", "owner"].includes(writer)) throw new HttpError(400, "invalid memory writer filter");
-    const index = await this.index();
-    const version = this.version(index, head);
-    if (!index || !version) return { head: null, days: [] };
+    const version = await this.version(head);
+    if (!version) return { head: null, days: [] };
     const activity = this.activity();
-    const position = index.byId.get(version)!.order;
-    const entries = index.entries.slice(position).filter((entry) => {
-      if (!entry.files.length) return false;
+    // Imported histories need not have monotonic committer dates. Sort only
+    // commit headers, keeping first-parent order for equal timestamps.
+    const ordered = (await this.git.commits(version)).filter((entry) => {
       if (writer === "all") return true;
       const kind = activity.writer(entry, false).kind;
       return kind === writer || (writer === "night" && entry.repair !== undefined);
-    }).sort((a, b) => b.at.localeCompare(a.at) || a.order - b.order);
-    const { page, next } = pageOf(entries, before);
-    const groups = new Map<string, MemoryChangesResponse["days"][number]>();
+    }).sort((a, b) => b.at.localeCompare(a.at));
+    const start = pageStart(ordered, before);
+    if (before !== undefined && !(await this.git.selected([before], "paths"))[0]?.files.length) {
+      throw new HttpError(400, "invalid memory page cursor");
+    }
+    const page: GitCommit[] = [];
+    for (let i = start; i < ordered.length && page.length <= PAGE; i += PAGE + 1) {
+      const ids = ordered.slice(i, i + PAGE + 1).map(({ id }) => id);
+      for (const { files, ...commit } of await this.git.selected(ids, "paths")) if (files.length) page.push(commit);
+    }
+    const next = page.length > PAGE ? page[PAGE - 1]!.id : undefined;
+    const onPage = page.slice(0, PAGE);
     const formatter = new Intl.DateTimeFormat("en-CA", { timeZone: zone, year: "numeric", month: "2-digit", day: "2-digit" });
-    const day = (entry: Entry) => formatter.format(Date.parse(entry.at));
-    for (const entry of page) {
-      const key = day(entry);
-      if (!groups.has(key)) groups.set(key, { day: key, changes: 0, files: 0, items: [] });
-      groups.get(key)!.items.push(this.summary(entry, activity));
-    }
-    const paths = new Map([...groups.keys()].map((key) => [key, new Set<string>()]));
-    for (const entry of entries) {
-      const key = day(entry);
-      const group = groups.get(key);
-      if (!group) continue;
+    const dayOfCommit = ({ at }: GitCommit) => formatter.format(Date.parse(at));
+    const groups = new Map(onPage.map((entry) => [dayOfCommit(entry), { changes: 0, paths: new Set<string>(), items: [] as MemoryChange[] }]));
+    const shown = new Set(onPage.map(({ id }) => id));
+    // Daily totals include the whole filtered day, with only the destination
+    // of a move. Off-page commits need rename detection but no line counts.
+    const offPage = groups.size ? ordered.filter((entry) => !shown.has(entry.id) && groups.has(dayOfCommit(entry))) : [];
+    const [detailed, totals] = await Promise.all([
+      this.git.selected([...shown], "counts"), this.git.selected(offPage.map(({ id }) => id), "moves"),
+    ]);
+    for (const entry of detailed) groups.get(dayOfCommit(entry))!.items.push(this.summary(entry, activity));
+    for (const entry of [...detailed, ...totals]) if (entry.files.length) {
+      const group = groups.get(dayOfCommit(entry))!;
       group.changes++;
-      for (const { path } of entry.files) paths.get(key)!.add(path);
+      for (const { path } of entry.files) group.paths.add(path);
     }
-    for (const [key, group] of groups) group.files = paths.get(key)!.size;
-    return { head: version, days: [...groups.values()], ...(next === undefined ? {} : { next }) };
+    const days = [...groups].map(([day, { changes, paths, items }]) => ({ day, changes, files: paths.size, items }));
+    return { head: version, days, ...(next === undefined ? {} : { next }) };
   }
 
   async change(id: string): Promise<MemoryChangeResponse> {
@@ -186,7 +202,7 @@ export class MemoryView {
 
   async diff(id: string, path: string): Promise<MemoryFileDiff> {
     this.checkPath(path);
-    const entry = await this.findChange(id);
+    const entry = await this.findChange(id, "moves");
     const file = entry.files.find((file) => file.path === path);
     if (!file) throw new HttpError(404, "no such changed file");
     return this.fileDiff(path, file.from ?? path, file.oldBlob, file.newBlob);
@@ -194,32 +210,31 @@ export class MemoryView {
 
   async history(path: string, { head, before }: { head?: string; before?: string } = {}): Promise<MemoryHistoryResponse> {
     this.checkPath(path);
-    const index = await this.index();
-    const version = this.version(index, head);
-    if (!index || !version) return { head: null, changes: [] };
-    const { page, next } = pageOf(this.fileHistory(index, version, path), before);
+    const version = await this.version(head);
+    if (!version) return { head: null, changes: [] };
+    const entries = await this.pathChanges(version, path);
+    const start = pageStart(entries, before);
+    const page = await this.git.selected(entries.slice(start, start + PAGE).map(({ id }) => id), "counts");
+    const next = start + PAGE < entries.length ? page.at(-1)!.id : undefined;
     const activity = this.activity();
     return { head: version, changes: page.map((entry) => this.summary(entry, activity)), ...(next === undefined ? {} : { next }) };
   }
 
   async compare(path: string, from: string, to: string): Promise<MemoryCompareResponse> {
     this.checkPath(path);
-    const index = await this.index();
-    const old = this.entry(index, from);
-    const current = this.entry(index, to);
-    if (old.order <= current.order) throw new HttpError(400, "from must be older than to");
-    const history = this.fileHistory(index!, to, path);
-    if (!history.some(({ id }) => id === to) || !history.some(({ id }) => id === from)) throw new HttpError(404, "no such version of this path");
-    const changes = history.filter(({ order }) => order >= current.order && order < old.order).length;
-    const [left, right, counts] = await Promise.all([this.git.tree(from), this.git.tree(to), this.git.diffCounts(from, to, path)]);
+    const positions = await this.requireVersions(await this.head(), from, to);
+    if (positions.indexOf(from) <= positions.indexOf(to)) throw new HttpError(400, "from must be older than to");
+    const [history, older] = await Promise.all([this.pathChanges(to, path, from), this.git.selected([from], "paths")]);
+    if (history[0]?.id !== to || !older[0]?.files.some((file) => file.path === path)) throw new HttpError(404, "no such version of this path");
+    const changes = history.length;
+    const [left, right, counts] = await Promise.all([this.git.tree(from, [path]), this.git.tree(to, [path]), this.git.diffCounts(from, to, path)]);
     const diff = await this.fileDiff(path, path, left.get(path)?.id, right.get(path)?.id);
     return { from, to, changes, ...counts, diff };
   }
 
   async search(query: string, head?: string): Promise<MemorySearchResponse> {
     if (!query || /[\r\n\0]/.test(query) || Buffer.byteLength(query) > 512) throw new HttpError(400, "q must be a single nonempty line of up to 512 bytes");
-    const index = await this.index();
-    const version = this.version(index, head);
+    const version = await this.version(head);
     const result: MemorySearchResponse = { head: version, files: [], truncated: false, line_limit: SEARCH_LINES };
     if (!version) return result;
     const tree = await this.filesAt(version);
@@ -247,55 +262,55 @@ export class MemoryView {
   }
 
   async turnChange(id: string): Promise<MemoryChange | undefined> {
-    const entry = (await this.index())?.byTurn.get(id);
-    return entry ? this.summary(entry, this.activity()) : undefined;
+    const head = await this.head();
+    if (!head || /[\0\n]/.test(id)) return undefined;
+    const candidates = (await this.git.commits(head, [`Turn ${id}`])).filter(({ turn }) => turn?.id === id);
+    const found = (await this.git.selected(candidates.map(({ id }) => id), "paths")).find(({ files }) => files.length);
+    if (!found) return undefined;
+    const [entry] = await this.git.selected([found.id], "counts");
+    return entry && this.summary(entry, this.activity());
   }
 
   async nightChanges(id: string): Promise<MemoryChange[]> {
-    const index = await this.index();
-    if (!index) return [];
+    const head = await this.head();
+    if (!head) return [];
     const activity = this.activity();
     const night = activity.nights.find((night) => night.id === id);
-    return night ? this.nightEntries(night, index, activity).map((entry) => this.summary(entry, activity)) : [];
+    return night ? (await this.nightEntries(night, head, activity)).map((entry) => this.summary(entry, activity)) : [];
   }
 
-  private async index(): Promise<Index | undefined> {
-    const head = await this.git.head();
-    if (head === null) return undefined;
-    if (this.indexed?.head !== head) {
-      const before = this.indexed?.value;
-      const value = this.loadIndex(head, before);
-      this.indexed = { head, value };
-      void value.catch(() => { if (this.indexed?.value === value) this.indexed = undefined; });
+  private lastChanges(head: string): Promise<LastChanges> {
+    if (this.latest?.head !== head) {
+      const before = this.latest?.value;
+      const value = this.loadLastChanges(head, before);
+      this.latest = { head, value };
+      void value.catch(() => { if (this.latest?.value === value) this.latest = undefined; });
     }
-    return this.indexed.value;
+    return this.latest.value;
   }
 
-  private async loadIndex(head: string, before: Promise<Index> | undefined): Promise<Index> {
+  private async loadLastChanges(head: string, before: Promise<LastChanges> | undefined): Promise<LastChanges> {
     const previous = await before?.catch(() => undefined);
-    let entries: GitChange[];
-    if (previous) {
-      const newEntries = await this.git.changes(head, previous.head);
-      // After a branch switch, rewind or imported merge, only reuse a true
-      // first-parent suffix. The previously published index stays immutable.
-      entries = newEntries.at(-1)?.parent === previous.head ? [...newEntries, ...previous.entries] : await this.git.changes(head);
-    } else entries = await this.git.changes(head);
-    const byId = new Map<string, Entry>();
-    const byTurn = new Map<string, Entry>();
-    const byPath = new Map<string, Entry[]>();
-    const indexed = entries.map((change, order) => {
-      const entry = { ...change, order };
-      byId.set(entry.id, entry);
-      if (entry.turn && entry.files.length && !byTurn.has(entry.turn.id)) byTurn.set(entry.turn.id, entry);
-      const paths = new Set(entry.files.flatMap(({ path, from }) => from === undefined ? [path] : [path, from]));
-      for (const path of paths) {
-        const list = byPath.get(path);
-        if (list) list.push(entry);
-        else byPath.set(path, [entry]);
+    let entries = await this.git.paths(head, previous ? { after: previous.head } : {});
+    const paths = new Map<string, GitCommit>();
+    // A rewound or switched HEAD can only reuse a true first-parent suffix.
+    const reuse = previous && entries.at(-1)?.parent === previous.head;
+    if (previous && !reuse) entries = await this.git.paths(head);
+    const seen = new Set<string>();
+    for (const { files, ...commit } of entries) {
+      for (const { path, newBlob } of files) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        if (newBlob) paths.set(path, commit);
       }
-      return entry;
-    });
-    return { head, entries: indexed, byId, byTurn, byPath };
+    }
+    if (reuse) for (const [path, commit] of previous.paths) if (!seen.has(path)) paths.set(path, commit);
+    return { head, paths };
+  }
+
+  private async pathChanges(head: string, path: string, after?: string): Promise<GitChange[]> {
+    const changes = await this.git.paths(head, { path, ...(after === undefined ? {} : { after }) });
+    return changes.filter(({ files }) => files.some((file) => file.path === path));
   }
 
   private filesAt(head: string): Promise<Map<string, TreeEntry>> {
@@ -359,7 +374,7 @@ export class MemoryView {
     const nightById = new Map(nights.map((night) => [night.id, night]));
     const nightBySeq = new Map(nights.map((night) => [night.seq, night]));
     const turns = this.reports.nightTurns();
-    const writer = (entry: Entry, includeTrigger = true): MemoryWriter => {
+    const writer = (entry: GitCommit, includeTrigger = true): MemoryWriter => {
       const night_seq = entry.nightSeq;
       const marked = night_seq === undefined ? undefined : nightBySeq.get(night_seq);
       const sequence = night_seq === undefined ? {} : { night_seq };
@@ -387,43 +402,63 @@ export class MemoryView {
         (ownerEmail === undefined || ownerEmail === entry.email) && (ownerName === undefined || ownerName === entry.author);
       return { kind: owner ? "owner" : "unknown" };
     };
-    return { nights, writer };
+    return { nights, turns, writer };
   }
 
-  private nightEntries(night: MemoryRecordNight, index: Index, activity: ReturnType<MemoryView["activity"]>, version = index.head): Entry[] {
-    const position = index.byId.get(version)!.order;
-    return index.entries.slice(position).filter((entry) => {
-      if (!entry.files.length || (!entry.turn && !entry.repair)) return false;
+  private async nightCommits(night: MemoryRecordNight, head: string, activity: ReturnType<MemoryView["activity"]>): Promise<GitCommit[]> {
+    const markers = night.seq === null ? [] : [`Night: ${night.seq}`];
+    for (const [id, turn] of activity.turns) {
+      if (turn.night_id === night.id && !/[\0\n]/.test(id)) markers.push(`Turn ${id}`);
+    }
+    if (!markers.length) return [];
+    return (await this.git.commits(head, markers)).filter((entry) => {
+      if (!entry.turn && !entry.repair) return false;
       const writer = activity.writer(entry, false);
       return (writer.kind === "night" || writer.kind === "system") && writer.night_id === night.id;
     }).reverse();
   }
 
-  private night(night: MemoryRecordNight, index: Index, activity: ReturnType<MemoryView["activity"]>, version?: string): MemoryNight {
-    const changes = this.nightEntries(night, index, activity, version).map((entry) => this.detail(entry, activity));
+  private async nightEntries(night: MemoryRecordNight, head: string, activity: ReturnType<MemoryView["activity"]>): Promise<GitChange[]> {
+    const commits = await this.nightCommits(night, head, activity);
+    const visible = (await this.git.selected(commits.map(({ id }) => id), "paths")).filter(({ files }) => files.length);
+    return this.git.selected(visible.map(({ id }) => id), "counts");
+  }
+
+  private async movedFrom(night: MemoryRecordNight, head: string, path: string, history: Promise<GitChange[]>, activity: ReturnType<MemoryView["activity"]>) {
+    const [commits, changes] = await Promise.all([this.nightCommits(night, head, activity), history]);
+    const touched = new Set(changes.map(({ id }) => id));
+    const candidates = commits.filter(({ id, repair }) => repair ? repair.moves.some(({ to }) => to === path) : touched.has(id));
+    const entries = await this.git.selected(candidates.map(({ id }) => id), "moves");
+    return entries.filter(({ files }) => files.length).flatMap((entry) => this.moves(entry)).findLast(({ to }) => to === path)?.from;
+  }
+
+  private async night(night: MemoryRecordNight, head: string, activity: ReturnType<MemoryView["activity"]>): Promise<MemoryNight> {
+    const changes = (await this.nightEntries(night, head, activity)).map((entry) => this.detail(entry, activity));
     const counts = changes.reduce((sum, { change }) => ({ added: sum.added + change.added, removed: sum.removed + change.removed }), { added: 0, removed: 0 });
     return { id: night.id, at: night.at, ended_at: night.ended_at, ...counts, files: new Set(changes.flatMap(({ change }) => change.paths)).size, changes };
   }
 
-  private async overTarget(index: Index, nights: MemoryRecordNight[], target: number, zone: string): Promise<string[]> {
-    const ordered = [...index.entries].sort((a, b) => b.at.localeCompare(a.at) || a.order - b.order);
+  private async overTarget(head: string, nights: MemoryRecordNight[], target: number, zone: string): Promise<string[]> {
+    if (!nights.some((night) => night.head !== "")) return [];
+    const legacy = nights.some((night) => night.head === null);
+    const commits = legacy ? await this.git.commits(head) : [];
+    const reachable = new Set(legacy ? commits.map(({ id }) => id) : await this.git.firstParent(head));
+    const ordered = commits.sort((a, b) => b.at.localeCompare(a.at));
     let cursor = 0;
-    const sizes = nights.flatMap((night) => {
-      const head = night.head === null ? (() => {
-        while (ordered[cursor] && ordered[cursor]!.at > night.ended_at) cursor++;
-        return ordered[cursor]?.id;
-      })() : night.head;
-      const commit = head ? index.byId.get(head) : undefined;
-      if (!commit) return [];
-      const blobs = [...LAYER].flatMap((path) => {
-        const change = index.byPath.get(path)?.find(({ order }) => order >= commit.order)?.files.find((file) => file.path === path || file.from === path);
-        return change?.path === path && change.newBlob ? [change.newBlob] : [];
-      });
-      return [{ date: dayOf(Date.parse(night.at), zone), blobs }];
+    const versions = nights.flatMap((night) => {
+      if (night.head === null) while (ordered[cursor] && ordered[cursor]!.at > night.ended_at) cursor++;
+      const version = night.head ?? ordered[cursor]?.id;
+      return version && reachable.has(version) ? [{ night, version }] : [];
     });
-    const missing = [...new Set(sizes.flatMap(({ blobs }) => blobs))].filter((id) => !this.layerSizes.has(id));
-    for (const [id, size] of await this.git.sizes(missing)) this.layerSizes.set(id, size);
-    return [...new Set(sizes.filter(({ blobs }) => blobs.reduce((sum, id) => sum + (this.layerSizes.get(id) ?? 0), 0) > target).map(({ date }) => date))];
+    const missing = [...new Set(versions.map(({ version }) => version))].filter((id) => !this.layerSizes.has(id));
+    // Look at the prompt files in each end-of-night tree, not in the commits between nights.
+    for (let i = 0; i < missing.length; i += 8) {
+      await Promise.all(missing.slice(i, i + 8).map(async (id) => {
+        const tree = await this.git.tree(id, [...LAYER]);
+        this.layerSizes.set(id, [...LAYER].reduce((sum, path) => sum + (tree.get(path)?.bytes ?? 0), 0));
+      }));
+    }
+    return [...new Set(versions.filter(({ version }) => this.layerSizes.get(version)! > target).map(({ night }) => dayOf(Date.parse(night.at), zone)))];
   }
 
   private readCounts(): Map<string, MemoryReadCount> | null {
@@ -442,26 +477,24 @@ export class MemoryView {
     }));
   }
 
-  private fileInfo(path: string, file: TreeFile, last: Entry | undefined, reads: Map<string, MemoryReadCount> | null, activity: ReturnType<MemoryView["activity"]>): MemoryFile {
+  private fileInfo(path: string, file: TreeFile, last: GitCommit | undefined, reads: Map<string, MemoryReadCount> | null, activity: ReturnType<MemoryView["activity"]>): MemoryFile {
     return { path, bytes: file.bytes, always_read: LAYER.has(path),
       reads: reads === null ? null : reads.get(path) ?? { count_30_days: 0, last_day: null },
       last_change: last ? { id: last.id, at: last.at, writer: activity.writer(last) } : null };
   }
 
-  private summary(entry: Entry, activity: ReturnType<MemoryView["activity"]>): MemoryChange {
+  private summary(entry: GitChange, activity: ReturnType<MemoryView["activity"]>): MemoryChange {
     const counts = entry.files.reduce<MemoryCounts>((sum, file) => ({ files: sum.files + 1, added: sum.added + file.added, removed: sum.removed + file.removed }), { files: 0, added: 0, removed: 0 });
     return { id: entry.id, at: entry.at, writer: activity.writer(entry), paths: entry.files.map(({ path }) => path), ...counts };
   }
 
-  private detail(entry: Entry, activity: ReturnType<MemoryView["activity"]>): MemoryChangeResponse {
-    const files: MemoryFileChange[] = entry.files.map(({ path, from, kind, added, removed }) => ({ path, ...(from === undefined ? {} : { from }), kind, added, removed }));
-    const moves = entry.repair?.moves ?? files.flatMap(({ path, from }) => from === undefined ? [] : [{ from, to: path }]);
-    return { change: this.summary(entry, activity), files, moves };
+  private moves(entry: GitChange) {
+    return entry.repair?.moves ?? entry.files.flatMap(({ path, from }) => from === undefined ? [] : [{ from, to: path }]);
   }
 
-  private fileHistory(index: Index, version: string, path: string): Entry[] {
-    const position = index.byId.get(version)!.order;
-    return index.byPath.get(path)?.filter(({ order }) => order >= position) ?? [];
+  private detail(entry: GitChange, activity: ReturnType<MemoryView["activity"]>): MemoryChangeResponse {
+    const files: MemoryFileChange[] = entry.files.map(({ path, from, kind, added, removed }) => ({ path, ...(from === undefined ? {} : { from }), kind, added, removed }));
+    return { change: this.summary(entry, activity), files, moves: this.moves(entry) };
   }
 
   private zone(tz?: string): string {
@@ -470,29 +503,37 @@ export class MemoryView {
     return zone;
   }
 
-  private version(index: Index | undefined, head?: string): string | null {
-    return head === undefined ? index?.head ?? null : this.entry(index, head).id;
+  private async version(requested?: string): Promise<string | null> {
+    const current = await this.head();
+    if (requested === undefined) return current;
+    await this.requireVersions(current, requested);
+    return requested;
   }
 
   private checkPath(path: string) {
     if (!memoryPath(path)) throw new HttpError(400, "path must be a memory-relative file name");
   }
 
-  private entry(index: Index | undefined, id: string): Entry {
-    if (!OBJECT_ID.test(id)) throw new HttpError(400, "invalid memory change id");
-    const found = index?.byId.get(id);
-    if (!found) throw new HttpError(404, "no such memory change");
-    return found;
+  private async requireVersions(head: string | null, ...ids: string[]): Promise<string[]> {
+    let commits = head === null ? [] : ids.every((id) => id === head) ? [head] : undefined;
+    for (const id of ids) {
+      if (!OBJECT_ID.test(id)) throw new HttpError(400, "invalid memory change id");
+      commits ??= await this.git.firstParent(head!);
+      if (!commits.includes(id)) throw new HttpError(404, "no such memory change");
+    }
+    return commits ?? [];
   }
 
-  private async findChange(id: string): Promise<Entry> { return this.entry(await this.index(), id); }
+  private async findChange(id: string, mode: "moves" | "counts" = "counts"): Promise<GitChange> {
+    await this.requireVersions(await this.head(), id);
+    return (await this.git.selected([id], mode))[0]!;
+  }
 
   private async findFile(path: string, head?: string) {
-    const index = await this.index();
-    const version = this.version(index, head);
+    const version = await this.version(head);
     const file = version ? (await this.filesAt(version)).get(path) : undefined;
-    if (!index || !version || !file) throw new HttpError(404, "no such memory file");
-    return { index, version, file };
+    if (!version || !file) throw new HttpError(404, "no such memory file");
+    return { version, file };
   }
 
   private async blob(file: TreeFile): Promise<Buffer> { return (await this.git.blobs([file])).get(file.id)!; }
@@ -524,11 +565,11 @@ function textOf(bytes: Buffer): string | undefined {
   try { return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes); } catch { return undefined; }
 }
 
-function pageOf(entries: Entry[], before: string | undefined) {
-  const i = before === undefined ? 0 : entries.findIndex(({ id }) => id === before) + 1;
-  if (before !== undefined && i === 0) throw new HttpError(400, "invalid memory page cursor");
-  const page = entries.slice(i, i + PAGE);
-  return { page, next: i + PAGE < entries.length ? page.at(-1)!.id : undefined };
+function pageStart(entries: { id: string }[], before: string | undefined): number {
+  if (before === undefined) return 0;
+  const start = entries.findIndex(({ id }) => id === before) + 1;
+  if (start === 0) throw new HttpError(400, "invalid memory page cursor");
+  return start;
 }
 
 function parsePatch(patch: string, truncated: boolean): MemoryFileDiff {

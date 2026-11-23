@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readdirSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { it } from "node:test";
 
@@ -11,7 +12,7 @@ import { cronOf } from "../src/schedules.ts";
 import { MemoryView } from "../src/memory-view.ts";
 import { tempDir } from "./support.ts";
 
-function setup(t: Parameters<typeof tempDir>[0], options: { targetBytes?: number; ownerName?: string } = {}) {
+function setup(t: Parameters<typeof tempDir>[0], options: { targetBytes?: number; ownerName?: string; ownerEmail?: string } = {}) {
   const dir = tempDir(t);
   const author = { name: "Example backend", email: "backend@example.com" };
   const db = openDatabase(":memory:");
@@ -21,6 +22,50 @@ function setup(t: Parameters<typeof tempDir>[0], options: { targetBytes?: number
   return { dir, writer: new Memory(dir, author), view: new MemoryView(dir, db, { now, timeZone, ...options }),
     record: new ActivityRecord(db, new Feed(), { now, timeZone, nightly: cronOf("0 4 * * *", timeZone) }) };
 }
+
+it("keeps packed memory readable by the shared group and usable as a save base", async (t) => {
+  const { view, writer, dir } = setup(t, { ownerEmail: "owner@example.com" });
+  writeFileSync(join(dir, "notes.md"), "first\n");
+  await writer.commit({ agent: "main", turnId: "first" });
+  const base_head = (await view.overview()).head!;
+  const umask = process.umask(0o077);
+  try { await writer.maintain(Date.now()); } finally { process.umask(umask); }
+  const packDir = join(dir, ".git", "objects", "pack");
+  const pack = readdirSync(packDir).find((name) => name.endsWith(".pack"));
+  assert.ok(pack);
+  for (const name of [pack, pack.replace(/\.pack$/, ".idx")]) assert.ok(statSync(join(packDir, name)).mode & 0o040);
+  const saved = await writer.save({ path: "notes.md", base_head, text: "second\n" }, view);
+  assert.equal(saved.kind, "saved");
+  if (saved.kind !== "saved") return;
+  const diff = await view.diff(saved.id, "notes.md");
+  assert.equal(diff.kind, "text");
+  if (diff.kind === "text") assert.deepEqual(diff.hunks[0]?.lines.map(({ text }) => text), ["first", "second"]);
+});
+
+it("counts moves outside the page at their destination in the full day's total", async (t) => {
+  const { view, dir } = setup(t);
+  const git = (...args: string[]) => execFileSync("git", args, { cwd: dir, encoding: "utf8" }).trim();
+  git("init", "--quiet", "--initial-branch=main");
+  const input = ["commit refs/heads/main\ncommitter Bot <bot@example.com> 1767222000 +0000\ndata 4\nseed\nM 644 inline old.md\ndata 4\nnote\n"];
+  for (let i = 0; i <= 50; i++) {
+    input.push(`commit refs/heads/main\ncommitter Bot <bot@example.com> ${1767225600 + i} +0000\ndata 0\n${i === 0 ? "R old.md new.md" : `M 644 inline new.md\ndata ${String(i).length}\n${i}`}\n`);
+  }
+  execFileSync("git", ["fast-import", "--quiet"], { cwd: dir, input: input.join("") });
+  const result = await view.changes({ tz: "UTC" });
+  assert.deepEqual(result.days.map(({ changes, files, items }) => [changes, files, items.length]), [[51, 1, 50]]);
+});
+
+it("does not expose a commit reachable only through a merge's second parent", async (t) => {
+  const { view, dir } = setup(t);
+  execFileSync("git", ["init", "--quiet", "--initial-branch=main"], { cwd: dir });
+  execFileSync("git", ["fast-import", "--quiet"], { cwd: dir, input: [
+    "commit refs/heads/main\nmark :1\ncommitter Bot <bot@example.com> 1767225600 +0000\ndata 0\n",
+    "commit refs/heads/side\nmark :2\ncommitter Bot <bot@example.com> 1767225601 +0000\ndata 0\nfrom :1\nM 644 inline note.md\ndata 4\ntext\n",
+    "commit refs/heads/main\ncommitter Bot <bot@example.com> 1767225602 +0000\ndata 0\nmerge :2\nM 644 inline note.md\ndata 4\ntext\n",
+  ].join("\n") });
+  const side = execFileSync("git", ["rev-parse", "side"], { cwd: dir, encoding: "utf8" }).trim();
+  await assert.rejects(view.change(side), { status: 404 });
+});
 
 it("shows no memory before the first commit", async (t) => {
   const { view, dir } = setup(t);

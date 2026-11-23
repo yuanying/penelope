@@ -305,6 +305,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         } catch {
           log("memory: nightly snapshot could not be kept");
         }
+        void memory.maintain(now()).catch(() => log("memory: repository maintenance failed"));
         log(`session: the nightly switch${seq === undefined ? "" : ` of ${String(seq)}`} was reported${steps === undefined ? "" : ` (${steps.reflection.result}, ${steps.verifier.result}, ${steps.curator.result}, ${steps.session.result})`}`);
         sendEmpty(response, 204);
         return;

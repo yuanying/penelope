@@ -25,7 +25,7 @@ export type TreeFile = { id: string; bytes: number };
 export type TreeEntry = TreeFile & { mode: "100644" | "100755" };
 export const OWNER_SAVE_SUBJECT = "Owner: save memory file";
 export type GitFileChange = MemoryFileChange & { oldBlob?: string; newBlob?: string };
-export type GitChange = {
+export type GitCommit = {
   id: string;
   parent?: string;
   at: string;
@@ -36,8 +36,9 @@ export type GitChange = {
   ownerSave?: true;
   turn?: { id: string; agent: string; stage?: "reflection" | "verifier" | "curator" };
   repair?: { moves: MemoryMove[]; turn?: string };
-  files: GitFileChange[];
 };
+export type GitChange = GitCommit & { files: GitFileChange[] };
+type LogMode = "commits" | "paths" | "moves" | "counts";
 
 export class MemoryGit {
   private readonly gitDir: string;
@@ -71,9 +72,9 @@ export class MemoryGit {
     return OBJECT_ID.test(head) ? head : null;
   }
 
-  async tree(id: string): Promise<Map<string, TreeEntry>> {
+  async tree(id: string, paths: string[] = []): Promise<Map<string, TreeEntry>> {
     const files = new Map<string, TreeEntry>();
-    const { bytes } = await this.run(["ls-tree", "-r", "-l", "-z", id, "--"]);
+    const { bytes } = await this.run(["--literal-pathspecs", "ls-tree", "-r", "-l", "-z", id, "--", ...paths]);
     const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
     for (let start = 0, end = bytes.indexOf(0); end !== -1; start = end + 1, end = bytes.indexOf(0, start)) {
       let row: string;
@@ -86,10 +87,34 @@ export class MemoryGit {
     return files;
   }
 
-  async changes(id: string, previous?: string): Promise<GitChange[]> {
-    const args = [noAttributes(id), "log", "--first-parent", "--diff-merges=first-parent", "--root", "--no-color", "--no-notes", "--no-show-signature",
-      "--no-ext-diff", "--no-textconv", "--raw", "--numstat", "--find-renames", "-l1000", "--no-abbrev", "-z", "--format=%x00%H%x00%P%x00%cI%x00%ae%x00%an%x00%B"];
-    const output = await this.run([...args, previous === undefined ? id : `${previous}..${id}`, "--"]);
+  async firstParent(head: string): Promise<string[]> {
+    const { bytes } = await this.run(["rev-list", "--first-parent", head, "--"]);
+    return bytes.toString().trimEnd().split("\n");
+  }
+
+  commits(head: string, grep: string[] = []): Promise<GitCommit[]> {
+    return this.log(head, "commits", grep.length ? ["--fixed-strings", ...grep.map((text) => `--grep=${text}`)] : []);
+  }
+
+  paths(head: string, { after, path }: { after?: string; path?: string } = {}): Promise<GitChange[]> {
+    return this.log(head, "paths", path === undefined ? [] : ["--full-history"], { after, path });
+  }
+
+  selected(ids: string[], mode: Exclude<LogMode, "commits">): Promise<GitChange[]> {
+    if (!ids.length) return Promise.resolve([]);
+    return this.log(ids[0]!, mode, ["--no-walk=unsorted", "--stdin"], { input: `${ids.join("\n")}\n` });
+  }
+
+  private async log(head: string, mode: LogMode, selection: string[], { after, path, input }: {
+    after?: string | undefined; path?: string | undefined; input?: string;
+  } = {}): Promise<GitChange[]> {
+    const diff = mode === "commits" ? ["--no-patch"] : ["--diff-merges=first-parent", "--root", "--raw",
+      ...(mode === "paths" ? ["--no-renames"] : ["--find-renames", "-l1000"]), ...(mode === "counts" ? ["--numstat"] : [])];
+    const args = [noAttributes(head), "log", "--first-parent", "--no-color", "--no-notes", "--no-show-signature",
+      "--no-ext-diff", "--no-textconv", "--no-abbrev", "-z", "--format=%x00%H%x00%P%x00%cI%x00%ae%x00%an%x00%B", ...diff, ...selection,
+      ...(input === undefined ? [after === undefined ? head : `${after}..${head}`] : []), "--",
+      ...(path === undefined ? [] : [`:(top,literal)${path}`])];
+    const output = await this.run(args, input === undefined ? {} : { input });
     return parseLog(output.bytes.toString());
   }
 
