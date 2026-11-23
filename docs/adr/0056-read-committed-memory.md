@@ -1,7 +1,7 @@
 # 0056. 記憶の画面はコミット済みの版を読み、活動の記録と行き来できるようにする
 
 - Date: 2026-11-23
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0057](0057-edit-existing-memory-in-the-backend.md) で置き換え）
 
 ## Context
 
@@ -18,7 +18,7 @@ backend はターンの終わりに `/memory` をコミットする。活動の�
 ### 本 ADR で決定しないこと
 
 - コミットの印の機械可読な書式、各口のパス・型・上限、保持する表の形（委譲先: References の backend・UI・sandbox の仕様書）。
-- 記憶の編集・衝突解消・復元の手順（委譲先: オーナーによる編集機能の設計。現行の手動コミットは ADR-0006 のままとする）。
+- 記憶の編集・衝突解消・復元（委譲先: ADR-0057）。
 
 ## Consequences
 
@@ -27,6 +27,8 @@ backend はターンの終わりに `/memory` をコミットする。活動の�
 - 参照の集計と夜の最終版のために SQLite のスキーマが進む。スキーマを古い版に戻す機構は作らない。旧 runner からの通知は従来どおり受ける。
 
 ## Related ADRs
+
+- Superseded by（一部）: [ADR-0057 オーナーによる記憶の編集と復元は、backend が 1 ファイルずつ確定する](0057-edit-existing-memory-in-the-backend.md)。閲覧の口は引き続き読み取り専用とし、別に保存の口を置く。
 
 - Related: [ADR-0006 記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md)
 - Related: [ADR-0036 アバターは記憶の中で育て、最初の 1 回だけ backend が選んだアバターを写す](0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)

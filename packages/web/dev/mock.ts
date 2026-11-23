@@ -340,7 +340,7 @@ function sendAsset(w: World, id: string, response: ServerResponse): boolean {
 
 // A small drawn icon, with no external dependency.
 const SAMPLE_IMAGE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XxQ0YAAAAABJRU5ErkJggg==", "base64");
-const EMPTY_MEMORY: MemoryOverviewResponse = { head: null, files: [], broken_links: [], links_incomplete: false, last_night: null, always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] } };
+const EMPTY_MEMORY: MemoryOverviewResponse = { head: null, can_edit: false, files: [], broken_links: [], links_incomplete: false, last_night: null, always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] } };
 const MEMORY_PAGE = 50;
 
 function memory(scene: MemoryScene | undefined, url: URL): unknown {
@@ -364,7 +364,7 @@ function memory(scene: MemoryScene | undefined, url: URL): unknown {
     if (!head || !file) return;
     const moved = overview.last_night?.changes.flatMap((c) => c.moves).find((move) => move.to === path);
     return {
-      head, file, history_count: versions.length, broken_links: overview.broken_links.filter((link) => link.path === path), ...(moved ? { moved_from: moved.from } : {}),
+      head, file, edit: null, history_count: versions.length, broken_links: overview.broken_links.filter((link) => link.path === path), ...(moved ? { moved_from: moved.from } : {}),
       ...(path.startsWith("avatar/") ? { kind: "image", image_url: `/api/memory/image?${new URLSearchParams({ path, head })}` } : { kind: "markdown", text: scene?.text[path] ?? "" }),
     } satisfies MemoryFileResponse;
   }

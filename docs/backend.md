@@ -40,9 +40,9 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
-| `PENELOPE_MEMORY_OWNER_NAME`・`PENELOPE_MEMORY_OWNER_EMAIL` | なし | 記憶の画面で手動コミットをオーナー名義と識別するための Git 作者の名前・メール。設定した方が完全一致すること（両方なら両方）。ログインの認証とは無関係 |
+| `PENELOPE_MEMORY_OWNER_NAME`・`PENELOPE_MEMORY_OWNER_EMAIL` | なし | 画面から保存する記憶の Git 作者の名前とメール。メールが無ければ保存を無効にし、名前が無ければ保存時に `Owner` を使う。履歴では設定した値との完全一致でオーナーを識別する。ログインの認証とは無関係 |
 | `PENELOPE_PROMPT_LAYER_TARGET_BYTES` | 16384 | 記憶の画面で毎回読む層の合計に示す目安。runner の同名設定を上書きする配置は backend にも同じ値を渡す |
-| `PENELOPE_PROMPT_FILE_MAX_BYTES` | 65536 | 記憶の画面に示す 1 ファイルの上限。runner の同名設定を上書きする配置は backend にも同じ値を渡す |
+| `PENELOPE_PROMPT_FILE_MAX_BYTES` | 65536 | 画面からの保存で適用する毎回読む層の 1 ファイルの上限。runner の同名設定を上書きする配置は backend にも同じ値を渡す |
 | `PENELOPE_AVATAR` | なし | 選んだアバターの名前。`/memory/avatar/` が無いとき、この名前のアバターを写す（下の「アバター」）。image に入っているのは `penelope`・`natsumi`・`myao`・`aki`・[`sayaka`](../assets/avatars/sayaka/README.md) |
 | `PENELOPE_AVATARS_DIR` | なし | 配置のアバターの置き場所。写すアバターを、image の `/app/avatars`（リポジトリの `assets/avatars/`）より先にここで探す |
 | `PENELOPE_AGENT_NAME` | アバターの名前、それも無ければ `Agent` | UI に出すエージェントの名前。`/memory/avatar/avatar.json` の名前より優先する |
@@ -124,7 +124,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 [ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md) の「コミットの作者とメッセージの形」をここで決める。
 
 - ターンの終わり（`POST /v1/turns/end`）ごとに、作業ツリーの変わったものをすべて（足したもの・変えたもの・消したもの）、検査せずにそのままコミットする。変わったものが無ければコミットしない。
-- 作者とコミッターは `PENELOPE_GIT_AUTHOR_NAME` と `PENELOPE_GIT_AUTHOR_EMAIL`。
+- ターン末などの作者とコミッターは `PENELOPE_GIT_AUTHOR_NAME` と `PENELOPE_GIT_AUTHOR_EMAIL`。画面からの保存ではコミッターは同じで、作者だけオーナーの設定を使う。
 - メッセージは、1 行目が `Turn <turn_id>`、本文が `Agent: <agent>`。サブエージェントのターンの終わりでは `<agent>` はサブエージェントの名前で、本体のターンの途中の変更も一緒に入る（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。
 - 本体の夜のターンは、振り返りを含め `Night-stage: reflection`・`verifier`・`curator` のいずれかと、夜の制御の出来事の `Night: <seq>` の 2 行を末尾に付ける。棚卸しの 2 回はともに `curator`。夜の報告にある各ターンの ID から画面では中身と構成を区別する。
 - ターンの終わりに `.git/HEAD` が無ければ（`.git` が無い、または Pod が別に mount した空の `.git`）、変わったものを見る前に `git init` で `main` を枝にしてリポジトリを作る。変わったものが無くても作る。`HEAD` があれば、そのリポジトリと今の枝をそのまま使う。
@@ -133,6 +133,12 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - このほかに、起動のときにアバターを写したら、`avatar/` だけをコミットする（上の「アバター」）。
 - コミットは 1 つずつ順に行う。本体の夜のターンは、次のコミットに進む前に、そのコミットの差分から変わったファイルと増減した行を数える。移動は削除と追加として数え、バイナリはファイル数にだけ含める。コミットが不要なら、変更量は 0 である。計測に失敗してもコミットは失敗にしない。
 - コミットに失敗したら `500` で答える。変わったものは作業ツリーに残り、次のターンの終わりにコミットされる。
+
+画面からの保存（[ADR-0057](adr/0057-edit-existing-memory-in-the-backend.md)）のコミットの題は `Owner: save memory file`、本文は無し。この印を持つコミットは、作者がオーナーの設定に合えば、backend とメールが同じでも履歴で `owner` とする。
+
+- 同じコミットの待ち行列の中で、起点と HEAD の通常ファイルの blob・Git のモードを比べ、さらに作業ツリーの実バイトと実行ビットを確かめる。Linux のディレクトリのファイル記述子を使い、途中の成分を含めシンボリックリンクをたどらない。置換の直前に作業ツリーを再確認する。sandbox 自体はこの待ち行列でロックしないため、再確認と置換の間の同時書き込みまでは排除できない。
+- 保存内容は、HEAD を起点とした一時 index で新しいコミットにする。作業ツリーの別の変更や index の他のパスは含めない。保存したファイルは backend の UID と記憶の共有グループで、通常は 0660、もともと実行可能なら 0770 とする。Pod の共有グループは 2000、backend の umask は 007。
+- 作業ツリーの置換・Git の ref と index の更新は別の操作である。途中で失敗した場合は機密を含まない `500` とし、クライアントは再試行の前に確定版を読み直す。本文と Git の出力はログに載せない。
 
 ## コミット済みの記憶の閲覧
 

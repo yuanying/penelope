@@ -3,11 +3,11 @@ import type { DatabaseSync } from "node:sqlite";
 import type {
   MemoryBrokenLink, MemoryChange, MemoryChangeResponse, MemoryChangesResponse, MemoryCompareResponse, MemoryCounts,
   MemoryFile, MemoryFileChange, MemoryFileDiff, MemoryFileResponse, MemoryHistoryResponse, MemoryNight,
-  MemoryOverviewResponse, MemoryReadCount, MemorySearchResponse, MemoryWriter, MemoryWriterFilter,
+  MemoryOverviewResponse, MemoryReadCount, MemorySaveRequest, MemorySaveResponse, MemorySearchResponse, MemoryWriter, MemoryWriterFilter,
 } from "@penelope/contract";
 
 import { HttpError } from "./http.ts";
-import { type GitChange, MemoryGit, memoryPath, OBJECT_ID, type TreeFile } from "./memory-git.ts";
+import { type GitChange, MemoryGit, memoryPath, OBJECT_ID, type TreeEntry, type TreeFile } from "./memory-git.ts";
 import { type LocalLink, localLinks } from "./memory-links.ts";
 import { DAY_MS, MemoryRecord, type MemoryRecordNight } from "./memory-record.ts";
 import { dayOf, isTimeZone } from "./record.ts";
@@ -15,7 +15,8 @@ import { imageTypeOf } from "./sources.ts";
 
 // Same files and defaults as the runner's prompts.ts and config.ts.
 const LAYER = new Set(["PURPOSE.md", "always.md", "personality.md", "handoff.md"]);
-const TEXT_BYTES = 1024 * 1024;
+export const MEMORY_TEXT_BYTES = 1024 * 1024;
+const DEFAULT_FILE_LIMIT = 65536;
 const IMAGE_BYTES = 16 * 1024 * 1024;
 const LINK_BYTES = 32 * 1024 * 1024;
 const LINK_RESULTS = 1000;
@@ -26,6 +27,7 @@ const PAGE = 50;
 type Entry = GitChange & { order: number };
 type Index = { head: string; entries: Entry[]; byId: Map<string, Entry>; byTurn: Map<string, Entry>; byPath: Map<string, Entry[]> };
 type LinkCache = { head: string; links: Map<string, LocalLink[]>; broken: MemoryBrokenLink[]; incomplete: boolean };
+type SavePlan = { kind: "write"; head: string; file: TreeEntry; original: Buffer; body: Buffer; author: { name: string; email: string } };
 
 export class MemoryView {
   readonly reports: MemoryRecord;
@@ -34,7 +36,7 @@ export class MemoryView {
     now: () => number; timeZone: string; targetBytes?: number; fileLimitBytes?: number; ownerEmail?: string; ownerName?: string; backendEmail?: string;
   };
   private indexed: { head: string; value: Promise<Index> } | undefined;
-  private tree: { head: string; value: Promise<Map<string, TreeFile>> } | undefined;
+  private tree: { head: string; value: Promise<Map<string, TreeEntry>> } | undefined;
   private links: { head: string; value: Promise<LinkCache> } | undefined;
   private readonly layerSizes = new Map<string, number>();
 
@@ -46,19 +48,55 @@ export class MemoryView {
 
   head() { return this.git.head(); }
 
+  private ownerAuthor() {
+    const { ownerEmail, ownerName } = this.options;
+    return ownerEmail ? { email: ownerEmail, name: ownerName ?? "Owner" } : undefined;
+  }
+
+  private fileLimit() { return this.options.fileLimitBytes ?? DEFAULT_FILE_LIMIT; }
+
+  private editLimit(path: string) { return LAYER.has(path) ? Math.min(this.fileLimit(), MEMORY_TEXT_BYTES) : MEMORY_TEXT_BYTES; }
+
+  /** Called inside the commit queue, before inspecting or writing the work tree. */
+  async planSave({ path, base_head, text }: MemorySaveRequest): Promise<SavePlan | MemorySaveResponse> {
+    const author = this.ownerAuthor();
+    if (!author) return { kind: "editing_disabled" };
+    this.checkPath(path);
+    if (path.startsWith("avatar/")) return { kind: "file_not_editable" };
+    const index = await this.index();
+    if (!index) return { kind: "file_not_editable" };
+    const base = this.entry(index, base_head);
+    const old = (await this.filesAt(base.id)).get(path);
+    if (!old || old.bytes > MEMORY_TEXT_BYTES) return { kind: "file_not_editable" };
+    const original = await this.blob(old);
+    if (textOf(original) === undefined) return { kind: "file_not_editable" };
+    const { head } = index;
+    const file = (await this.filesAt(head)).get(path);
+    if (!file || file.id !== old.id || file.mode !== old.mode) {
+      const last = index.byPath.get(path)?.[0];
+      const last_change = last ? { id: last.id, at: last.at, writer: this.activity().writer(last) } : null;
+      return { kind: "head_conflict", head, exists: file !== undefined, last_change, diff: await this.fileDiff(path, path, old.id, file?.id) };
+    }
+    const body = Buffer.from(text, "utf8");
+    if (body.length > MEMORY_TEXT_BYTES) return { kind: "text_too_large", max_bytes: MEMORY_TEXT_BYTES };
+    if (body.length > this.editLimit(path)) return { kind: "prompt_file_limit", max_bytes: this.fileLimit() };
+    return { kind: "write", head, file, original, body, author };
+  }
+
   async overview(tz?: string): Promise<MemoryOverviewResponse> {
     const zone = this.zone(tz);
     const index = await this.index();
     const target = this.options.targetBytes ?? 16384;
-    const empty = { bytes: 0, target_bytes: target, file_limit_bytes: this.options.fileLimitBytes ?? 65536, over_target_nights: [] as string[] };
-    if (!index) return { head: null, files: [], always_read: empty, broken_links: [], links_incomplete: false, last_night: null };
+    const can_edit = this.ownerAuthor() !== undefined;
+    const empty = { bytes: 0, target_bytes: target, file_limit_bytes: this.fileLimit(), over_target_nights: [] as string[] };
+    if (!index) return { head: null, can_edit, files: [], always_read: empty, broken_links: [], links_incomplete: false, last_night: null };
     const files = await this.filesAt(index.head);
     const activity = this.activity();
     const reads = this.readCounts();
     const [links, overTarget] = await Promise.all([this.broken(index.head, files), this.overTarget(index, activity.nights, target, zone)]);
     const last = activity.nights[0];
     return {
-      head: index.head,
+      head: index.head, can_edit,
       files: [...files].map(([path, file]) => this.fileInfo(path, file, index.byPath.get(path)?.[0], reads, activity)),
       always_read: {
         ...empty, bytes: [...LAYER].reduce((sum, path) => sum + (files.get(path)?.bytes ?? 0), 0), over_target_nights: overTarget,
@@ -85,12 +123,15 @@ export class MemoryView {
     if (path.startsWith("avatar/")) {
       if (file.bytes <= IMAGE_BYTES && imageTypeOf(await this.blob(file))) {
         const query = new URLSearchParams({ path, head: version });
-        return { ...metadata, kind: "image", image_url: `/api/memory/image?${query}` };
+        return { ...metadata, edit: null, kind: "image", image_url: `/api/memory/image?${query}` };
       }
-      return { ...metadata, kind: "unavailable" };
+      return { ...metadata, edit: null, kind: "unavailable" };
     }
-    const text = file.bytes > TEXT_BYTES ? undefined : textOf(await this.blob(file));
-    return text === undefined ? { ...metadata, kind: "unavailable" } : { ...metadata, kind: /\.md$/i.test(path) ? "markdown" : "text", text };
+    const text = file.bytes > MEMORY_TEXT_BYTES ? undefined : textOf(await this.blob(file));
+    return text === undefined ? { ...metadata, edit: null, kind: "unavailable" } : {
+      ...metadata, kind: /\.md$/i.test(path) ? "markdown" : "text", text,
+      edit: this.ownerAuthor() ? { max_bytes: this.editLimit(path) } : null,
+    };
   }
 
   async image(path: string, head?: string): Promise<{ bytes: Buffer; mime: string }> {
@@ -257,7 +298,7 @@ export class MemoryView {
     return { head, entries: indexed, byId, byTurn, byPath };
   }
 
-  private filesAt(head: string): Promise<Map<string, TreeFile>> {
+  private filesAt(head: string): Promise<Map<string, TreeEntry>> {
     if (this.tree?.head !== head) {
       const value = this.git.tree(head);
       this.tree = { head, value };
@@ -289,7 +330,7 @@ export class MemoryView {
       if (!/\.md$/i.test(path) || path.startsWith("avatar/")) continue;
       const key = `${file.id}:${path}`;
       const cached = previous?.links.get(key);
-      if (file.bytes > TEXT_BYTES || bytes + file.bytes > LINK_BYTES) { incomplete = true; continue; }
+      if (file.bytes > MEMORY_TEXT_BYTES || bytes + file.bytes > LINK_BYTES) { incomplete = true; continue; }
       bytes += file.bytes;
       if (cached) links.set(key, cached);
       else {
@@ -342,7 +383,7 @@ export class MemoryView {
         return { kind: "daytime", agent: turn.agent, ...(record ? { turn_id: turn.id, ...record } : {}) };
       }
       const { ownerEmail, ownerName, backendEmail } = this.options;
-      const owner = (ownerEmail !== undefined || ownerName !== undefined) && entry.email !== backendEmail &&
+      const owner = (ownerEmail !== undefined || ownerName !== undefined) && (entry.email !== backendEmail || entry.ownerSave === true) &&
         (ownerEmail === undefined || ownerEmail === entry.email) && (ownerName === undefined || ownerName === entry.author);
       return { kind: owner ? "owner" : "unknown" };
     };
@@ -460,7 +501,7 @@ export class MemoryView {
     const ids = [...new Set([from, to].filter((id) => id !== undefined))];
     const sizes = await this.git.sizes(ids);
     const avatar = path.startsWith("avatar/") || oldPath.startsWith("avatar/");
-    if (ids.some((id) => (sizes.get(id) ?? Infinity) > (avatar ? IMAGE_BYTES : TEXT_BYTES))) return { kind: "too_large" };
+    if (ids.some((id) => (sizes.get(id) ?? Infinity) > (avatar ? IMAGE_BYTES : MEMORY_TEXT_BYTES))) return { kind: "too_large" };
     const blobs = await this.git.blobs(ids.map((id) => ({ id, bytes: sizes.get(id)! })));
     if (avatar) return { kind: ids.some((id) => imageTypeOf(blobs.get(id)!)) ? "image" : "binary" };
     const left = from ? textOf(blobs.get(from)!) : "";

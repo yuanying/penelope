@@ -125,6 +125,7 @@ export async function startBackend(
           agents,
           schedules,
           record,
+          memory,
           memoryView,
           feed,
           login,

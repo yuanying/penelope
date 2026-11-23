@@ -45,11 +45,11 @@ it("does not render raw HTML elements from a memory document", async () => {
   const ui = render(<App fetch={(input, init) => {
     const url = new URL(String(input), "http://example.com");
     if (url.pathname === "/api/memory") return Promise.resolve(Response.json({
-      head: id, files: [file], broken_links: [], links_incomplete: false, last_night: null,
+      head: id, can_edit: false, files: [file], broken_links: [], links_incomplete: false, last_night: null,
       always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] },
     } satisfies MemoryOverviewResponse));
     if (url.pathname === "/api/memory/file") return Promise.resolve(Response.json({
-      head: id, file, history_count: 1, broken_links: [], kind: "markdown",
+      head: id, file, edit: null, history_count: 1, broken_links: [], kind: "markdown",
       text: "# 道具の控え\n\n<i id=raw-memory-html>本文</i>",
     } satisfies MemoryFileResponse));
     return backend.fetch(input, init);
@@ -59,7 +59,7 @@ it("does not render raw HTML elements from a memory document", async () => {
 });
 
 const overview: MemoryOverviewResponse = {
-  head: id, files: [], broken_links: [], links_incomplete: false, last_night: null,
+  head: id, can_edit: false, files: [], broken_links: [], links_incomplete: false, last_night: null,
   always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] },
 };
 

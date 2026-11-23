@@ -40,6 +40,7 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/settings`・`PUT /api/settings` | モデルと思考の深さの設定 |
 | `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
 | `GET /api/memory` および `/api/memory/…` | コミット済みの記憶の閲覧（「記憶」） |
+| `POST /api/memory/save` | 既存の記憶ファイル 1 つの保存（「保存と復元」） |
 | `GET /api/approvals`・`POST /api/approvals/<id>` | 承認（後の波） |
 
 ## メッセージを送る
@@ -283,11 +284,11 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 ## 記憶
 
-ログインしたオーナーだけが、コミット済みの `/memory` を読める（[ADR-0056](adr/0056-read-committed-memory.md)）。すべて GET で、保存・編集・復元の口はない。型は `packages/contract/src/ui.ts` の `Memory…`。まだコミットのない配置では、一覧・履歴・検索は `head: null` と空の結果、個別のファイル・変更は `404`。
+ログインしたオーナーだけが、コミット済みの `/memory` を読み（[ADR-0056](adr/0056-read-committed-memory.md)）、既存ファイルを保存できる（[ADR-0057](adr/0057-edit-existing-memory-in-the-backend.md)）。読み取りは GET、保存と復元は同じ POST を使う。型は `packages/contract/src/ui.ts` の `Memory…`。まだコミットのない配置では、一覧・履歴・検索は `head: null` と空の結果、個別のファイル・変更は `404`。
 
 - パスはルートからの UTF-8 の相対パス。query には `URLSearchParams` で入れる。絶対パス、空の成分、`.`・`..`・`.git`（大文字小文字の違いを含む）、バックスラッシュ、NUL を含むパスは `400`。通常ファイルだけを扱い、リンクやサブモジュールは開かない。
 - `head` は各応答が読んだ版。本文・画像・検索・履歴・変更一覧の `head` に一覧で受け取った値を渡せば、途中で新しいコミットができても同じ版を参照できる。省略時は要求ごとにそのときの HEAD を使う。版・変更 ID は完全な Git のオブジェクト ID（小文字の 40 または 64 桁の 16 進数）。形式違いは `400`、現在の HEAD の第一親の履歴にない ID は `404`。
-- 以下の `tz` は活動の記録と同じ IANA タイムゾーンで、省略時は backend の設定。無効なら `400`。時刻は RFC 3339（UTC）、日付は `YYYY-MM-DD`。GET 以外は `405`、未認証は `401`、応答は `no-store`。
+- 以下の `tz` は活動の記録と同じ IANA タイムゾーンで、省略時は backend の設定。無効なら `400`。時刻は RFC 3339（UTC）、日付は `YYYY-MM-DD`。各口のメソッドと異なれば `405`、未認証は `401`、応答は `no-store`。
 
 | 口 | 応答 |
 | --- | --- |
@@ -300,6 +301,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 | `GET /api/memory/history?path=&head=&before=` | `MemoryHistoryResponse`: 1 パスを変えたコミット（50 件ずつ） |
 | `GET /api/memory/compare?path=&from=&to=` | `MemoryCompareResponse`: 1 パスの 2 版の差分。履歴の変更 ID を古い方から `from`、`to` に指定 |
 | `GET /api/memory/search?q=&head=` | `MemorySearchResponse`: 版の本文に一致した行、パスと行番号 |
+| `POST /api/memory/save` | `MemorySaveResponse`: 保存した変更の ID、変更なし、または保存を断った理由 |
 
 ### ファイルとゆうべの変更
 
@@ -308,6 +310,27 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - `broken_links` は Markdown の相対リンク・画像参照のうち、リンク先がその版にないものの `{path, line, destination}`（行番号は 1 始まり。参照形式でも使用箇所の行と宣言されたリンク先を返す）。URL、絶対パス、記憶の外へ出るリンク、ページ内アンカーの有無は調べない。出力は 1000 件まで、読む Markdown は 1 ファイル 1 MiB、総量 32 MiB まで。上限で省いた場合は `links_incomplete: true`。
 - `last_night` が `null` なら、報告された夜はない。それ以外は `{id, at, ended_at, files, added, removed, changes}`。 `id` は活動の記録の夜の ID。 `changes` に書き手の段ごとの変更と参照の修正をコミット順で並べる。同じ段の複数の試行もコミットがあれば載る。変更が無い段の行は無い。合計の `files` は各変更のパスの重複を除いた数、加減行は各変更の合計。移動は `changes[].moves` の `{from,to}`。
 - `file` の `kind` は `markdown`・`text`（元の UTF-8 の文を `text` に返す）、`image`（`image_url` に認証の必要な画像の URL を返す）、`unavailable`（本文や URL を返さない）のいずれか。本文は 1 MiB まで、画像は `avatar/` 下の PNG・JPEG・GIF・WebP を先頭バイトで判定し 16 MiB まで。画像以外の `avatar/` 下のデータは本文にしない。画像には正しい `content-type` と `x-content-type-options: nosniff` を付ける。ファイルが最新の夜に移動していれば `moved_from` が付く。他の読めるファイルへの相対リンクは UI が解決する。Markdown は信頼できる HTML ではないので、生の HTML は描画しない。
+
+### 保存と復元
+
+- 配置の `can_edit` は一覧 `GET /api/memory` にある。ファイル応答のトップレベルの `edit` は、その版が対象外または配置で保存が無効なら `null`、対象なら `{max_bytes}`。`max_bytes` は保存する本文の UTF-8 バイト数の上限（通常は 1 MiB、毎回読む層なら 1 MiB と `always_read.file_limit_bytes` の小さい方）。対象は閲覧で本文を返せる既存の Markdown・テキストで、`avatar/` は含まない。過去の版の `edit` は今もそのファイルがあることを保証しない。編集・復元のボタンは PC で、**現在の**本文を取得して `edit` が `null` でないときに出す。
+- `POST /api/memory/save` に `Content-Type: application/json` と `MemorySaveRequest`（`{path, base_head, text}`）を送る。`path` は記憶の相対パス（最大 4096 UTF-8 バイト）、`base_head` は編集開始時に `GET /api/memory/file?path=…` で受け取った `head`。`text` は置き換える全文（NUL を含まない UTF-8、空でもよい）。改行や末尾の改行は足さず、送ったとおり保存する。毎回読む層の合計の目安は超えても保存する。
+- 復元では、現在の本文を取得して確認の起点 `base_head` を控え、同じパスの過去の本文を `GET /api/memory/file?path=…&head=<過去の変更ID>` から取得する。保存の `text` に過去の本文、`base_head` に**確認の起点**を渡す。作る・消す操作はなく、現在の版にないパスは復元できない。
+
+| HTTP | `MemorySaveResponse.kind` | 意味と追加のフィールド |
+| --- | --- | --- |
+| `200` | `saved` | コミットした。`id` は変更の ID、`head` は保存直後の版（`id` と同じ）。変更へは `GET /api/memory/changes/<id>` を使う |
+| `200` | `unchanged` | 本文が同じでコミットしなかった。`head` は判定した現在の版 |
+| `409` | `head_conflict` | 起点と判定時の `head` で、そのパスの blob・Git のモード・通常ファイルとしての有無が違う。`exists` は新しい版に通常ファイルがあるか、`last_change` は削除・移動を含むそのパスの直近の変更（`{id, at, writer}` または `null`）、`diff` は起点から新しい版への `MemoryFileDiff`。ほかのパスだけの変更ではぶつからない |
+| `409` | `worktree_conflict` | `head` の対象と作業ツリーが一致しない。エージェントが書いている途中、移動・削除など。作業ツリーの本文や差分は返さない |
+| `422` | `file_not_editable` | 対象外、または起点の版に対象がない。起点に編集可能なファイルがあり判定時の HEAD で消えていれば `head_conflict` |
+| `422` | `text_too_large` | 保存する本文が `max_bytes`（1 MiB）を超えた |
+| `422` | `prompt_file_limit` | 毎回読む層の本文が配置の 1 ファイルの上限 `max_bytes` を超えた |
+| `403` | `editing_disabled` | 配置にオーナーのメールが設定されていない |
+
+ぶつかったときは保存しない。UI は入力中の本文を保持する。確定版が変わった場合は `diff` で変更を示し、`exists` が真なら本文を読み直してから編集・復元の確認をやり直す。作業ツリーとの衝突なら書きかけがあることを示し、確定後に再確認できるようにする。どちらも無確認で `base_head` を差し替えて再送しない。
+
+一般の失敗（型では `{error}`）は、不正な入力 `400`、到達できない `base_head` `404`、JSON 全体が 6 MiB + 32 KiB を超えた `413`、メディア型が違う `415`、確定に失敗した `500`。`500` や通信切断で結果が不明な場合は、確定版を読み直してから再試行する。成功してもエージェントを起動せず、次のターンや会話にも添えない。
 
 ### 変更と差分
 

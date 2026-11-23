@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createECDH, createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -76,6 +77,7 @@ async function setup(
     a2a = undefined as Handler | undefined,
     web = undefined as Handler | undefined,
     pushKey = undefined as string | undefined,
+    memoryOwner = undefined as { ownerEmail: string; ownerName?: string; fileLimitBytes?: number } | undefined,
   } = {},
 ) {
   const dir = tempDir(t);
@@ -106,6 +108,7 @@ async function setup(
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
   const subscriptions = new PushSubscriptions(db, { now });
   const memoryDir = path.join(dir, "memory");
+  const memory = new Memory(memoryDir, { name: "Backend", email: "backend@example.com" });
   const push = pushKey === undefined ? undefined : { publicKey: pushKey, subscriptions };
   const server = await listenTcp(
     uiHandler({
@@ -115,7 +118,8 @@ async function setup(
       agents,
       schedules,
       record,
-      memoryView: new MemoryView(memoryDir, db, { now, timeZone: "UTC" }),
+      memory,
+      memoryView: new MemoryView(memoryDir, db, { now, timeZone: "UTC", backendEmail: "backend@example.com", ...memoryOwner }),
       feed,
       login,
       sessions,
@@ -141,7 +145,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, memoryDir };
+  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, memoryDir, memory };
 }
 
 it("requires an owner session even on the committed memory image endpoint", async (t) => {
@@ -161,6 +165,158 @@ it("links the activity turn to its committed memory change", async (t) => {
   const id = turn.json().memory_change.id;
   const detail = await call(`/api/memory/changes/${id}`, cookie);
   assert.deepEqual(detail.json().change.writer, { kind: "daytime", agent: "main", turn_id: "turn-1" });
+});
+
+const memoryOwner = { ownerEmail: "owner@example.com" };
+
+describe("saving memory", () => {
+  it("requires an owner session to write", async (t) => {
+    const { call } = await setup(t, { memoryOwner });
+    assert.equal((await call("/api/memory/save", undefined, { json: {} })).status, 401);
+  });
+
+  it("commits only the edited path as the owner even with other changes staged", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    mkdirSync(memoryDir);
+    const file = path.join(memoryDir, "[note].md");
+    writeFileSync(file, "original\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const git = (...args: string[]) => execFileSync("git", args, { cwd: memoryDir, encoding: "utf8" });
+    writeFileSync(path.join(memoryDir, "draft.md"), "unfinished\n");
+    git("add", "draft.md");
+    const cookie = signIn();
+    const { head } = (await call("/api/memory/file?path=%5Bnote%5D.md", cookie)).json();
+    const saved = await call("/api/memory/save", cookie, { json: { path: "[note].md", base_head: head, text: "corrected\n" } });
+    assert.equal(saved.status, 200);
+    const result = saved.json();
+    assert.equal(result.kind, "saved");
+    assert.equal(result.head, git("rev-parse", "HEAD").trim());
+    const change = (await call(`/api/memory/changes/${result.id}`, cookie)).json().change;
+    assert.deepEqual(change.paths, ["[note].md"]);
+    assert.deepEqual(change.writer, { kind: "owner" });
+    assert.equal(git("show", "HEAD:[note].md"), "corrected\n");
+    assert.equal(git("diff", "--cached", "--name-only"), "draft.md\n");
+    assert.equal(readFileSync(file, "utf8"), "corrected\n");
+    assert.equal(statSync(file).mode & 0o777, 0o660);
+  });
+
+  it("reports the committed difference when a queued turn removes the path before a restore", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    mkdirSync(memoryDir);
+    const file = path.join(memoryDir, "note.md");
+    writeFileSync(file, "original\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const { head } = (await call("/api/memory/file?path=note.md", cookie)).json();
+    renameSync(file, path.join(memoryDir, "moved.md"));
+    const turn = memory.commit({ agent: "main", turnId: "turn-2" });
+    const refused = await call("/api/memory/save", cookie, { json: { path: "note.md", base_head: head, text: "previous version\n" } });
+    await turn;
+    assert.equal(refused.status, 409);
+    const result = refused.json();
+    assert.equal(result.kind, "head_conflict");
+    assert.equal(result.exists, false);
+    assert.equal(result.last_change.writer.kind, "daytime");
+    assert.deepEqual(result.diff.hunks[0].lines, [{ kind: "removed", old_line: 1, text: "original" }]);
+  });
+
+  it("does not overwrite a work-tree draft even when the requested text matches HEAD", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    mkdirSync(memoryDir);
+    const file = path.join(memoryDir, "note.md");
+    writeFileSync(file, "original\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const { head } = (await call("/api/memory/file?path=note.md", cookie)).json();
+    writeFileSync(file, "draft\n");
+    const refused = await call("/api/memory/save", cookie, { json: { path: "note.md", base_head: head, text: "original\n" } });
+    assert.equal(refused.status, 409);
+    assert.deepEqual(refused.json(), { kind: "worktree_conflict", head });
+    assert.equal(readFileSync(file, "utf8"), "draft\n");
+  });
+
+  it("does not follow a work-tree directory replaced with a symlink", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    const dir = path.join(memoryDir, "topics");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, "note.md"), "original\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const { head } = (await call("/api/memory/file?path=topics%2Fnote.md", cookie)).json();
+    const outside = tempDir(t);
+    const outsideFile = path.join(outside, "note.md");
+    writeFileSync(outsideFile, "original\n");
+    renameSync(dir, path.join(memoryDir, "moved"));
+    symlinkSync(outside, dir);
+    const refused = await call("/api/memory/save", cookie, { json: { path: "topics/note.md", base_head: head, text: "corrected\n" } });
+    assert.deepEqual(refused.json(), { kind: "worktree_conflict", head });
+    assert.equal(readFileSync(outsideFile, "utf8"), "original\n");
+  });
+
+  it("refuses an always-read file over the configured UTF-8 byte limit", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner: { ...memoryOwner, fileLimitBytes: 4 } });
+    mkdirSync(memoryDir);
+    writeFileSync(path.join(memoryDir, "always.md"), "yes\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const { head, edit } = (await call("/api/memory/file?path=always.md", cookie)).json();
+    assert.deepEqual(edit, { max_bytes: 4 });
+    const refused = await call("/api/memory/save", cookie, { json: { path: "always.md", base_head: head, text: "日本" } });
+    assert.equal(refused.status, 422);
+    assert.deepEqual(refused.json(), { kind: "prompt_file_limit", max_bytes: 4 });
+  });
+
+  it("restores an older body when HEAD advanced only on another path", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    mkdirSync(memoryDir);
+    const file = path.join(memoryDir, "note.md");
+    writeFileSync(file, "older\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const old = (await call("/api/memory/file?path=note.md", cookie)).json();
+    writeFileSync(file, "current\n");
+    await memory.commit({ agent: "main", turnId: "turn-2" });
+    const { head } = (await call("/api/memory/file?path=note.md", cookie)).json();
+    writeFileSync(path.join(memoryDir, "other.md"), "other\n");
+    await memory.commit({ agent: "main", turnId: "turn-3" });
+    const saved = await call("/api/memory/save", cookie, { json: { path: "note.md", base_head: head, text: old.text } });
+    assert.equal(saved.status, 200);
+    assert.equal((await call("/api/memory/file?path=note.md", cookie)).json().text, "older\n");
+  });
+
+  it("does not add a commit for unchanged text", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    mkdirSync(memoryDir);
+    writeFileSync(path.join(memoryDir, "note.md"), "original\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const { head, text } = (await call("/api/memory/file?path=note.md", cookie)).json();
+    const saved = await call("/api/memory/save", cookie, { json: { path: "note.md", base_head: head, text } });
+    assert.equal(saved.status, 200);
+    assert.deepEqual(saved.json(), { kind: "unchanged", head });
+    assert.equal((await call("/api/memory", cookie)).json().head, head);
+  });
+
+  it("does not create a path absent from the base and HEAD", async (t) => {
+    const { call, signIn, memoryDir, memory } = await setup(t, { memoryOwner });
+    mkdirSync(memoryDir);
+    writeFileSync(path.join(memoryDir, "note.md"), "original\n");
+    await memory.commit({ agent: "main", turnId: "turn-1" });
+    const cookie = signIn();
+    const { head } = (await call("/api/memory/file?path=note.md", cookie)).json();
+    const refused = await call("/api/memory/save", cookie, { json: { path: "missing.md", base_head: head, text: "new\n" } });
+    assert.equal(refused.status, 422);
+    assert.deepEqual(refused.json(), { kind: "file_not_editable" });
+  });
+
+  it("disables editing when the deployment has no owner email", async (t) => {
+    const { call, signIn } = await setup(t);
+    const cookie = signIn();
+    assert.equal((await call("/api/memory", cookie)).json().can_edit, false);
+    const refused = await call("/api/memory/save", cookie, { json: { path: "note.md", base_head: "0".repeat(40), text: "new\n" } });
+    assert.equal(refused.status, 403);
+    assert.deepEqual(refused.json(), { kind: "editing_disabled" });
+  });
 });
 
 const modelChoice = { model: "example/org/chat", thinking: "low" } as const;

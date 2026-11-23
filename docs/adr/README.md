@@ -57,4 +57,5 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |
 | 0054 | [同じ出どころの鍵に限り、複数の登録でサロゲートを共有できる](0054-share-surrogates-only-for-the-same-key-source.md) | Accepted |
 | 0055 | [残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) | Accepted |
-| 0056 | [記憶の画面はコミット済みの版を読み、活動の記録と行き来できるようにする](0056-read-committed-memory.md) | Accepted |
+| 0056 | [記憶の画面はコミット済みの版を読み、活動の記録と行き来できるようにする](0056-read-committed-memory.md) | Accepted（一部を ADR-0057 で置き換え） |
+| 0057 | [オーナーによる記憶の編集と復元は、backend が 1 ファイルずつ確定する](0057-edit-existing-memory-in-the-backend.md) | Accepted |

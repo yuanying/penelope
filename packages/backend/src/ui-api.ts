@@ -21,6 +21,7 @@ import { CALLBACK_PATH, type GitHubLogin } from "./login/github.ts";
 import type { LoginSessions, Session } from "./login/sessions.ts";
 import { MEMORY_PATH, memoryRoute } from "./memory-api.ts";
 import type { MemoryView } from "./memory-view.ts";
+import type { Memory } from "./memory.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { PushSubscriptions } from "./push/notifier.ts";
 import { webPushSubscriptionOf } from "./push/web-push.ts";
@@ -54,6 +55,7 @@ export type UiOptions = {
   schedules: Schedules;
   /** The activity record (ADR-0038). */
   record: ActivityRecord;
+  memory: Memory;
   memoryView: MemoryView;
   feed: Feed;
   login: GitHubLogin;
@@ -76,7 +78,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, assets, agents, schedules, record, memoryView, feed, login, sessions, ownerId, now } = options;
+  const { queue, conversation, assets, agents, schedules, record, memory, memoryView, feed, login, sessions, ownerId, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -177,11 +179,11 @@ export function uiHandler(options: UiOptions): Handler {
     }
     if (url.pathname === MEMORY_PATH || url.pathname.startsWith(`${MEMORY_PATH}/`)) {
       try {
-        await memoryRoute(memoryView, url, request, response);
+        await memoryRoute(memoryView, memory, url, request, response);
       } catch (error) {
         if (error instanceof HttpError) throw error;
         // The ordinary error handler logs the URL, which can contain private search text.
-        throw new HttpError(500, "committed memory could not be read");
+        throw new HttpError(500, request.method === "POST" ? "memory could not be saved" : "committed memory could not be read");
       }
       return;
     }

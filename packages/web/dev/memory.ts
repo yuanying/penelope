@@ -98,7 +98,7 @@ export function memoryScene(now: number, state: "normal" | "over" | "broken" | "
   return {
     text, changes,
     overview: {
-      head: changes[0]!.change.id, files, last_night: lastNight,
+      head: changes[0]!.change.id, can_edit: false, files, last_night: lastNight,
       always_read: { bytes: files.filter((f) => f.always_read).reduce((n, f) => n + f.bytes, 0), target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: state === "over" ? [day(1), day(2)] : [] },
       broken_links: state === "broken" ? [{ path: TOPIC, line: 13, destination: "old.md" }, { path: TOPIC, line: 13, destination: "../../old-index.md" }] : [], links_incomplete: false,
     },

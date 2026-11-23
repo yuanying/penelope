@@ -22,6 +22,8 @@ export function memoryPath(value: unknown): value is string {
 }
 
 export type TreeFile = { id: string; bytes: number };
+export type TreeEntry = TreeFile & { mode: "100644" | "100755" };
+export const OWNER_SAVE_SUBJECT = "Owner: save memory file";
 export type GitFileChange = MemoryFileChange & { oldBlob?: string; newBlob?: string };
 export type GitChange = {
   id: string;
@@ -31,6 +33,7 @@ export type GitChange = {
   author: string;
   nightSeq?: number;
   avatarSeed?: true;
+  ownerSave?: true;
   turn?: { id: string; agent: string; stage?: "reflection" | "verifier" | "curator" };
   repair?: { moves: MemoryMove[]; turn?: string };
   files: GitFileChange[];
@@ -68,12 +71,17 @@ export class MemoryGit {
     return OBJECT_ID.test(head) ? head : null;
   }
 
-  async tree(id: string): Promise<Map<string, TreeFile>> {
-    const files = new Map<string, TreeFile>();
-    const output = (await this.run(["ls-tree", "-r", "-l", "-z", id, "--"])).bytes.toString();
-    for (const row of output.split("\0")) {
-      const match = /^100(?:644|755) blob ([a-f0-9]+) +([0-9]+)\t([\s\S]+)$/.exec(row);
-      if (match && memoryPath(match[3])) files.set(match[3], { id: match[1]!, bytes: Number(match[2]) });
+  async tree(id: string): Promise<Map<string, TreeEntry>> {
+    const files = new Map<string, TreeEntry>();
+    const { bytes } = await this.run(["ls-tree", "-r", "-l", "-z", id, "--"]);
+    const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+    for (let start = 0, end = bytes.indexOf(0); end !== -1; start = end + 1, end = bytes.indexOf(0, start)) {
+      let row: string;
+      try { row = decoder.decode(bytes.subarray(start, end)); } catch { continue; }
+      const match = /^(100644|100755) blob ([a-f0-9]+) +([0-9]+)\t([\s\S]+)$/.exec(row);
+      if (match && memoryPath(match[4])) {
+        files.set(match[4], { mode: match[1] === "100755" ? "100755" : "100644", id: match[2]!, bytes: Number(match[3]) });
+      }
     }
     return files;
   }
@@ -203,6 +211,8 @@ function parseLog(output: string): GitChange[] {
       if (night && Number.isSafeInteger(Number(night.slice(7)))) change.nightSeq = Number(night.slice(7));
     } else if (subject?.startsWith("Avatar ") && body.some((line) => line.startsWith("Copied from "))) {
       change.avatarSeed = true;
+    } else if (subject === OWNER_SAVE_SUBJECT) {
+      change.ownerSave = true;
     }
     changes.push(change);
   }

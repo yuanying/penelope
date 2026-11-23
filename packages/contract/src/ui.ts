@@ -346,7 +346,7 @@ export type RecordTurnResponse = {
 export type RecordResultResponse = { output: string };
 
 /** `GET /api/record/nights/<id>`: the night, its stage turns and the individual weekly review turns. */
-// Read-only memory (docs/ui-api.md). IDs are full Git object IDs.
+// Memory (docs/ui-api.md). IDs are full Git object IDs.
 export type MemoryNightStage = NightTurnStage | NightReviewPhase;
 export type MemoryWriter =
   | { kind: "daytime"; agent: string; turn_id?: string; trigger?: RecordTrigger }
@@ -364,11 +364,13 @@ export type MemoryNight = MemoryCounts & {
 export type MemoryReadCount = { count_30_days: number; last_day: string | null };
 export type MemoryFile = {
   path: string; bytes: number; always_read: boolean; reads: MemoryReadCount | null;
-  last_change: { id: string; at: string; writer: MemoryWriter } | null;
+  last_change: MemoryLastChange | null;
 };
+export type MemoryLastChange = { id: string; at: string; writer: MemoryWriter };
 export type MemoryBrokenLink = { path: string; line: number; destination: string };
 export type MemoryOverviewResponse = {
   head: string | null;
+  can_edit: boolean;
   files: MemoryFile[];
   always_read: { bytes: number; target_bytes: number; file_limit_bytes: number; over_target_nights: string[] };
   broken_links: MemoryBrokenLink[];
@@ -377,6 +379,7 @@ export type MemoryOverviewResponse = {
 };
 export type MemoryFileResponse = {
   head: string; file: MemoryFile; history_count: number; broken_links: MemoryBrokenLink[];
+  edit: { max_bytes: number } | null;
   moved_from?: string; kind: "markdown" | "text" | "image" | "unavailable"; text?: string; image_url?: string;
 };
 export type MemoryWriterFilter = "all" | "daytime" | "night" | "owner";
@@ -393,6 +396,17 @@ export type MemoryDiffLine =
 export type MemoryFileDiff =
   | { kind: "text"; hunks: Array<{ old_start: number; new_start: number; lines: MemoryDiffLine[] }>; truncated: boolean }
   | { kind: "image" | "binary" | "too_large" };
+/** To restore an older body, send it as `text` with the current file's `head` as `base_head`. */
+export type MemorySaveRequest = { path: string; base_head: string; text: string };
+export type MemorySaveResponse =
+  | { kind: "saved"; head: string; id: string }
+  | { kind: "unchanged"; head: string }
+  | { kind: "head_conflict"; head: string; exists: boolean; last_change: MemoryLastChange | null; diff: MemoryFileDiff }
+  | { kind: "worktree_conflict"; head: string }
+  | { kind: "file_not_editable" }
+  | { kind: "text_too_large"; max_bytes: number }
+  | { kind: "prompt_file_limit"; max_bytes: number }
+  | { kind: "editing_disabled" };
 export type MemoryCompareResponse = { from: string; to: string; changes: number; added: number; removed: number; diff: MemoryFileDiff };
 export type MemorySearchResponse = {
   head: string | null; files: Array<{ path: string; lines: Array<{ line: number; text: string }> }>;
