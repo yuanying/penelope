@@ -47,13 +47,19 @@ body{margin:0}
 </div>
 </sc-if>
 
+<sc-if value="{{isMemory}}" hint-placeholder-val="{{ false }}">
+<div style="height: 844px; overflow: auto">
+<dc-import name="Memory" view="{{mview}}" st="{{mst}}" file="{{mfile}}" commit="{{mcommit}}" from="{{mfrom}}" pad="140px" hint-size="390px,844px"></dc-import>
+</div>
+</sc-if>
+
 <sc-if value="{{kb}}" hint-placeholder-val="{{ false }}">
 <div style="flex: none; height: 336px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-top: 1px dashed var(--color-text-secondary); color: var(--color-text-secondary); font-size: 13px">[端末のキーボードが出る領域]</div>
 </sc-if>
 
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"kb":{"editor":"boolean","default":false},"page":{"editor":"enum","options":["talk","schedule","record","detail"],"default":"talk"},"rday":{"editor":"text","default":"failures"},"rkind":{"editor":"text","default":"turn"},"fails":{"editor":"int","default":0,"min":0,"max":99},"subs":{"editor":"int","default":0,"min":0,"max":6},"attach":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"mode":{"editor":"enum","options":["busy","empty","offline"],"default":"busy"},"kb":{"editor":"boolean","default":false},"page":{"editor":"enum","options":["talk","schedule","record","detail","memory"],"default":"talk"},"mview":{"editor":"text","default":"home"},"mst":{"editor":"text","default":"normal"},"mfile":{"editor":"text","default":"topic"},"mcommit":{"editor":"text","default":"day"},"mfrom":{"editor":"text","default":"memory"},"rday":{"editor":"text","default":"failures"},"rkind":{"editor":"text","default":"turn"},"fails":{"editor":"int","default":0,"min":0,"max":99},"subs":{"editor":"int","default":0,"min":0,"max":6},"attach":{"editor":"boolean","default":false},"$preview":{"width":390,"height":844}}'>
 class Component extends DCLogic {
 renderVals() {
 const kb = !!this.props.kb;
@@ -65,6 +71,8 @@ isTalk: (this.props.page ?? 'talk') === 'talk',
 isSchedule: this.props.page === 'schedule',
 isRecord: this.props.page === 'record',
 isDetail: this.props.page === 'detail',
+isMemory: this.props.page === 'memory',
+mview: this.props.mview ?? 'home', mst: this.props.mst ?? 'normal', mfile: this.props.mfile ?? 'topic', mcommit: this.props.mcommit ?? 'day', mfrom: this.props.mfrom ?? 'memory',
 rday: this.props.rday ?? 'failures',
 rkind: this.props.rkind ?? 'turn',
 fails: Number(this.props.fails ?? 0),

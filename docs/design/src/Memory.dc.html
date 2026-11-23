@@ -1,0 +1,678 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>部品 記憶</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+body{margin:0}
+a{color:inherit}
+</style>
+</helmet>
+<div style="--color-background-body: light-dark(#f1f1f1, #1b1b1b); --color-background-surface: light-dark(#ffffff, #262626); --color-text-primary: light-dark(#000000, #ffffff); --color-text-secondary: light-dark(#474747, #9e9e9e); --color-border: light-dark(#00000014, #ffffff1A); --color-neutral: light-dark(#0000000F, #ffffff1A); --color-accent: light-dark(#1b1b1b, #f1f1f1); --color-on-accent: light-dark(#ffffff, #111111); --diff-add: light-dark(#dff0df, #1e3a22); --diff-del: light-dark(#fbe1de, #472220); --mono: ui-monospace, 'SF Mono', Monaco, Consolas, monospace; width: 100%; box-sizing: border-box; padding: {{pad}} 20px 48px; background: var(--color-background-body); color: var(--color-text-primary); font-family: Figtree, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 14px; line-height: 1.6">
+<div style="width: 100%; max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+
+<sc-if value="{{isTop}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px">
+<h1 style="flex: 1 1 auto; margin: 0; font-size: 28px; font-weight: 600; line-height: 1.3">記憶</h1>
+<label style="flex: 1 1 240px; max-width: 320px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; background: var(--color-background-surface); color: var(--color-text-secondary)">
+<svg aria-hidden="true" style="flex: none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.500 16.500L21 21"/></svg>
+<input type="search" aria-label="記憶の中を探す" placeholder="記憶の中を探す" style="flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-text-primary); font: inherit">
+</label>
+</div>
+<div role="tablist" aria-label="記憶の見方" style="display: flex; gap: 4px; border-bottom: 1px solid var(--color-border)">
+<button type="button" role="tab" aria-selected="{{filesSel}}" onClick="{{toFiles}}" style="min-height: 44px; padding: 0 14px; border: 0; border-bottom: 2px solid {{filesLine}}; margin-bottom: -1px; background: transparent; color: {{filesFg}}; font: inherit; font-weight: 600; cursor: pointer">ファイル</button>
+<button type="button" role="tab" aria-selected="{{changesSel}}" onClick="{{toChanges}}" style="min-height: 44px; padding: 0 14px; border: 0; border-bottom: 2px solid {{changesLine}}; margin-bottom: -1px; background: transparent; color: {{changesFg}}; font: inherit; font-weight: 600; cursor: pointer">変更</button>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isSub}}" hint-placeholder-val="{{ false }}">
+<nav aria-label="いまの場所" style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 44px; font-size: 13px; color: var(--color-text-secondary)">
+<a href="{{backHref}}" style="display: flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600; text-decoration: none">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+<span>{{backLabel}}</span>
+</a>
+<sc-for list="{{crumbs}}" as="c" hint-placeholder-count="1">
+<span style="display: flex; align-items: center; gap: 6px"><span aria-hidden="true">/</span><span>{{c}}</span></span>
+</sc-for>
+</nav>
+</sc-if>
+
+<sc-if value="{{isHome}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 32px">
+
+<sc-if value="{{isEmpty}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; color: var(--color-text-secondary)">記憶は始まったばかりです。エージェントが書くと、ファイルと夜の変化がここに並びます。</p>
+</sc-if>
+
+<sc-if value="{{hasNight}}" hint-placeholder-val="{{ true }}">
+<section aria-labelledby="mem-night" style="display: flex; flex-direction: column; background: var(--color-background-surface); border: 1px solid var(--color-border); border-radius: 0.75rem; padding: 16px 20px 8px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding-bottom: 8px">
+<h2 id="mem-night" style="margin: 0; font-size: 16px; font-weight: 600">ゆうべ変わったこと</h2>
+<span style="font-size: 12px; color: var(--color-text-secondary)">11月22日(日) 3:00 の夜の切り替え ・ 18 ファイル <span style="font-family: var(--mono)">+212 −164</span></span>
+</div>
+<sc-for list="{{night}}" as="n" hint-placeholder-count="4">
+<a href="{{n.href}}" style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 10px 0; border-top: 1px solid var(--color-border); text-decoration: none">
+<span style="flex: 0 0 20px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--color-text-secondary)">
+<sc-if value="{{n.moon}}" hint-placeholder-val="{{ true }}">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.500A8 8 0 0 1 9.500 4a8 8 0 1 0 10.500 10.500z"/></svg>
+</sc-if>
+<sc-if value="{{n.move}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg>
+</sc-if>
+</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<span style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px">
+<span style="font-weight: 600">{{n.who}}</span>
+<span style="font-size: 12px; color: var(--color-text-secondary)">{{n.stat}} <span style="font-family: var(--mono)">{{n.lines}}</span></span>
+</span>
+<span style="font-family: var(--mono); font-size: 12px; color: var(--color-text-secondary); overflow-wrap: anywhere">{{n.files}}</span>
+</span>
+<svg aria-hidden="true" style="flex: none; margin-top: 3px; color: var(--color-text-secondary)" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+</a>
+</sc-for>
+</section>
+</sc-if>
+
+<section aria-labelledby="mem-always" style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px">
+<h2 id="mem-always" style="margin: 0; font-size: 16px; font-weight: 600">毎回読む層</h2>
+<span style="font-size: 12px; color: var(--color-text-secondary)">合計 <strong style="color: var(--color-text-primary); font-size: 14px">{{layerTotal}}</strong> ・ 目安 16 KB</span>
+</div>
+<div role="img" aria-label="{{layerAria}}" style="position: relative; height: 8px; border-radius: 9999px; background: var(--color-neutral)">
+<span style="position: absolute; left: 0; top: 0; bottom: 0; width: {{layerPct}}; border-radius: 9999px; background: var(--color-text-secondary)"></span>
+<span style="position: absolute; left: 66.600%; top: -4px; bottom: -4px; width: 2px; background: var(--color-text-primary)"></span>
+</div>
+<p style="margin: 0; font-size: 12px; color: var(--color-text-secondary)">{{layerNote}}</p>
+<div style="display: flex; flex-direction: column">
+<sc-for list="{{layer}}" as="f" hint-placeholder-count="4">
+<a href="{{f.href}}" style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-height: 44px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid var(--color-border); text-decoration: none">
+<span style="flex: 0 0 132px; font-family: var(--mono); font-size: 13px; font-weight: 600">{{f.name}}</span>
+<span style="flex: 1 1 160px; min-width: 0; color: var(--color-text-secondary)">{{f.role}}</span>
+<span style="flex: none; width: 60px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums">{{f.size}}</span>
+<span style="flex: 0 1 190px; font-size: 12px; color: var(--color-text-secondary)">{{f.when}}</span>
+</a>
+</sc-for>
+</div>
+</section>
+
+<section aria-labelledby="mem-files" style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px">
+<h2 id="mem-files" style="margin: 0; font-size: 16px; font-weight: 600">ファイル</h2>
+<span style="font-size: 12px; color: var(--color-text-secondary)">{{filesTotal}}</span>
+</div>
+<sc-if value="{{isBroken}}" hint-placeholder-val="{{ false }}">
+<a href="HybridMemoryFile.dc.html" style="display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 13px; color: var(--color-text-secondary); text-decoration: none">
+<svg aria-hidden="true" style="flex: none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14l-2 2a3 3 0 0 1-4-4l3-3M14 10l2-2a3 3 0 0 1 4 4l-3 3M4 4l16 16"/></svg>
+<span>リンク先のファイルが無いリンクが 2 つあります（<span style="font-family: var(--mono)">people/example.md</span>、<span style="font-family: var(--mono)">howto/backup.md</span>）</span>
+</a>
+</sc-if>
+<sc-for list="{{loose}}" as="r" hint-placeholder-count="1">
+<a href="{{r.href}}" style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-height: 44px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid var(--color-border); text-decoration: none">
+<span style="flex: 1 1 220px; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px"><span style="font-family: var(--mono); font-size: 13px; font-weight: 600">{{r.path}}</span><span style="color: var(--color-text-secondary)">{{r.role}}</span></span>
+<span style="flex: none; width: 60px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums">{{r.size}}</span>
+<span style="flex: 0 1 170px; font-size: 12px; color: var(--color-text-secondary)">{{r.when}}</span>
+<span style="flex: 0 1 100px; font-size: 12px; color: var(--color-text-secondary)">{{r.reads}}</span>
+</a>
+</sc-for>
+<sc-for list="{{groups}}" as="g" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column">
+<sc-if value="{{g.hasHead}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 12px; padding: 24px 0 8px; border-bottom: 1px solid var(--color-border)">
+<h3 style="margin: 0; font-size: 14px; font-weight: 600">{{g.head}}</h3>
+<span style="font-size: 12px; color: var(--color-text-secondary)">{{g.headNote}}</span>
+</div>
+</sc-if>
+<button type="button" aria-expanded="{{g.openStr}}" onClick="{{g.toggle}}" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0; border: 0; border-bottom: 1px solid var(--color-border); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer">
+<svg aria-hidden="true" style="flex: none; color: var(--color-text-secondary); transform: rotate({{g.rot}})" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+<span style="font-family: {{g.font}}; font-size: 13px; font-weight: 600">{{g.path}}</span>
+<span style="font-size: 13px; color: var(--color-text-secondary)">{{g.name}}</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--color-text-secondary)">{{g.count}}</span>
+</button>
+<sc-if value="{{g.open}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; padding-left: 22px">
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="4">
+<a href="{{r.href}}" style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-height: 44px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid var(--color-border); text-decoration: none">
+<span style="flex: 1 1 220px; min-width: 0; display: flex; align-items: baseline; gap: 8px; font-family: {{r.font}}; font-size: 13px; overflow-wrap: anywhere; color: {{r.fg}}; font-weight: {{r.weight}}">
+<sc-if value="{{r.fold}}" hint-placeholder-val="{{ false }}">
+<svg aria-hidden="true" style="flex: none; align-self: center; color: var(--color-text-secondary)" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+</sc-if>
+<span>{{r.path}}</span>
+</span>
+<span style="flex: none; width: 60px; text-align: right; font-size: 13px; font-variant-numeric: tabular-nums">{{r.size}}</span>
+<span style="flex: 0 1 170px; font-size: 12px; color: var(--color-text-secondary)">{{r.when}}</span>
+<span style="flex: 0 1 100px; font-size: 12px; color: var(--color-text-secondary)">{{r.reads}}</span>
+</a>
+</sc-for>
+</div>
+</sc-if>
+</div>
+</sc-for>
+<p style="margin: 8px 0 0; font-size: 12px; color: var(--color-text-secondary)">「30 日に何回」は、エージェントが日中にそのファイルを読んだ・探した回数です。読まれないことは、要らないことを意味しません。</p>
+</section>
+
+</div>
+</sc-if>
+
+<sc-if value="{{isChanges}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 24px">
+<div role="group" aria-label="書き手で絞る" style="display: flex; align-items: center; gap: 8px; overflow-x: auto">
+<sc-for list="{{whoFilters}}" as="w" hint-placeholder-count="4">
+<button type="button" aria-pressed="{{w.on}}" style="flex: none; min-height: 44px; padding: 0 14px; border: 1px solid {{w.border}}; border-radius: 9999px; background: {{w.bg}}; color: {{w.fg}}; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">{{w.label}}</button>
+</sc-for>
+</div>
+<sc-for list="{{days}}" as="day" hint-placeholder-count="2">
+<section style="display: flex; flex-direction: column">
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); font-size: 12px; color: var(--color-text-secondary)">
+<h2 style="margin: 0; font-size: 12px; font-weight: 600">{{day.label}}</h2>
+<span>{{day.summary}}</span>
+</div>
+<sc-for list="{{day.rows}}" as="c" hint-placeholder-count="6">
+<a href="{{c.href}}" style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 10px 0 10px {{c.indent}}; border-bottom: 1px solid var(--color-border); background: {{c.bg}}; text-decoration: none">
+<span style="flex: 0 0 48px; padding-top: 2px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--color-text-secondary)">{{c.time}}</span>
+<span style="flex: 0 0 20px; height: 22px; display: flex; align-items: center; justify-content: center; color: var(--color-text-secondary)">
+<sc-if value="{{c.gDay}}" hint-placeholder-val="{{ true }}">
+<svg role="img" aria-label="日中のターン" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.600 5.600l1.400 1.400M17 17l1.400 1.400M5.600 18.400L7 17M17 7l1.400-1.400"/></svg>
+</sc-if>
+<sc-if value="{{c.gNight}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="夜の切り替え" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.500A8 8 0 0 1 9.500 4a8 8 0 1 0 10.500 10.500z"/></svg>
+</sc-if>
+<sc-if value="{{c.gOwner}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="オーナー" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.500-6 8-6s7 2 8 6"/></svg>
+</sc-if>
+<sc-if value="{{c.gSys}}" hint-placeholder-val="{{ false }}">
+<svg role="img" aria-label="仕組み" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14l-2 2a3 3 0 0 1-4-4l3-3a3 3 0 0 1 4 0M14 10l2-2a3 3 0 0 1 4 4l-3 3a3 3 0 0 1-4 0"/></svg>
+</sc-if>
+</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<span style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px">
+<span style="flex: none; font-weight: 600">{{c.who}}</span>
+<span style="flex: 1 1 0; min-width: 40%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">{{c.what}}</span>
+<span style="flex: none; margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--color-text-secondary); white-space: nowrap">{{c.lines}}</span>
+</span>
+<span style="font-family: var(--mono); font-size: 12px; color: var(--color-text-secondary); overflow-wrap: anywhere">{{c.files}}</span>
+</span>
+</a>
+</sc-for>
+</section>
+</sc-for>
+<p style="margin: 0; font-size: 12px; color: var(--color-text-secondary)">変更は、ターンの終わりごとに 1 つ記録されます。</p>
+</div>
+</sc-if>
+
+<sc-if value="{{isCommit}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.4">{{cm.title}}</h1>
+<p style="margin: 0; color: var(--color-text-secondary)">{{cm.when}} ・ {{cm.stat}} <span style="font-family: var(--mono)">{{cm.lines}}</span></p>
+<a href="{{cm.turnHref}}" style="align-self: flex-start; display: flex; align-items: center; gap: 6px; min-height: 44px; font-weight: 600">
+<span>{{cm.turnLabel}}</span>
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+</a>
+</div>
+<sc-if value="{{cm.hasMoves}}" hint-placeholder-val="{{ false }}">
+<section aria-label="移動" style="display: flex; flex-direction: column; gap: 4px">
+<h2 style="margin: 0; font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">移動 2</h2>
+<sc-for list="{{cm.moves}}" as="m" hint-placeholder-count="2">
+<p style="margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; font-family: var(--mono); font-size: 13px"><span>{{m.from}}</span><svg role="img" aria-label="から" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h15M13 6l6 6-6 6"/></svg><span>{{m.to}}</span></p>
+</sc-for>
+</section>
+</sc-if>
+<sc-for list="{{cm.files}}" as="f" hint-placeholder-count="2">
+<section style="display: flex; flex-direction: column; border: 1px solid var(--color-border); border-radius: 0.75rem; overflow: hidden; background: var(--color-background-surface)">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; min-height: 44px; box-sizing: border-box; padding: 4px 14px; border-bottom: {{f.headLine}}">
+<svg aria-hidden="true" style="flex: none; color: var(--color-text-secondary); transform: rotate({{f.rot}})" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+<a href="HybridMemoryFile.dc.html" style="flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere">{{f.path}}</a>
+<span style="font-size: 12px; color: var(--color-text-secondary)">{{f.note}}</span>
+<span style="font-family: var(--mono); font-size: 12px; color: var(--color-text-secondary)">{{f.lines}}</span>
+</div>
+<sc-if value="{{f.open}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; padding: 6px 0; font-family: var(--mono); font-size: 12.500px; line-height: 1.7">
+<sc-for list="{{f.diff}}" as="l" hint-placeholder-count="8">
+<div style="display: flex; background: {{l.bg}}; color: {{l.fg}}">
+<span aria-hidden="true" style="flex: 0 0 38px; text-align: right; padding-right: 8px; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; user-select: none">{{l.no}}</span>
+<span style="flex: 0 0 16px; font-weight: 700" aria-label="{{l.signLabel}}">{{l.sign}}</span>
+<span style="flex: 1; min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere">{{l.s}}</span>
+</div>
+</sc-for>
+</div>
+</sc-if>
+</section>
+</sc-for>
+<sc-if value="{{cm.more}}" hint-placeholder-val="{{ false }}">
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer">残りの 8 ファイルを表示</button>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{isFile}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px">
+<h1 style="flex: 1 1 auto; min-width: 0; margin: 0; font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere">{{fl.path}}</h1>
+<sc-if value="{{fl.layer}}" hint-placeholder-val="{{ false }}">
+<span style="flex: none; padding: 2px 10px; border-radius: 9999px; background: var(--color-neutral); font-size: 12px; color: var(--color-text-secondary)">毎回読む層</span>
+</sc-if>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">{{fl.meta}}</p>
+<sc-if value="{{fl.hasNote}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">{{fl.note}}</p>
+</sc-if>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<div role="group" aria-label="本文の見方" style="display: flex; border: 1px solid var(--color-border); border-radius: 9999px; overflow: hidden">
+<button type="button" aria-pressed="true" style="min-height: 44px; padding: 0 14px; border: 0; background: var(--color-neutral); color: inherit; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">読む</button>
+<button type="button" aria-pressed="false" style="min-height: 44px; padding: 0 14px; border: 0; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">元の文</button>
+</div>
+<a href="HybridMemoryHistory.dc.html" style="display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 13px; font-weight: 600; text-decoration: none">履歴 {{fl.versions}}</a>
+<a href="HybridMemoryEdit.dc.html" style="display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 13px; font-weight: 600; text-decoration: none">
+<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg>
+<span>直す</span>
+</a>
+<sc-if value="{{fl.isDiary}}" hint-placeholder-val="{{ false }}">
+<span style="display: flex; gap: 8px; margin-left: auto">
+<a href="#prev" style="display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 13px; font-weight: 600; text-decoration: none">前の日</a>
+<a href="#next" style="display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 13px; font-weight: 600; text-decoration: none">次の日</a>
+</span>
+</sc-if>
+</div>
+<article style="padding: 8px 24px 16px; background: var(--color-background-surface); border: 1px solid var(--color-border); border-radius: 0.75rem; font-size: 15px; line-height: 1.8">
+<sc-if value="{{fl.isTopic}}" hint-placeholder-val="{{ true }}">
+<div>
+<h2 style="margin: 16px 0 8px; font-size: 20px; font-weight: 600">書斎の NAS</h2>
+<p style="margin: 0 0 12px">家のファイル置き場。写真と書類の控えが入っている。管理は <a href="#people">people/owner.md</a> の本人。</p>
+<h3 style="margin: 20px 0 6px; font-size: 16px; font-weight: 600">決まっていること</h3>
+<ul style="margin: 0 0 12px; padding-left: 22px">
+<li>控えは毎晩 2 時。手順は <a href="#howto">howto/backup.md</a>。</li>
+<li>容量が 8 割を超えたら本人に知らせる。自分では消さない。</li>
+<li>再起動は本人の許可を取ってから。</li>
+</ul>
+<h3 style="margin: 20px 0 6px; font-size: 16px; font-weight: 600">最近のこと</h3>
+<ul style="margin: 0 0 12px; padding-left: 22px">
+<li>11月20日: 2 番のディスクを交換した。作業の記録は <a href="#diary">diary/2026-11-20.md</a>。</li>
+<li>11月12日: 控えが 1 回失敗。次の晩は成功。原因は分からないまま。</li>
+</ul>
+</div>
+</sc-if>
+<sc-if value="{{fl.isPurpose}}" hint-placeholder-val="{{ false }}">
+<div>
+<h2 style="margin: 16px 0 8px; font-size: 20px; font-weight: 600">この記憶の目的</h2>
+<p style="margin: 0 0 12px">オーナーの暮らしと家の機械の世話を、前の日の続きから手伝えるようにする。</p>
+<h3 style="margin: 20px 0 6px; font-size: 16px; font-weight: 600">答えられるべき問い</h3>
+<ul style="margin: 0 0 12px; padding-left: 22px">
+<li>今週、オーナーが気にしている予定は何か。</li>
+<li>家の機械のうち、いま調子が悪いものはどれか。最後に手を入れたのはいつか。</li>
+<li>頼まれて、まだ終わっていないことは何か。</li>
+<li>オーナーが嫌がる連絡の仕方は何か。</li>
+</ul>
+</div>
+</sc-if>
+<sc-if value="{{fl.isDiary}}" hint-placeholder-val="{{ false }}">
+<div>
+<h2 style="margin: 16px 0 8px; font-size: 20px; font-weight: 600">11月21日(土)</h2>
+<ul style="margin: 0 0 12px; padding-left: 22px">
+<li>朝、予定を確かめて知らせた。午後に宅配の集荷。</li>
+<li>NAS の控えは成功。ディスク交換のあと 1 晩目。</li>
+<li>夕方、来週の買い物の一覧を頼まれて作った。<a href="#goals">goals/today.md</a> に残りを書いた。</li>
+</ul>
+</div>
+</sc-if>
+</article>
+<sc-if value="{{fl.broken}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-secondary)">
+<svg aria-hidden="true" style="flex: none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14l-2 2a3 3 0 0 1-4-4l3-3M14 10l2-2a3 3 0 0 1 4 4l-3 3M4 4l16 16"/></svg>
+<span>リンク先のファイルが無いリンク: <span style="font-family: var(--mono)">howto/backup.md</span></span>
+</p>
+</sc-if>
+</div>
+</sc-if>
+
+<sc-if value="{{isSearch}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px">
+<h1 style="flex: 1 1 auto; margin: 0; font-size: 28px; font-weight: 600; line-height: 1.3">記憶</h1>
+<label style="flex: 1 1 240px; max-width: 320px; min-height: 44px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 14px; border: 1px solid var(--color-text-primary); border-radius: 9999px; background: var(--color-background-surface); color: var(--color-text-secondary)">
+<svg aria-hidden="true" style="flex: none" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M16.500 16.500L21 21"/></svg>
+<input type="search" aria-label="記憶の中を探す" value="控え" style="flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--color-text-primary); font: inherit">
+<a href="HybridMemory.dc.html" aria-label="探すのをやめる" style="flex: none; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px; margin-right: -14px">
+<svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+</a>
+</label>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">「控え」 ・ 6 ファイルの 14 行 ・ 文字のとおりに探します</p>
+<sc-for list="{{hits}}" as="h" hint-placeholder-count="3">
+<section style="display: flex; flex-direction: column">
+<a href="HybridMemoryFile.dc.html" style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 12px; min-height: 44px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid var(--color-border); text-decoration: none">
+<span style="flex: 1 1 auto; min-width: 0; font-family: var(--mono); font-size: 13px; font-weight: 600; overflow-wrap: anywhere">{{h.path}}</span>
+<span style="font-size: 12px; color: var(--color-text-secondary)">{{h.count}}</span>
+</a>
+<sc-for list="{{h.lines}}" as="l" hint-placeholder-count="2">
+<a href="HybridMemoryFile.dc.html" style="display: flex; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 10px 0 10px 12px; border-bottom: 1px solid var(--color-border); text-decoration: none">
+<span aria-label="行" style="flex: 0 0 32px; text-align: right; font-family: var(--mono); font-size: 12px; line-height: 1.9; color: var(--color-text-secondary)">{{l.no}}</span>
+<span style="flex: 1; min-width: 0; overflow-wrap: anywhere">{{l.a}}<mark style="padding: 0 2px; border-radius: 3px; background: var(--color-neutral); color: inherit; font-weight: 700; text-decoration: underline">{{l.m}}</mark>{{l.b}}</span>
+</a>
+</sc-for>
+</section>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isHistory}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere">machines/storage/nas.md</h1>
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">履歴 ・ 23 回の変更 ・ 9月2日に作られた</p>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">2 つ選ぶと、その間の違いを下に出します。1 つ押すと、その変更だけの差分を開きます。</p>
+<div role="group" aria-label="比べる版を選ぶ" style="display: flex; flex-direction: column">
+<sc-for list="{{vers}}" as="v" hint-placeholder-count="6">
+<label style="display: flex; align-items: flex-start; gap: 10px; min-height: 44px; box-sizing: border-box; padding: 10px 0; border-bottom: 1px solid var(--color-border); background: {{v.bg}}; cursor: pointer">
+<sc-if value="{{v.on}}" hint-placeholder-val="{{ false }}">
+<input type="checkbox" checked aria-label="{{v.aria}}" style="flex: none; width: 18px; height: 18px; margin: 2px 2px 0 4px; accent-color: var(--color-accent)">
+</sc-if>
+<sc-if value="{{v.off}}" hint-placeholder-val="{{ true }}">
+<input type="checkbox" aria-label="{{v.aria}}" style="flex: none; width: 18px; height: 18px; margin: 2px 2px 0 4px; accent-color: var(--color-accent)">
+</sc-if>
+<span style="flex: 0 0 96px; padding-top: 1px; font-size: 13px; font-variant-numeric: tabular-nums; color: var(--color-text-secondary)">{{v.when}}</span>
+<span style="flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px">
+<span style="flex: none; font-weight: 600">{{v.who}}</span>
+<span style="flex: 1 1 0; min-width: 40%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis">{{v.what}}</span>
+<span style="flex: none; margin-left: auto; font-family: var(--mono); font-size: 12px; color: var(--color-text-secondary)">{{v.lines}}</span>
+</span>
+</label>
+</sc-for>
+</div>
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer">前の 17 回を表示</button>
+<section aria-labelledby="mem-cmp" style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px">
+<h2 id="mem-cmp" style="margin: 0; font-size: 16px; font-weight: 600">11月12日 9:05 の版 と ゆうべ 3:04 の版の違い</h2>
+<a href="HybridMemoryRevert.dc.html" style="display: flex; align-items: center; min-height: 44px; padding: 0 14px; border: 1px solid var(--color-border); border-radius: 9999px; font-size: 13px; font-weight: 600; text-decoration: none">11月12日 9:05 の版に戻す</a>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">間に 4 回の変更 <span style="font-family: var(--mono)">+19 −7</span></p>
+<div style="display: flex; flex-direction: column; padding: 6px 0; border: 1px solid var(--color-border); border-radius: 0.75rem; background: var(--color-background-surface); font-family: var(--mono); font-size: 12.500px; line-height: 1.7">
+<sc-for list="{{cmp}}" as="l" hint-placeholder-count="8">
+<div style="display: flex; background: {{l.bg}}; color: {{l.fg}}">
+<span aria-hidden="true" style="flex: 0 0 38px; text-align: right; padding-right: 8px; color: var(--color-text-secondary); user-select: none">{{l.no}}</span>
+<span style="flex: 0 0 16px; font-weight: 700" aria-label="{{l.signLabel}}">{{l.sign}}</span>
+<span style="flex: 1; min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere">{{l.s}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isEdit}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-family: var(--mono); font-size: 20px; font-weight: 600; line-height: 1.4">PURPOSE.md</h1>
+<p style="margin: 0; font-size: 13px; color: var(--color-text-secondary)">直しています ・ 元にしたのは 今日 9:40 の版（オーナー）</p>
+</div>
+<sc-if value="{{isConflict}}" hint-placeholder-val="{{ false }}">
+<section role="alert" aria-labelledby="mem-clash" style="display: flex; flex-direction: column; gap: 12px; padding: 16px 20px; border: 1px solid var(--color-text-primary); border-radius: 0.75rem; background: var(--color-background-surface)">
+<h2 id="mem-clash" style="margin: 0; font-size: 16px; font-weight: 600">保存していません。直している間に、このファイルが書き換わりました</h2>
+<p style="margin: 0; color: var(--color-text-secondary)">今日 10:12 に、日中のターン（Slack ・ メンション 1 件）が書き換えました。あなたが書いた文は下の欄にそのまま残っています。</p>
+<div style="display: flex; flex-direction: column; padding: 6px 0; border: 1px solid var(--color-border); border-radius: 0.5rem; font-family: var(--mono); font-size: 12.500px; line-height: 1.7">
+<p style="margin: 0; padding: 2px 12px 6px; font-family: Figtree, 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 12px; color: var(--color-text-secondary)">あなたが元にした版から、エージェントが変えたところ</p>
+<sc-for list="{{clash}}" as="l" hint-placeholder-count="4">
+<div style="display: flex; background: {{l.bg}}; color: {{l.fg}}">
+<span aria-hidden="true" style="flex: 0 0 38px; text-align: right; padding-right: 8px; color: var(--color-text-secondary); user-select: none">{{l.no}}</span>
+<span style="flex: 0 0 16px; font-weight: 700" aria-label="{{l.signLabel}}">{{l.sign}}</span>
+<span style="flex: 1; min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere">{{l.s}}</span>
+</div>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 16px; border: 0; border-radius: 9999px; background: var(--color-accent); color: var(--color-on-accent); font: inherit; font-weight: 600; cursor: pointer">新しい版を取り込んで、直しを続ける</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer">自分の文で上書きする</button>
+<button type="button" style="min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer">直しを捨てる</button>
+</div>
+<p style="margin: 0; font-size: 12px; color: var(--color-text-secondary)">取り込むと、エージェントが変えた行が欄に入り、同じ行を両方が変えたところだけ、2 つの文を並べて残します。上書きしても、エージェントの版は履歴に残ります。</p>
+</section>
+</sc-if>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<div role="group" aria-label="欄の見方" style="display: flex; border: 1px solid var(--color-border); border-radius: 9999px; overflow: hidden">
+<button type="button" aria-pressed="true" style="min-height: 44px; padding: 0 14px; border: 0; background: var(--color-neutral); color: inherit; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">元の文を直す</button>
+<button type="button" aria-pressed="false" style="min-height: 44px; padding: 0 14px; border: 0; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">仕上がりを見る</button>
+<button type="button" aria-pressed="false" style="min-height: 44px; padding: 0 14px; border: 0; background: transparent; color: var(--color-text-secondary); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer">変えたところ <span style="font-family: var(--mono)">+2 −1</span></button>
+</div>
+</div>
+<label style="display: flex; flex-direction: column; gap: 6px">
+<span style="font-size: 12px; font-weight: 600; color: var(--color-text-secondary)">本文（Markdown）</span>
+<textarea rows="14" style="box-sizing: border-box; width: 100%; padding: 14px 16px; border: 1px solid var(--color-border); border-radius: 0.75rem; background: var(--color-background-surface); color: var(--color-text-primary); font-family: var(--mono); font-size: 13px; line-height: 1.8; resize: vertical"># この記憶の目的
+
+オーナーの暮らしと家の機械の世話を、前の日の続きから手伝えるようにする。
+
+## 答えられるべき問い
+
+- 今週、オーナーが気にしている予定は何か。
+- 家の機械のうち、いま調子が悪いものはどれか。最後に手を入れたのはいつか。
+- 頼まれて、まだ終わっていないことは何か。
+- オーナーが嫌がる連絡の仕方は何か。
+- 家族の誕生日と、去年贈ったものは何か。</textarea>
+</label>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px">
+<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: var(--color-accent)">
+<span>直したことをエージェントに知らせる<span style="color: var(--color-text-secondary)">（会話に「オーナーが PURPOSE.md を直しました」と 1 行出て、次のターンで読みます）</span></span>
+</label>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 20px; border: 0; border-radius: 9999px; background: var(--color-accent); color: var(--color-on-accent); font: inherit; font-weight: 600; cursor: pointer">保存する</button>
+<a href="HybridMemoryPurpose.dc.html" style="display: flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; font-weight: 600; text-decoration: none">やめる</a>
+<span style="font-size: 12px; color: var(--color-text-secondary)">オーナーの変更として、このファイルだけを記録します。</span>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isRevert}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<h1 style="margin: 0; font-size: 22px; font-weight: 600; line-height: 1.4">11月12日 9:05 の版に戻しますか</h1>
+<p style="margin: 0; font-family: var(--mono); font-size: 14px">machines/storage/nas.md</p>
+</div>
+<ul style="margin: 0; padding-left: 22px; color: var(--color-text-secondary)">
+<li>このファイルだけが、11月12日 9:05 の中身になります。ほかのファイルは変わりません。</li>
+<li>そのあとの 4 回の変更（日中のターン 3、整理係 1）で入った下の行が消えます。消えた行は履歴に残り、あとから戻せます。</li>
+<li>戻したことは、オーナーの変更として 1 つ記録します。</li>
+</ul>
+<div style="display: flex; flex-direction: column; padding: 6px 0; border: 1px solid var(--color-border); border-radius: 0.75rem; background: var(--color-background-surface); font-family: var(--mono); font-size: 12.500px; line-height: 1.7">
+<p style="margin: 0; padding: 2px 12px 6px; font-family: Figtree, 'Hiragino Sans', 'Noto Sans JP', sans-serif; font-size: 12px; color: var(--color-text-secondary)">戻すと変わるところ <span style="font-family: var(--mono)">+7 −19</span></p>
+<sc-for list="{{rev}}" as="l" hint-placeholder-count="6">
+<div style="display: flex; background: {{l.bg}}; color: {{l.fg}}">
+<span aria-hidden="true" style="flex: 0 0 38px; text-align: right; padding-right: 8px; color: var(--color-text-secondary); user-select: none">{{l.no}}</span>
+<span style="flex: 0 0 16px; font-weight: 700" aria-label="{{l.signLabel}}">{{l.sign}}</span>
+<span style="flex: 1; min-width: 0; padding-right: 12px; white-space: pre-wrap; overflow-wrap: anywhere">{{l.s}}</span>
+</div>
+</sc-for>
+</div>
+<label style="display: flex; align-items: center; gap: 10px; min-height: 44px">
+<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: var(--color-accent)">
+<span>戻したことをエージェントに知らせる</span>
+</label>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<button type="button" style="min-height: 44px; padding: 0 20px; border: 0; border-radius: 9999px; background: var(--color-accent); color: var(--color-on-accent); font: inherit; font-weight: 600; cursor: pointer">この版に戻す</button>
+<a href="HybridMemoryHistory.dc.html" style="display: flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; font-weight: 600; text-decoration: none">やめる</a>
+</div>
+</div>
+</sc-if>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"view":{"editor":"enum","options":["home","changes","commit","file","search","history","edit","conflict","revert"],"default":"home"},"st":{"editor":"enum","options":["normal","over","broken","empty"],"default":"normal"},"file":{"editor":"enum","options":["topic","purpose","diary"],"default":"topic"},"commit":{"editor":"enum","options":["day","night"],"default":"day"},"from":{"editor":"enum","options":["memory","record"],"default":"memory"},"pad":{"editor":"text","default":"24px"},"$preview":{"width":800,"height":1500}}'>
+class Component extends DCLogic {
+renderVals() {
+const p = this.props, s = this.state || {};
+const st = p.st ?? 'normal';
+let view = p.view ?? 'home';
+if (s.tab && (view === 'home' || view === 'changes')) view = s.tab;
+const empty = st === 'empty', over = st === 'over', broken = st === 'broken';
+const F = 'HybridMemoryFile.dc.html', C = 'HybridMemoryCommit.dc.html', CN = 'HybridMemoryNight.dc.html';
+const pri = 'var(--color-text-primary)', mu = 'var(--color-text-secondary)';
+const tab = (on) => ({ line: on ? pri : 'transparent', fg: on ? pri : mu, sel: on ? 'true' : 'false' });
+const tf = tab(view === 'home'), tc = tab(view === 'changes');
+
+const night = [
+{ moon: true, who: '照合係', stat: '4 ファイル', lines: '+38 −6', files: 'people/example.md、machines/printer.md、projects/garden.md、ほか 1', href: CN },
+{ moon: true, who: '整理係', stat: '12 ファイル', lines: '+160 −150', files: 'always.md、machines/nas.md、howto/backup.md、ほか 9', href: CN },
+{ move: true, who: '移動 2', stat: 'リンクの直し 3 ファイル', lines: '', files: 'machines/nas.md → machines/storage/nas.md、notes/misc.md → archive/2026-10.md', href: CN },
+{ moon: true, who: '振り返り', stat: '2 ファイル', lines: '+14 −8', files: 'handoff.md、diary/2026-11-21.md', href: CN }
+];
+let layer = [
+{ name: 'PURPOSE.md', role: '記憶の目的', size: '1.8 KB', when: '11月3日 ・ オーナー', href: 'HybridMemoryPurpose.dc.html' },
+{ name: 'always.md', role: 'いつも覚えておくこと', size: over ? '11.9 KB' : '4.7 KB', when: 'ゆうべ 3:04 ・ 整理係', href: F },
+{ name: 'personality.md', role: '性格・話し方', size: '2.9 KB', when: '10月28日 ・ 日中のターン', href: F },
+{ name: 'handoff.md', role: '翌日の自分への引き継ぎ', size: '1.8 KB', when: 'ゆうべ 3:01 ・ 振り返り', href: F }
+];
+if (empty) layer = [{ name: 'personality.md', role: '性格・話し方', size: '1.2 KB', when: '今日 9:12 ・ 日中のターン', href: F }];
+const total = empty ? '1.2 KB' : (over ? '18.4 KB' : '11.2 KB');
+const pct = empty ? '5%' : (over ? '76.600%' : '46.600%');
+const note = over ? '目安を超えています。超えた夜: 11月20日、11月21日。夜の整理係が、まずここを縮めます。' : (empty ? 'ここにあるファイルは、毎ターン、エージェントが丸ごと読みます。' : 'ここにあるファイルは、毎ターン、エージェントが丸ごと読みます。1 ファイルは 64 KB まで。');
+const row = (path, size, when, reads) => ({ path: path, size: size, when: when, reads: reads, href: F, fg: pri, weight: 400, font: 'var(--mono)' });
+const fold = (label, count, mono) => ({ path: label, size: '', when: count, reads: '', href: '#open', fg: pri, weight: 600, font: mono ? 'var(--mono)' : 'inherit', fold: true });
+const open = Object.assign({ machines: true, diary: true }, s.open || {});
+const grp = (id, path, name, count, rows, head, headNote) => ({ name: name, path: path, font: path.endsWith('/') ? 'var(--mono)' : 'inherit', count: count, rows: rows, hasHead: !!head, head: head || '', headNote: headNote || '', open: !!open[id], openStr: open[id] ? 'true' : 'false', rot: open[id] ? '90deg' : '0deg', toggle: () => this.setState({ open: Object.assign({}, open, { [id]: !open[id] }) }) });
+let groups = [
+grp('goals', 'goals/', '目標と今日のこと', '4', [row('goals/today.md', '0.9 KB', '今日 8:02 ・ 日中のターン', '30 日に 58 回'), row('goals/garden.md', '2.2 KB', '11月14日 ・ 日中のターン', '30 日に 6 回')]),
+grp('skills', 'skills/', '手順書', '3', [row('skills/memory/SKILL.md', '4.0 KB', '10月30日 ・ 整理係', '30 日に 22 回')]),
+grp('diary', 'diary/', '日記', '326', [
+row('diary/2026-11-22.md', '0.6 KB', '今日 8:02 ・ 日中のターン', ''),
+row('diary/2026-11-21.md', '2.8 KB', 'ゆうべ 3:01 ・ 振り返り', '30 日に 2 回'),
+row('diary/2026-11-20.md', '3.4 KB', '11月21日 ・ 振り返り', '30 日に 1 回'),
+fold('11月の残り', '19 日分'), fold('2026年10月', '31 日分'), fold('2026年9月', '30 日分'), fold('それより前', '243 日分 ・ 月ごと')
+]),
+grp('archive', 'archive/', '古い事実の要約', '9', [row('archive/2026-10.md', '5.5 KB', 'ゆうべ 3:04 ・ 整理係', '30 日に 1 回'), row('archive/2026-Q3.md', '9.1 KB', '10月1日 ・ 整理係', '30 日に 0 回'), row('archive/2025.md', '12.4 KB', '1月1日 ・ 整理係', '30 日に 0 回')]),
+grp('avatar', 'avatar/', 'アバターの画像と設定', '10', [row('avatar/neutral.png', '48 KB', '10月2日 ・ オーナー', '')]),
+grp('howto', 'howto/', '', '40', [], 'トピック', 'エージェントが作ったファイル ・ 142 ・ 名前はエージェントが付けたまま'),
+grp('projects', 'projects/', '', '31', []),
+grp('machines', 'machines/', '', '23', [
+fold('machines/storage/', '4 ファイル', true),
+row('machines/printer.md', '1.1 KB', '11月19日 ・ 日中のターン', '30 日に 0 回'),
+row('machines/router.md', '2.0 KB', '11月8日 ・ 日中のターン', '30 日に 3 回'),
+fold('ほか 17 を表示', '最近変わった順の続き')
+]),
+grp('people', 'people/', '', '18', []),
+grp('root', 'フォルダに入っていないファイル', '', '30', [row('shopping.md', '0.8 KB', '昨日 21:15 ・ 日中のターン', '30 日に 7 回'), row('house-rules.md', '1.6 KB', '10月12日 ・ 日中のターン', '30 日に 5 回')])
+];
+if (empty) groups = [];
+const loose = empty ? [] : [Object.assign(row('INDEX.md', '3.1 KB', 'ゆうべ 3:05 ・ 整理係', '30 日に 41 回'), { role: '記憶の索引' })];
+
+const d = (kind, time, who, what, files, lines, href, indent) => ({ time: time, who: who, what: what, files: files, lines: lines, href: href || C, indent: indent ? '24px' : '0', bg: indent ? 'var(--color-neutral)' : 'transparent', gDay: kind === 'day', gNight: kind === 'night', gOwner: kind === 'owner', gSys: kind === 'sys' });
+const days = [
+{ label: '今日 ・ 11月22日(日)', summary: '変更 9 ・ 7 ファイル', rows: [
+d('day', '10:12', 'Slack', 'メンション 1 件', 'people/example.md', '+3 −0'),
+d('owner', '9:40', 'オーナー', '画面から直した', 'PURPOSE.md', '+2 −1'),
+d('day', '8:02', '予約', '朝の予定確認', 'goals/today.md、diary/2026-11-22.md', '+12 −4'),
+d('night', '3:00', '夜の切り替え', '18 ファイル ・ 移動 2', '', '+212 −164', CN),
+d('night', '3:05', '整理係', '記憶の整理', 'always.md、machines/storage/nas.md、ほか 10', '+160 −150', CN, true),
+d('sys', '3:05', '仕組み', '移動に合わせたリンクの直し', 'INDEX.md、howto/backup.md、projects/garden.md', '+3 −3', CN, true),
+d('night', '3:02', '照合係', '日記と記憶の照合', 'people/example.md、machines/printer.md、ほか 2', '+38 −6', CN, true),
+d('night', '3:01', '振り返り', '引き継ぎと日記', 'handoff.md、diary/2026-11-21.md', '+14 −8', CN, true)
+] },
+{ label: '昨日 ・ 11月21日(土)', summary: '変更 31 ・ 14 ファイル', rows: [
+d('day', '21:15', 'オーナー', '買い物の一覧を作って', 'goals/today.md', '+9 −2'),
+d('day', '16:40', '自分から', '控えの手順を書き直した', 'howto/backup.md、machines/nas.md', '+21 −17'),
+d('day', '14:08', 'alertmanager', '[FIRING warning] DiskAlmostFull', 'machines/nas.md', '+4 −0')
+] }
+];
+const fb = (on) => ({ on: on ? 'true' : 'false', bg: on ? 'var(--color-accent)' : 'transparent', fg: on ? 'var(--color-on-accent)' : pri, border: on ? 'var(--color-accent)' : 'var(--color-border)' });
+const whoFilters = [Object.assign({ label: 'すべて' }, fb(true)), Object.assign({ label: '日中' }, fb(false)), Object.assign({ label: '夜' }, fb(false)), Object.assign({ label: 'オーナー' }, fb(false))];
+
+const L = (t, no, str) => ({ no: no, sign: t === ' ' ? '' : (t === '+' ? '+' : '−'), signLabel: t === '+' ? '足した行' : (t === '-' ? '消した行' : ''), s: str, bg: t === '+' ? 'var(--diff-add)' : (t === '-' ? 'var(--diff-del)' : 'transparent'), fg: t === '@' ? mu : pri });
+const fileD = (path, lines, noteText, isOpen, diff) => ({ path: path, lines: lines, note: noteText || '', open: isOpen, rot: isOpen ? '90deg' : '0deg', headLine: isOpen ? '1px solid var(--color-border)' : '0', diff: diff || [] });
+const dayCommit = { title: '予約 ・ 朝の予定確認', when: '今日 8:02', stat: '2 ファイル', lines: '+12 −4', turnHref: 'HybridTurn.dc.html', turnLabel: 'このターンを活動の記録で見る', hasMoves: false, moves: [], more: false, files: [
+fileD('goals/today.md', '+8 −4', '', true, [
+L(' ', '1', '# 今日のこと'), L(' ', '2', ''),
+L('-', '3', '- 宅配の集荷（午後）'), L('-', '4', '- 買い物の一覧を作る'),
+L('+', '3', '- 歯医者 12:00（30 分前に知らせる）'), L('+', '4', '- 買い物: 一覧は作った。牛乳と電池が残り'),
+L('+', '5', '- NAS の控え、2 晩目の結果を朝に確かめる'),
+L(' ', '6', ''), L('@', '', '… 9 行目から'),
+L('-', '9', '控えは 1 晩目が成功。'), L('-', '10', ''),
+L('+', '10', '控えは 2 晩続けて成功。様子見はここまで。'), L('+', '11', ''), L('+', '12', '## あとで'), L('+', '13', '- 年末の予定を聞く'), L('+', '14', '')
+]),
+fileD('diary/2026-11-22.md', '+4 −0', '新しいファイル', true, [
+L('+', '1', '# 11月22日(日)'), L('+', '2', ''), L('+', '3', '- 朝、予定を確かめて知らせた。歯医者が 12:00。'), L('+', '4', '- 控えは 2 晩続けて成功。')
+])
+] };
+const nightCommit = { title: '夜の切り替え ・ 整理係', when: '今日 3:05', stat: '12 ファイル ・ 移動 2', lines: '+160 −150', turnHref: 'HybridRecordNight.dc.html', turnLabel: 'この夜を活動の記録で見る', hasMoves: true, more: true, moves: [{ from: 'machines/nas.md', to: 'machines/storage/nas.md' }, { from: 'notes/misc.md', to: 'archive/2026-10.md' }], files: [
+fileD('always.md', '+6 −41', '', true, [
+L(' ', '12', '## 家の機械'), L('-', '13', '- NAS は書斎。控えは毎晩 2 時。11月12日に 1 回失敗した。'), L('-', '14', '- 11月20日に 2 番のディスクを交換。'),
+L('+', '13', '- NAS は書斎。くわしくは machines/storage/nas.md。'), L(' ', '14', '- プリンタは居間。'), L('@', '', '… ほか 3 か所')
+]),
+fileD('machines/storage/nas.md', '+44 −9', 'machines/nas.md から移動', false),
+fileD('archive/2026-10.md', '+52 −0', 'notes/misc.md をまとめた', false),
+fileD('howto/backup.md', '+12 −30', '', false)
+] };
+const cm = (p.commit ?? 'day') === 'night' ? nightCommit : dayCommit;
+
+const fk = p.file ?? 'topic';
+const fl = fk === 'purpose'
+? { path: 'PURPOSE.md', layer: true, meta: '1.8 KB ・ 最後に変わったのは 今日 9:40（オーナー）', hasNote: true, note: 'オーナーの同意で書くファイルです。', versions: '6', isPurpose: true }
+: (fk === 'diary'
+? { path: 'diary/2026-11-21.md', meta: '2.8 KB ・ 最後に変わったのは ゆうべ 3:01（振り返り） ・ 30 日に 2 回読まれた（最後は今日）', versions: '5', isDiary: true }
+: { path: 'machines/storage/nas.md', meta: '4.2 KB ・ 最後に変わったのは ゆうべ 3:04（整理係） ・ 30 日に 12 回読まれた（最後は昨日）', hasNote: true, note: 'ゆうべ machines/nas.md から移動しました。', versions: '23', isTopic: true, broken: broken });
+const fromRec = (p.from ?? 'memory') === 'record';
+const crumbs = view === 'commit' ? (fromRec ? ['記憶の変更', cm.title] : ['変更', cm.title]) : (view === 'history' ? ['machines', 'storage', 'nas.md', '履歴'] : (view === 'revert' ? ['machines', 'storage', 'nas.md', '履歴', '戻す'] : ((view === 'edit' || view === 'conflict') ? ['PURPOSE.md', '直す'] : fl.path.split('/'))));
+const hit = (path, count, lines) => ({ path: path, count: count, lines: lines });
+const hl = (no, a, mk, b) => ({ no: no, a: a, m: mk, b: b });
+const hits = [
+hit('howto/backup.md', '6 行', [hl('1', '# ', '控え', 'の取り方'), hl('4', '', '控え', 'は毎晩 2 時に NAS が自分で取る。'), hl('9', '失敗したら、次の晩の', '控え', 'を待たずに本人に知らせる。')]),
+hit('machines/storage/nas.md', '4 行', [hl('3', '家のファイル置き場。写真と書類の', '控え', 'が入っている。'), hl('7', '- ', '控え', 'は毎晩 2 時。手順は howto/backup.md。')]),
+hit('diary/2026-11-21.md', '1 行', [hl('4', '- NAS の', '控え', 'は成功。ディスク交換のあと 1 晩目。')])
+];
+const ver = (on, when, who, what, lines) => ({ on: on, off: !on, when: when, who: who, what: what, lines: lines, bg: on ? 'var(--color-neutral)' : 'transparent', aria: when + ' の版を比べる' });
+const vers = [
+ver(true, 'ゆうべ 3:04', '整理係', '記憶の整理（machines/nas.md から移動）', '+4 −3'),
+ver(false, '昨日 16:40', '自分から', '控えの手順を書き直した', '+6 −2'),
+ver(false, '昨日 14:08', 'alertmanager', '[FIRING warning] DiskAlmostFull', '+4 −0'),
+ver(false, '11月20日 11:30', 'オーナー', 'ディスクを交換したよ', '+5 −2'),
+ver(true, '11月12日 9:05', '予約', '朝の見回り', '+2 −0'),
+ver(false, '11月3日 3:04', '整理係', '記憶の整理', '+1 −6')
+];
+const cmp = [
+L(' ', '5', '## 決まっていること'), L(' ', '6', ''),
+L('-', '7', '- 控えは毎晩 2 時。'), L('+', '7', '- 控えは毎晩 2 時。手順は howto/backup.md。'),
+L(' ', '8', '- 容量が 8 割を超えたら本人に知らせる。自分では消さない。'), L('@', '', '… 12 行目から'),
+L(' ', '12', '## 最近のこと'), L(' ', '13', ''),
+L('+', '14', '- 11月20日: 2 番のディスクを交換した。作業の記録は diary/2026-11-20.md。'),
+L(' ', '15', '- 11月12日: 控えが 1 回失敗。次の晩は成功。原因は分からないまま。'),
+L('-', '16', '- 10月30日: 容量 71%。'), L('-', '17', '- 10月2日: 容量 68%。')
+];
+const rev = [
+L('+', '7', '- 控えは毎晩 2 時。'), L('-', '7', '- 控えは毎晩 2 時。手順は howto/backup.md。'),
+L('@', '', '… 12 行目から'),
+L('-', '14', '- 11月20日: 2 番のディスクを交換した。作業の記録は diary/2026-11-20.md。'),
+L('+', '16', '- 10月30日: 容量 71%。'), L('+', '17', '- 10月2日: 容量 68%。')
+];
+const clash = [
+L(' ', '7', '- 今週、オーナーが気にしている予定は何か。'),
+L('-', '8', '- 家の機械のうち、いま調子が悪いものはどれか。'),
+L('+', '8', '- 家の機械のうち、いま調子が悪いものはどれか。最後に手を入れたのはいつか。'),
+L(' ', '9', '- 頼まれて、まだ終わっていないことは何か。')
+];
+
+return {
+pad: p.pad ?? '24px',
+isTop: view === 'home' || view === 'changes', isSub: !(view === 'home' || view === 'changes' || view === 'search'),
+isSearch: view === 'search', isHistory: view === 'history', isEdit: view === 'edit' || view === 'conflict', isConflict: view === 'conflict', isRevert: view === 'revert',
+hits: hits, vers: vers, cmp: cmp, rev: rev, clash: clash,
+backHref: (view === 'commit' && fromRec) ? 'HybridTurn.dc.html' : 'HybridMemory.dc.html', backLabel: (view === 'commit' && fromRec) ? '活動の記録のターンへ戻る' : '記憶',
+isHome: view === 'home', isChanges: view === 'changes', isCommit: view === 'commit', isFile: view === 'file',
+filesLine: tf.line, filesFg: tf.fg, filesSel: tf.sel, changesLine: tc.line, changesFg: tc.fg, changesSel: tc.sel,
+toFiles: () => this.setState({ tab: 'home' }), toChanges: () => this.setState({ tab: 'changes' }),
+isEmpty: empty, hasNight: !empty, isBroken: broken,
+night: night, layer: layer, layerTotal: total, layerPct: pct, layerNote: note, layerAria: '毎回読む層の合計 ' + total + '、目安は 16 KB',
+filesTotal: empty ? '1 ファイル ・ 1.2 KB' : '495 ファイル ・ 1.9 MB', groups: groups, loose: loose,
+days: days, whoFilters: whoFilters, cm: cm, fl: fl, crumbs: crumbs
+};
+}
+}
+</script>
+</body>
+</html>
