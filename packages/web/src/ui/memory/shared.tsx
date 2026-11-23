@@ -1,4 +1,4 @@
-import { createContext, type ReactNode, useContext, useEffect, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useRef, useState } from "react";
 
 import type { MemoryCounts, MemoryOverviewResponse, MemoryWriter } from "@penelope/contract";
 
@@ -13,7 +13,43 @@ export const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 export const HOME = "#/memory";
 export const memoryHash = (page: MemoryPage) => hashOf({ place: "memory", page });
 export const fileHash = (path: string, line?: number) => memoryHash({ kind: "file", path, ...(line === undefined ? {} : { line }) });
-export const counts = ({ files, added, removed }: MemoryCounts) => `${files} ファイル +${added} −${removed}`;
+/** A number and its unit stay on one line. */
+export const unbroken = (text: string) => text.replaceAll(" ", "\u00a0");
+
+/** "+12 −4", read out as lines added and removed. */
+export function Lines({ added, removed }: { added: number; removed: number }) {
+  return <span role="img" aria-label={`${added} 行足した、${removed} 行消した`}>+{added}{"\u00a0"}−{removed}</span>;
+}
+
+export function Counts({ of: { files, added, removed } }: { of: MemoryCounts }) {
+  return <>{files}{"\u00a0"}ファイル <Lines added={added} removed={removed} /></>;
+}
+
+/** Go to another address of the same screen without adding a step to go back over. */
+export function replaceHash(hash: string): void {
+  if (hash === location.hash) return;
+  history.replaceState(history.state, "", hash);
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+}
+
+const FOCUSABLE = "a[href], button:not([disabled]), input:not([disabled]), summary";
+/**
+ * The button that shows more rows may be gone once they are shown, and the
+ * focus with it. Call `remember` before showing them: when `count` changes,
+ * the first row under `root` that was not there gets the focus.
+ */
+export function useFocusNew<T extends HTMLElement>(count: number) {
+  const root = useRef<T>(null);
+  const seen = useRef<Set<Element>>(undefined);
+  useEffect(() => {
+    const before = seen.current;
+    seen.current = undefined;
+    if (!before || !root.current) return;
+    [...root.current.querySelectorAll<HTMLElement>(FOCUSABLE)].find((element) => !before.has(element))?.focus();
+  }, [count]);
+  const remember = useCallback(() => { seen.current = new Set(root.current?.querySelectorAll(FOCUSABLE)); }, []);
+  return { root, remember };
+}
 
 export const MemoryScope = createContext<{ api: Api; overview: MemoryOverviewResponse | undefined; onFail: (error: unknown) => void }>(null!);
 export const useMemory = () => useContext(MemoryScope);
@@ -29,27 +65,34 @@ export function groupBy<T, K>(items: Iterable<T>, keyOf: (item: T) => K): Map<K,
   return groups;
 }
 
-export type Reading<T> = { value: T; error?: never } | { value?: never; error: unknown };
+export type Reading<T> = { value: T; error?: never } | { value?: never; error: unknown; retry: () => void };
 export function useReading<T>(read: () => Promise<T>, onFail: (error: unknown) => void): Reading<T> | undefined {
   const [result, setResult] = useState<{ read: () => Promise<T>; result: Reading<T> }>();
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let active = true;
+    const retry = () => { setResult(undefined); setAttempt((n) => n + 1); };
     void read().then(
       (value) => { if (active) setResult({ read, result: { value } }); },
-      (error: unknown) => { if (active) { onFail(error); setResult({ read, result: { error } }); } },
+      (error: unknown) => { if (active) { onFail(error); setResult({ read, result: { error, retry } }); } },
     );
     return () => { active = false; };
-  }, [read, onFail]);
+  }, [read, onFail, attempt]);
   return result?.read === read ? result.result : undefined;
 }
 
-export function ReadError({ error }: { error: unknown }) {
-  return <p role="status" className="muted">{error instanceof Refused && error.status === 404 ? "記憶に見つかりませんでした。" : "記憶を読み込めませんでした。"}</p>;
+/** What is not there stays not there; anything else can be read again. */
+export function ReadError({ error, retry }: { error: unknown; retry?: () => void }) {
+  const missing = error instanceof Refused && error.status === 404;
+  return <div className="memory-controls">
+    <p role="status" className="muted">{missing ? "記憶に見つかりませんでした。" : "記憶を読み込めませんでした。"}</p>
+    {retry && !missing ? <button type="button" className="memory-hit" onClick={retry}>もう一度読み込む</button> : null}
+  </div>;
 }
 
 export function ReadBody<T>({ result, children }: { result: Reading<T> | undefined; children: (value: T) => ReactNode }) {
   if (!result) return <p role="status" className="muted">読み込み中…</p>;
-  return "error" in result ? <ReadError error={result.error} /> : children(result.value);
+  return "retry" in result ? <ReadError error={result.error} retry={result.retry} /> : children(result.value);
 }
 
 /** Keep a true back destination per history entry; copied links still have a useful fallback. */

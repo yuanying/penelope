@@ -8,7 +8,7 @@ import type { MemoryBrokenLink, MemoryFile, MemoryFileResponse, MemoryOverviewRe
 import { ChevronRightIcon } from "../icons.tsx";
 import { dateTimeOf, recordDayOf } from "../record.ts";
 import { sizeOf } from "../words.ts";
-import { counts, fileHash, groupBy, MemoryBack, MemoryLink, memoryHash, ReadBody, useMemory, useReading, WriterMark, writerName } from "./shared.tsx";
+import { Counts, fileHash, groupBy, MemoryBack, MemoryLink, memoryHash, ReadBody, replaceHash, unbroken, useFocusNew, useMemory, useReading, WriterMark, writerName } from "./shared.tsx";
 
 const ROLES = {
   "PURPOSE.md": "このエージェントの目的",
@@ -20,13 +20,14 @@ const PLACES = { goals: "目標と今日のこと", skills: "手順書", diary: 
 const PAGE = 6;
 
 const when = (file: MemoryFile) => file.last_change ? `${dateTimeOf(file.last_change.at)} ・ ${writerName(file.last_change.writer)}` : "変更日時は不明";
-const readCount = (file: MemoryFile) => file.reads ? `30 日に ${file.reads.count_30_days} 回` : "読まれた回数は不明";
+const readCount = (file: MemoryFile) => file.reads ? unbroken(`30 日に ${file.reads.count_30_days} 回`) : "読まれた回数は不明";
+const size = (bytes: number) => unbroken(sizeOf(bytes));
 const byRecent = (a: MemoryFile, b: MemoryFile) => (b.last_change?.at ?? "").localeCompare(a.last_change?.at ?? "") || a.path.localeCompare(b.path);
 
 function FileRow({ file, role }: { file: MemoryFile; role?: string }) {
   return <MemoryLink href={fileHash(file.path)} className="record-row-body memory-file-row">
     <code>{file.path}</code>{role ? <span className="muted">{role}</span> : null}
-    <span className="memory-file-meta muted">{sizeOf(file.bytes)} ・ {when(file)}{role ? "" : ` ・ ${readCount(file)}`}</span>
+    <span className="memory-file-meta muted">{size(file.bytes)} ・ {when(file)}{role ? "" : ` ・ ${readCount(file)}`}</span>
     <ChevronRightIcon width={14} height={14} />
   </MemoryLink>;
 }
@@ -49,21 +50,21 @@ export function HomeView({ data }: { data: MemoryOverviewResponse }) {
   const ratio = layer.bytes / Math.max(1, layer.target_bytes);
   return <>
     {night ? <section className="memory-card">
-      <div className="memory-section-head"><h2>ゆうべ変わったこと</h2><span className="muted">{dateTimeOf(night.ended_at)} ・ {counts(night)}</span></div>
+      <div className="memory-section-head"><h2>ゆうべ変わったこと</h2><span className="muted">{dateTimeOf(night.ended_at)} ・ <Counts of={night} /></span></div>
       {!night.changes.length ? <p className="muted">記憶の変更なし</p> : null}
       {night.changes.map(({ change, moves }) => <MemoryLink key={change.id} className="record-row-body" href={memoryHash({ kind: "change", id: change.id })}>
-        <WriterMark writer={change.writer} /><span className="record-main"><span className="memory-section-head"><strong>{moves.length && change.writer.kind === "system" ? "移動 ・ 仕組み" : writerName(change.writer)}</strong><span className="muted">{counts(change)}</span></span><PathPreview paths={change.paths} /></span>
+        <WriterMark writer={change.writer} /><span className="record-main"><span className="memory-section-head"><strong>{moves.length && change.writer.kind === "system" ? "移動 ・ 仕組み" : writerName(change.writer)}</strong><span className="muted"><Counts of={change} /></span></span><PathPreview paths={change.paths} /></span>
       </MemoryLink>)}
     </section> : null}
     <section className="memory-card">
-      <div className="memory-section-head"><h2>毎回読む層</h2><span className="muted">合計 {sizeOf(layer.bytes)} ・ 目安 {sizeOf(layer.target_bytes)}</span></div>
+      <div className="memory-section-head"><h2>毎回読む層</h2><span className="muted">合計 {size(layer.bytes)} ・ 目安 {size(layer.target_bytes)}</span></div>
       <div className="memory-meter" aria-hidden="true"><span style={{ width: `${Math.min(100, 75 * ratio)}%` }} /><i /></div>
       {Object.entries(ROLES).map(([path, role]) => {
         const file = files.find((f) => f.path === path);
         return file ? <FileRow key={path} file={file} role={role} /> : null;
       })}
       {ratio > 1 || layer.over_target_nights.length ? <p className="muted">{ratio > 1 ? "目安を超えています。" : ""}{layer.over_target_nights.length ? ` 超えた夜: ${layer.over_target_nights.map((d) => recordDayOf(d)).join("、")}。` : ""}{ratio > 1 ? " 夜の整理係が、まずここを縮めます。" : ""}</p> : null}
-      <p className="muted">ここにあるファイルは、毎ターン、エージェントが丸ごと読みます。1 ファイルは {sizeOf(layer.file_limit_bytes)} まで。</p>
+      <p className="muted">ここにあるファイルは、毎ターン、エージェントが丸ごと読みます。1 ファイルは {size(layer.file_limit_bytes)} まで。</p>
     </section>
     <section>
       <div className="memory-section-head"><h2>ファイル</h2><span className="muted">{files.length} ファイル</span></div>
@@ -106,8 +107,9 @@ function FolderContents({ prefix, files }: { prefix: string; files: MemoryFile[]
 
 function FileRows({ files, capped = true }: { files: MemoryFile[]; capped?: boolean }) {
   const [more, setMore] = useState(false);
-  return <>{files.slice(0, !capped || more ? files.length : PAGE).map((file) => <FileRow key={file.path} file={file} />)}
-    {capped && !more && files.length > PAGE ? <button type="button" className="memory-hit" onClick={() => setMore(true)}>ほか {files.length - PAGE} を表示</button> : null}</>;
+  const { root, remember } = useFocusNew<HTMLDivElement>(Number(more));
+  return <div className="memory-group" ref={root}>{files.slice(0, !capped || more ? files.length : PAGE).map((file) => <FileRow key={file.path} file={file} />)}
+    {capped && !more && files.length > PAGE ? <button type="button" className="memory-hit" onClick={() => { remember(); setMore(true); }}>ほか {files.length - PAGE} を表示</button> : null}</div>;
 }
 
 const diaryDay = (path: string) => /^diary\/(\d{4}-\d{2}-\d{2})\.md$/.exec(path)?.[1];
@@ -128,7 +130,7 @@ function Diary({ files }: { files: MemoryFile[] }) {
   </>;
 }
 
-export function FileView({ path, line, active }: { path: string; line: number | undefined; active: boolean }) {
+export function FileView({ path, line, source, active }: { path: string; line: number | undefined; source: boolean; active: boolean }) {
   const { api, overview, onFail } = useMemory();
   const head = overview?.head ?? undefined;
   const read = useCallback(() => api.memoryFile(path, head), [api, path, head]);
@@ -136,19 +138,21 @@ export function FileView({ path, line, active }: { path: string; line: number | 
   return <>
     <MemoryBack />
     <p className="muted memory-breadcrumb">記憶 / <code>{path.split("/").join(" / ")}</code></p>
-    <ReadBody result={result}>{(data) => <FileBody data={data} line={line} active={active} />}</ReadBody>
+    <ReadBody result={result}>{(data) => <FileBody data={data} line={line} source={source} active={active} />}</ReadBody>
   </>;
 }
 
-function FileBody({ data, line, active }: { data: MemoryFileResponse; line: number | undefined; active: boolean }) {
+function FileBody({ data, line, source, active }: { data: MemoryFileResponse; line: number | undefined; source: boolean; active: boolean }) {
   const { overview } = useMemory();
   const { file, text = "" } = data;
-  const [raw, setRaw] = useState(line !== undefined || data.kind === "text");
+  // The address says which of the two is shown, so that it comes back the same after a reload.
+  const raw = source || data.kind === "text";
+  const show = (source: boolean) => replaceHash(memoryHash({ kind: "file", path: file.path, ...(source ? { source: true } : {}) }));
   const target = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     if (active && raw) target.current?.scrollIntoView({ block: "center" });
     // The pane keeps its own position when returning to this file.
-  }, [raw]);
+  }, [raw, line]);
   const diary = diaryDay(file.path) ? overview?.files.filter((f) => diaryDay(f.path)).sort(diaryOrder) ?? [] : [];
   const at = diary.findIndex((f) => f.path === file.path);
   const previous = at < 0 ? undefined : diary[at + 1];
@@ -156,7 +160,7 @@ function FileBody({ data, line, active }: { data: MemoryFileResponse; line: numb
   const markdown = useMemo((): MarkdownComponents => ({
     link: ({ href, children }) => {
       const path = relativeMemoryPath(file.path, href);
-      return path ? <MemoryLink className="memory-text-link" href={fileHash(path)}>{children}</MemoryLink> : /^https?:\/\//i.test(href) ? <a className="memory-text-link" href={href} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>;
+      return path ? <MemoryLink className="memory-text-link" href={fileHash(path)}>{children}</MemoryLink> : /^https?:\/\//i.test(href) ? <a className="memory-text-link" href={href} target="_blank" rel="noopener noreferrer">{children}<span aria-hidden="true">{"\u00a0"}↗</span><span className="memory-unseen">（新しいタブで開く）</span></a> : <span>{children}</span>;
     },
     image: ({ src, alt }) => {
       const path = relativeMemoryPath(file.path, src);
@@ -166,16 +170,16 @@ function FileBody({ data, line, active }: { data: MemoryFileResponse; line: numb
   }), [file.path, data.head]);
   return <>
     <div className="memory-section-head"><Heading level={1}><code>{file.path}</code></Heading>{file.path === "PURPOSE.md" ? <Badge label="毎回読む層" /> : null}</div>
-    <p className="muted">{sizeOf(file.bytes)} ・ 最後の変更: {when(file)} ・ {file.reads ? `${readCount(file)}読まれた${file.reads.last_day ? `（最後は ${recordDayOf(file.reads.last_day)}）` : ""}` : readCount(file)}</p>
+    <p className="muted">{size(file.bytes)} ・ 最後の変更: {when(file)} ・ {file.reads ? `${readCount(file)}読まれた${file.reads.last_day ? `（最後は ${recordDayOf(file.reads.last_day)}）` : ""}` : readCount(file)}</p>
     {file.path === "PURPOSE.md" ? <p className="muted">オーナーの同意で書くファイルです。</p> : null}
     {data.moved_from ? <p className="muted">ゆうべ <code>{data.moved_from}</code> から移動しました。</p> : null}
     <div className="memory-controls">
-      {data.kind === "markdown" ? <><button type="button" aria-pressed={!raw} onClick={() => setRaw(false)}>読む</button><button type="button" aria-pressed={raw} onClick={() => setRaw(true)}>元の文</button></> : null}
+      {data.kind === "markdown" ? <><button type="button" aria-pressed={!raw} onClick={() => show(false)}>読む</button><button type="button" aria-pressed={raw} onClick={() => show(true)}>元の文</button></> : null}
       <MemoryLink className="memory-hit" href={memoryHash({ kind: "history", path: file.path })}>履歴 {data.history_count}</MemoryLink>
     </div>
     <div className="memory-card memory-document">
       {data.kind === "image" && data.image_url?.startsWith("/api/memory/image?") ? <img src={data.image_url} alt={file.path} /> : data.kind === "unavailable" ? <p className="muted">本文を表示できないファイルです。</p> : raw ? (
-        <pre className="memory-source">{text.split("\n").map((content, index) => <span key={index} ref={line === index + 1 ? target : null} data-selected={line === index + 1 || undefined}><span aria-hidden="true">{index + 1}</span><span>{content || " "}</span></span>)}</pre>
+        <pre className="memory-source">{text.split("\n").map((content, index) => <span key={index} ref={line === index + 1 ? target : null} data-selected={line === index + 1 || undefined} aria-current={line === index + 1 || undefined}><span aria-hidden="true">{index + 1}</span><span>{content || " "}</span></span>)}</pre>
       ) : <Markdown headingLevelStart={2} components={markdown}>{text}</Markdown>}
     </div>
     <Broken links={data.broken_links} detail />
@@ -209,11 +213,11 @@ export function SearchView({ q }: { q: string }) {
   const read = useCallback(() => api.memorySearch(q, head), [api, q, head]);
   const result = useReading(read, onFail);
   return <><MemoryBack /><h2>検索結果</h2><ReadBody result={result}>{(data) => <>
-    <p className="muted">「{q}」 ・ {data.files.length} ファイルの {data.files.reduce((n, f) => n + f.lines.length, 0)} 行 ・ 文字のとおりに探します。大文字・小文字、全角・半角を区別します。</p>
+    <p className="muted" role="status">「{q}」 ・ {data.files.length} ファイルの {data.files.reduce((n, f) => n + f.lines.length, 0)} 行 ・ 文字のとおりに探します。大文字・小文字、全角・半角を区別します。</p>
     {data.truncated ? <p className="muted">結果の一部を表示しています（最大 {data.line_limit} 行）。</p> : null}
     {data.files.length === 0 ? <p className="muted">一致する行はありません。</p> : null}
     {data.files.map(({ path, lines }) => <section className="memory-card" key={path}><h3><MemoryLink href={fileHash(path)}><code>{path}</code></MemoryLink></h3>
-      {lines.map(({ line, text }) => <MemoryLink key={line} href={fileHash(path, line)} className="record-row-body memory-search-line"><span className="muted">{line}</span><code>{text.split(q).map((part, i) => <span key={i}>{i ? <strong><u>{q}</u></strong> : null}{part}</span>)}</code></MemoryLink>)}
+      {lines.map(({ line, text }) => <MemoryLink key={line} href={fileHash(path, line)} className="record-row-body memory-search-line"><span className="muted">{line}</span><code>{text.split(q).map((part, i) => <span key={i}>{i ? <mark>{q}</mark> : null}{part}</span>)}</code></MemoryLink>)}
     </section>)}
   </>}</ReadBody></>;
 }

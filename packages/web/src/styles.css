@@ -1239,9 +1239,29 @@ button.record-row-body:hover {
   flex-direction: column;
   overflow: hidden;
   overflow-wrap: anywhere;
+  /* Sizes and counts line up from one row to the next. */
+  font-variant-numeric: tabular-nums;
 }
 .memory-place [hidden] { display: none; }
-.memory-inset { padding-top: 124px; }
+.memory-place :is(a, button, summary, label) {
+  touch-action: manipulation;
+  /* A touch is answered by the ground of :active below, not by the browser's flash. */
+  -webkit-tap-highlight-color: transparent;
+}
+.memory-place :is(h1, h2, h3) { text-wrap: balance; }
+/* Room for the avatar that floats at the top of a phone, below the notch as it is. */
+.memory-inset { padding-top: calc(env(safe-area-inset-top) + 124px); }
+/* A wrapper only to find its rows by; the layout is its parent's. */
+.memory-group { display: contents; }
+/* Said to a screen reader, not shown. */
+.memory-unseen {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 .memory-header, .memory-tabs {
   width: 100%;
   max-width: 760px;
@@ -1274,6 +1294,13 @@ button.record-row-body:hover {
   text-decoration: none;
 }
 .memory-tabs a[aria-current] { border-color: currentColor; font-weight: 600; }
+/* The name of the place over a file, a change or a history: it looks like the heading it is not. */
+.memory-title {
+  margin: 0;
+  font-size: var(--text-heading-2-size);
+  font-weight: var(--text-heading-2-weight);
+  line-height: var(--text-heading-2-leading);
+}
 .memory-scroll {
   flex: 1;
   min-height: 0;
@@ -1316,6 +1343,14 @@ button.record-row-body:hover {
   padding-inline: 10px;
 }
 .memory-hit:where(a) { text-decoration: none; }
+/* The same ground as a row that can be pressed (a.record-row-body). */
+.memory-tabs a:is(:hover, :active),
+.memory-hit:is(:hover, :active),
+.memory-controls > button:is(:hover, :active),
+.memory-fold > summary:is(:hover, :active) {
+  background: var(--color-neutral);
+}
+.memory-scroll button:disabled { background: transparent; cursor: default; }
 .memory-scroll button, .memory-fold summary { cursor: pointer; }
 .memory-controls > button[aria-pressed="true"] { border-color: currentColor; font-weight: 600; }
 .memory-controls > * { min-height: 44px; }
@@ -1341,6 +1376,8 @@ button.record-row-body:hover {
 .memory-nested { padding-inline-start: 12px; }
 .memory-topics { margin-block: 12px; }
 .memory-broken { padding-block: 6px; }
+/* A path in a sentence or a heading is a small thing to press: give it the height of a row. */
+.memory-broken a, .memory-card > h3 > a { display: inline-flex; align-items: center; min-height: 44px; }
 .memory-document { display: block; }
 .memory-document img { display: block; max-width: 100%; max-height: 60vh; object-fit: contain; }
 .memory-document .memory-text-link { text-decoration: underline; }
@@ -1381,8 +1418,13 @@ button.record-row-body:hover {
 .memory-version input { accent-color: currentColor; }
 .memory-version .record-row-body { min-width: 0; }
 .memory-search-line code { white-space: pre-wrap; }
+/* The line numbers are a column, as in the file's own text. */
+.memory-search-line > .muted { flex: 0 0 3em; text-align: end; }
+/* What matched is bold and underlined, not colored. */
+.memory-search-line mark { background: none; color: inherit; font-weight: 700; text-decoration: underline; }
 .record-memory-facts dd { grid-column: 2; }
 .record-memory-facts a { display: inline-flex; align-items: center; min-height: 44px; color: inherit; }
+.record-memory-facts a:is(:hover, :active) { text-decoration-thickness: 2px; }
 @media (max-width: 767px) {
   .memory-header, .memory-tabs, .memory-scroll { padding-inline: 12px; }
   .memory-file-meta { flex-basis: 100%; order: 2; }

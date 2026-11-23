@@ -57,3 +57,80 @@ it("does not render raw HTML elements from a memory document", async () => {
   await screen.findByRole("heading", { name: "道具の控え" });
   assert.equal(ui.container.querySelector("#raw-memory-html"), null);
 });
+
+const overview: MemoryOverviewResponse = {
+  head: id, files: [], broken_links: [], links_incomplete: false, last_night: null,
+  always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] },
+};
+
+// The button once said it would show all that remained and showed eight; and pressing the last one dropped the focus.
+it("says how many more files of a change it shows, and moves the focus to the first of them", async () => {
+  const backend = new FakeBackend();
+  const paths = Array.from({ length: 20 }, (_, i) => `f${String(i + 1).padStart(2, "0")}.md`);
+  window.history.replaceState(null, "", `/#/memory/changes/${id}`);
+  render(<App fetch={(input, init) => {
+    const url = new URL(String(input), "http://example.com");
+    if (url.pathname === `/api/memory/changes/${id}`) return Promise.resolve(Response.json({ change: { ...change, paths, files: 20 }, moves: [], files: paths.map((path) => ({ path, kind: "added", added: 1, removed: 0 })) }));
+    if (url.pathname === `/api/memory/changes/${id}/diff`) return Promise.resolve(Response.json({ kind: "text", truncated: false, hunks: [] }));
+    return backend.fetch(input, init);
+  }} />);
+
+  const more = await screen.findByRole("button", { name: "次の 8 ファイルを表示（残り 12）" });
+  await act(async () => more.click());
+  assert.equal(document.activeElement, screen.getByRole("button", { name: /f09\.md/ }));
+  assert.ok(screen.getByRole("button", { name: "残りの 4 ファイルを表示" }));
+});
+
+// A read that failed left only a sentence: the page had to be loaded again.
+it("reads a change again when asked after a failure", async () => {
+  const backend = new FakeBackend();
+  let failed = false;
+  window.history.replaceState(null, "", `/#/memory/changes/${id}`);
+  render(<App fetch={(input, init) => {
+    const url = new URL(String(input), "http://example.com");
+    if (url.pathname === `/api/memory/changes/${id}`) {
+      if (!failed) { failed = true; return Promise.resolve(new Response(null, { status: 500 })); }
+      return Promise.resolve(Response.json({ change, moves: [], files: [] }));
+    }
+    return backend.fetch(input, init);
+  }} />);
+
+  const again = await screen.findByRole("button", { name: "もう一度読み込む" });
+  await act(async () => again.click());
+  await screen.findByRole("heading", { name: "オーナー" });
+});
+
+// The way back from a night's change once said "turn".
+it("names the night in the way back from a change opened from a night", async () => {
+  const backend = new FakeBackend();
+  window.history.replaceState(null, "", `/#/memory/changes/${id}?from=night/n-1`);
+  render(<App fetch={(input, init) => {
+    const url = new URL(String(input), "http://example.com");
+    if (url.pathname === `/api/memory/changes/${id}`) return Promise.resolve(Response.json({ change, moves: [], files: [] }));
+    return backend.fetch(input, init);
+  }} />);
+
+  await screen.findByRole("heading", { name: "オーナー" });
+  const back = await screen.findByRole("link", { name: "活動の記録の夜へ戻る" });
+  assert.equal(back.getAttribute("href"), "#/record/nights/n-1");
+});
+
+// The writer the list was narrowed to was lost on a reload.
+it("narrows the list of changes to the writer in the address", async () => {
+  const backend = new FakeBackend();
+  const writers: Array<string | null> = [];
+  window.history.replaceState(null, "", "/#/memory/changes?writer=night");
+  render(<App fetch={(input, init) => {
+    const url = new URL(String(input), "http://example.com");
+    if (url.pathname === "/api/memory") return Promise.resolve(Response.json(overview));
+    if (url.pathname === "/api/memory/changes") {
+      writers.push(url.searchParams.get("writer"));
+      return Promise.resolve(Response.json({ head: id, days: [] }));
+    }
+    return backend.fetch(input, init);
+  }} />);
+
+  await screen.findByText("変更はありません。");
+  assert.deepEqual(writers, ["night"]);
+  assert.equal(screen.getByRole("button", { name: "夜" }).getAttribute("aria-pressed"), "true");
+});

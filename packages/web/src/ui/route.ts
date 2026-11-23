@@ -3,12 +3,17 @@ import { useCallback, useSyncExternalStore } from "react";
 
 import type { Place } from "./places.tsx";
 
+/** A writer the list of changes is narrowed to; all of them when there is none. */
+export type MemoryWriterKind = "daytime" | "night" | "owner";
+const WRITERS: readonly string[] = ["daytime", "night", "owner"] satisfies MemoryWriterKind[];
 export type RecordPage = { kind: "turn" | "night" | "sub_agent"; id: string };
 export type MemoryPage =
-  | { kind: "changes" }
+  | { kind: "changes"; writer?: MemoryWriterKind }
   | { kind: "change"; id: string; from?: RecordPage }
-  | { kind: "file"; path: string; line?: number }
-  | { kind: "history"; path: string }
+  /** `source` is the file as it was written; a line is always shown in it. */
+  | { kind: "file"; path: string; line?: number; source?: true }
+  /** `compare` is the two versions to compare, the older first. */
+  | { kind: "history"; path: string; compare?: [older: string, newer: string] }
   | { kind: "search"; q: string };
 
 export type Route =
@@ -28,7 +33,10 @@ export function parseRoute(hash: string): Route {
     const q = query.get("q");
     try {
       if (q) return { place: "memory", page: { kind: "search", q } };
-      if (kind === "changes" && !id) return { place: "memory", page: { kind: "changes" } };
+      if (kind === "changes" && !id) {
+        const writer = query.get("writer") ?? "";
+        return { place: "memory", page: { kind: "changes", ...(WRITERS.includes(writer) ? { writer: writer as MemoryWriterKind } : {}) } };
+      }
       if (kind === "changes" && id && rest.length === 0) {
         const origin = /^(turn|night)\/(.+)$/.exec(query.get("from") ?? "");
         return { place: "memory", page: { kind: "change", id: decodeURIComponent(id), ...(origin ? { from: { kind: origin[1] === "turn" ? "turn" : "night", id: origin[2]! } } : {}) } };
@@ -36,7 +44,10 @@ export function parseRoute(hash: string): Route {
       if ((kind === "files" || kind === "history") && id) {
         const file = [id, ...rest].map(decodeURIComponent).join("/");
         const line = Number(query.get("line"));
-        return { place: "memory", page: kind === "history" ? { kind, path: file } : { kind: "file", path: file, ...(Number.isSafeInteger(line) && line > 0 ? { line } : {}) } };
+        const older = query.get("from");
+        const newer = query.get("to");
+        if (kind === "history") return { place: "memory", page: { kind, path: file, ...(older && newer ? { compare: [older, newer] } : {}) } };
+        return { place: "memory", page: { kind: "file", path: file, ...(Number.isSafeInteger(line) && line > 0 ? { line } : query.get("view") === "source" ? { source: true } : {}) } };
       }
     } catch {
       // A malformed escape is not a file address.
@@ -67,11 +78,14 @@ export function hashOf(route: Route): string {
     const page = route.page;
     switch (page.kind) {
       case "search": return `#/memory?${new URLSearchParams({ q: page.q })}`;
-      case "changes": return "#/memory/changes";
+      case "changes": return `#/memory/changes${page.writer ? `?writer=${page.writer}` : ""}`;
       case "change": return `#/memory/changes/${encodeURIComponent(page.id)}${page.from ? `?${new URLSearchParams({ from: `${page.from.kind}/${page.from.id}` })}` : ""}`;
       case "file":
-      case "history":
-        return `#/memory/${page.kind === "file" ? "files" : "history"}/${page.path.split("/").map(encodeURIComponent).join("/")}${page.kind === "file" && page.line !== undefined ? `?line=${page.line}` : ""}`;
+      case "history": {
+        const query = page.kind === "history" ? (page.compare ? `?${new URLSearchParams({ from: page.compare[0], to: page.compare[1] })}` : "")
+          : page.line !== undefined ? `?line=${page.line}` : page.source ? "?view=source" : "";
+        return `#/memory/${page.kind === "file" ? "files" : "history"}/${page.path.split("/").map(encodeURIComponent).join("/")}${query}`;
+      }
     }
   }
   return `#/${NAMES[route.place]}`;

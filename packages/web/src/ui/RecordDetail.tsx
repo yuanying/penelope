@@ -19,6 +19,7 @@ import { ChevronLeftIcon } from "./icons.tsx";
 import { markdownLinks } from "./links.tsx";
 import { FlowLine } from "./Now.tsx";
 import { dateTimeOf, failedStageOf, headlineText, isFresh, nightTitle, nightWarnings, spanOf, stagesOf } from "./record.ts";
+import { Counts, writerName } from "./memory/shared.tsx";
 import { RecordMark, RecordRowView, StageMark, StageMemory } from "./RecordRow.tsx";
 import { hashOf, type RecordPage } from "./route.ts";
 import { sizeOf, words } from "./words.ts";
@@ -115,9 +116,10 @@ function Facts({ facts, memory, origin }: { facts: Array<[string, string]>; memo
           <dd>{value}</dd>
         </div>
       ))}
-      {memory?.length && origin ? <div className="record-memory-facts">
+      {memory && memory.length > 0 && origin ? <div className="record-memory-facts">
         <dt>記憶</dt>
-        {memory.map((change) => <dd key={change.id}><a href={hashOf({ place: "memory", page: { kind: "change", id: change.id, from: origin } })}>記憶 {change.files} ファイル +{change.added} −{change.removed}</a></dd>)}
+        {/* A night has a change for each stage: its name tells them apart. */}
+        {memory.map((change) => <dd key={change.id}><a href={hashOf({ place: "memory", page: { kind: "change", id: change.id, from: origin } })}>{origin.kind === "night" ? `${writerName(change.writer)} ・ ` : ""}<Counts of={change} /></a></dd>)}
       </div> : null}
     </dl>
   );
