@@ -966,7 +966,10 @@ describe("the Pod end to end", () => {
       const text = memoryLog();
       return text.includes("handoff.md") && text.includes("INDEX.md") ? text : undefined;
     });
-    assert.match(log, /Turn [0-9a-f-]{36}\nAgent: main\n+handoff\.md\n/);
+    const reflectionCommit = /Turn [0-9a-f-]{36}\nAgent: main\n+Night-stage: reflection\nNight: ([1-9]\d*)\n+handoff\.md\n/.exec(log);
+    assert.ok(reflectionCommit, "the handoff commit identifies the reflection and its night");
+    const curatorCommit = /Turn [0-9a-f-]{36}\nAgent: main\n+Night-stage: curator\nNight: ([1-9]\d*)\n+INDEX\.md\n/.exec(log);
+    assert.equal(curatorCommit?.[1], reflectionCommit[1], "the curator committed the index in the same night");
     const state = await eventually("the new session", () => {
       const text = exec("sandbox", "cat /home/agent/.pi/agent/sessions/main/current.json", { check: false }).stdout;
       return text.includes('"nightly"') ? (JSON.parse(text) as { file: string; nightly: number }) : undefined;
