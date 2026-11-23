@@ -1,5 +1,7 @@
-// Invented, stable links and text for the read-only memory scenes.
-import type { MemoryChangeResponse, MemoryDiffLine, MemoryFile, MemoryFileChange, MemoryFileDiff, MemoryOverviewResponse, MemoryWriter } from "@penelope/contract";
+// Invented links and revisions for the memory scenes.
+import type { MemoryChangeResponse, MemoryDiffLine, MemoryFile, MemoryFileChange, MemoryFileDiff, MemoryOverviewResponse, MemorySaveRequest, MemorySaveResponse, MemoryWriter } from "@penelope/contract";
+
+import { diffMemoryText } from "../src/model/memory-diff.ts";
 
 const oid = (number: number) => number.toString(16).padStart(40, "0");
 export const MEMORY_DAY = oid(900);
@@ -13,7 +15,83 @@ export type MemoryScene = {
   overview: MemoryOverviewResponse;
   changes: MemoryChangeResponse[];
   text: Record<string, string>;
+  editing?: {
+    snapshots: Map<string, Record<string, string>>;
+    diffs: Map<string, MemoryFileDiff>;
+    changeFromAgent: boolean;
+    worktreeBusy: boolean;
+  };
 };
+
+export function allowMemoryEdit(scene: MemoryScene, mode?: "conflict" | "worktree"): void {
+  scene.overview.can_edit = true;
+  scene.editing = { snapshots: new Map([[scene.overview.head!, scene.text]]), diffs: new Map(), changeFromAgent: mode === "conflict", worktreeBusy: mode === "worktree" };
+}
+
+export function memoryTextAt(scene: MemoryScene, path: string, head: string): string | undefined {
+  const snapshot = scene.editing?.snapshots.get(head);
+  if (snapshot) return Object.hasOwn(snapshot, path) ? snapshot[path] : undefined;
+  if (!scene.editing || !scene.changes.some(({ change }) => change.id === head)) return;
+  // Older bodies in the fixture predate the live mock commits. Give every old
+  // topic revision a distinct line so that comparing and restoring differ.
+  const text = scene.editing.snapshots.values().next().value?.[path];
+  return path === TOPIC && text !== undefined ? text.replace("- 下段: 紙の控え。", `- 下段: 点検表（控え ${parseInt(head, 16)}）。`) : text;
+}
+
+export function memoryEditLimit(scene: MemoryScene, file: MemoryFile): number {
+  return file.always_read ? scene.overview.always_read.file_limit_bytes : 1024 * 1024;
+}
+
+function commitMockMemory(scene: MemoryScene, file: MemoryFile, text: string | undefined, writer: MemoryWriter): string {
+  const { diff, added = 0, removed = 0 } = diffMemoryText(scene.text[file.path] ?? "", text ?? "");
+  const id = oid(1000 + scene.changes.length);
+  const at = new Date().toISOString();
+  scene.text = { ...scene.text };
+  if (text === undefined) delete scene.text[file.path];
+  else scene.text[file.path] = text;
+  scene.changes.unshift({
+    change: { id, at, writer, paths: [file.path], files: 1, added, removed },
+    files: [{ path: file.path, kind: text === undefined ? "deleted" : "modified", added, removed }], moves: [],
+  });
+  const bytes = Buffer.byteLength(text ?? "");
+  scene.overview.head = id;
+  if (file.always_read) scene.overview.always_read.bytes += bytes - file.bytes;
+  scene.overview.files = scene.overview.files.flatMap((f) => f !== file ? [f] : text === undefined ? [] : [{ ...f, bytes, last_change: { id, at, writer } }]);
+  scene.editing!.snapshots.set(id, scene.text);
+  scene.editing!.diffs.set(id, diff);
+  return id;
+}
+
+export function mockAgentMemoryChange(scene: MemoryScene, remove: boolean): boolean {
+  const file = scene.overview.files.find((f) => f.path === TOPIC);
+  if (!file || !scene.editing?.changeFromAgent) return false;
+  const text = scene.text[TOPIC]!.replace("- 上段: 予備の箱。", "- 上段: 予備の箱と新しい点検表。");
+  commitMockMemory(scene, file, remove ? undefined : text, { kind: "daytime", agent: "main" });
+  scene.editing.changeFromAgent = false;
+  return true;
+}
+
+export function saveMockMemory(scene: MemoryScene | undefined, { path, base_head, text }: MemorySaveRequest): { status: number; body: MemorySaveResponse | { error: string } } {
+  if (!scene?.editing || !scene.overview.can_edit) return { status: 403, body: { kind: "editing_disabled" } };
+  const { overview } = scene;
+  const head = overview.head!;
+  if (!scene.editing.snapshots.has(base_head) && !scene.changes.some(({ change }) => change.id === base_head)) return { status: 404, body: { error: "no such revision" } };
+  const before = memoryTextAt(scene, path, base_head);
+  if (before === undefined || path.startsWith("avatar/")) return { status: 422, body: { kind: "file_not_editable" } };
+  const file = overview.files.find((f) => f.path === path);
+  const current = memoryTextAt(scene, path, head);
+  if (!file || current !== before) return { status: 409, body: {
+    kind: "head_conflict", head, exists: file !== undefined,
+    last_change: file?.last_change ?? scene.changes.find(({ change }) => change.paths.includes(path))?.change ?? null,
+    diff: diffMemoryText(before, current ?? "").diff,
+  } };
+  if (scene.editing.worktreeBusy && path === TOPIC) return { status: 409, body: { kind: "worktree_conflict", head } };
+  const max_bytes = memoryEditLimit(scene, file);
+  if (Buffer.byteLength(text) > max_bytes) return { status: 422, body: { kind: file.always_read ? "prompt_file_limit" : "text_too_large", max_bytes } };
+  if (text === current) return { status: 200, body: { kind: "unchanged", head } };
+  const id = commitMockMemory(scene, file, text, { kind: "owner" });
+  return { status: 200, body: { kind: "saved", head: id, id } };
+}
 
 /** `lastNight` is the record's night that her last night's changes belong to, and how many days before today it ran. */
 export function memoryScene(now: number, state: "normal" | "over" | "broken" | "empty" = "normal", lastNight_: { id: string; daysBefore: number } = { id: MEMORY_NIGHT_RECORD, daysBefore: 1 }): MemoryScene {

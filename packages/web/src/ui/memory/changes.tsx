@@ -2,13 +2,14 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import type { MemoryChange, MemoryChangeResponse, MemoryChangesResponse, MemoryFileChange, MemoryFileDiff, MemoryHistoryResponse, MemoryWriterFilter } from "@penelope/contract";
+import type { MemoryChange, MemoryChangeResponse, MemoryChangesResponse, MemoryFileChange, MemoryHistoryResponse, MemoryWriterFilter } from "@penelope/contract";
 
 import { ChevronRightIcon } from "../icons.tsx";
 import { dateTimeOf, recordDayOf, timeOfDay } from "../record.ts";
 import { RecordMark } from "../RecordRow.tsx";
 import { hashOf, type MemoryPage } from "../route.ts";
 import { words } from "../words.ts";
+import { Diff } from "./Diff.tsx";
 import { PathPreview } from "./files.tsx";
 import { Counts, fileHash, groupBy, Lines, MemoryBack, MemoryLink, memoryHash, ReadBody, ReadError, replaceHash, TZ, useFocusNew, useMemory, useReading, WriterMark, writerName, writerSummary } from "./shared.tsx";
 
@@ -138,22 +139,6 @@ function ReadDiff({ id, path }: { id: string; path: string }) {
   return <ReadBody result={useReading(read, onFail)}>{(diff) => <Diff diff={diff} />}</ReadBody>;
 }
 
-function Diff({ diff }: { diff: MemoryFileDiff }) {
-  if (diff.kind !== "text") return <p className="memory-diff-note muted">{diff.kind === "image" ? "画像が替わりました。" : diff.kind === "binary" ? "バイナリファイルが変わりました。" : "差分が大きいため表示できません。"}</p>;
-  return <div className="memory-diff-content">
-    {!diff.hunks.length ? <p className="memory-diff-note muted">本文の差分はありません。</p> : null}
-    {diff.hunks.map((hunk, i) => <div key={i}>
-      {i > 0 || Math.max(hunk.old_start, hunk.new_start) > 1 ? <p className="memory-diff-note muted">… {hunk.new_start || hunk.old_start} 行目から</p> : null}
-      {hunk.lines.map((line, j) => <div className="memory-diff-line" data-kind={line.kind} key={j}>
-        <span aria-hidden="true">{"old_line" in line ? line.old_line : ""}</span><span aria-hidden="true">{"new_line" in line ? line.new_line : ""}</span>
-        {line.kind === "context" ? <span aria-hidden="true" /> : <span role="img" aria-label={line.kind === "added" ? "足した行" : "消した行"}>{line.kind === "added" ? "+" : "−"}</span>}
-        <code>{line.text || " "}</code>
-      </div>)}
-    </div>)}
-    {diff.truncated ? <p className="memory-diff-note muted">差分の一部を表示しています。</p> : null}
-  </div>;
-}
-
 export function HistoryView({ path, compare }: { path: string; compare: [older: string, newer: string] | undefined }) {
   const { api, overview, onFail } = useMemory();
   const head = overview?.head ?? undefined;
@@ -191,16 +176,29 @@ function Versions({ first, path, compare }: { first: MemoryHistoryResponse; path
 }
 
 function Comparison({ path, older, newer }: { path: string; older: MemoryChange; newer: MemoryChange }) {
-  const { api, onFail } = useMemory();
+  const { api, onFail, beginEdit } = useMemory();
   const read = useCallback(() => api.memoryCompare(path, older.id, newer.id), [api, path, older.id, newer.id]);
   const result = useReading(read, onFail);
   // It comes out under a list that may be long: bring it into view, and say so.
   const section = useRef<HTMLElement>(null);
   useEffect(() => section.current?.scrollIntoView?.({ block: "nearest" }), []);
   return <section className="memory-card" ref={section}>
-    <h2>{dateTimeOf(older.at)} の版と {dateTimeOf(newer.at)} の版の違い</h2>
+    <div className="memory-section-head">
+      <h2>{dateTimeOf(older.at)} の版と {dateTimeOf(newer.at)} の版の違い</h2>
+      {beginEdit ? <RevertAction path={path} version={older} /> : null}
+    </div>
     <ReadBody result={result}>{({ diff, changes, added, removed }) => <><p className="muted" role="status">間に {changes} 回の変更 <Lines added={added} removed={removed} /></p><Diff diff={diff} /></>}</ReadBody>
   </section>;
+}
+
+function RevertAction({ path, version }: { path: string; version: MemoryChange }) {
+  const { api, onFail, beginEdit } = useMemory();
+  const read = useCallback(async () => {
+    const [current, past] = await Promise.all([api.memoryFile(path), api.memoryFile(path, version.id)]);
+    return current.edit !== null && past.text !== undefined;
+  }, [api, path, version.id]);
+  const eligible = useReading(read, onFail);
+  return beginEdit && eligible?.value ? <button className="memory-hit" type="button" onClick={(event) => beginEdit({ path, version }, event.currentTarget)}>{dateTimeOf(version.at)} の版に戻す</button> : null;
 }
 
 function usePages<T extends { next?: string }>(first: T, read: (before: string) => Promise<T>) {

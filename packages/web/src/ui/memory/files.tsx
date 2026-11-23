@@ -64,7 +64,7 @@ export function HomeView({ data }: { data: MemoryOverviewResponse }) {
         return file ? <FileRow key={path} file={file} role={role} /> : null;
       })}
       {ratio > 1 || layer.over_target_nights.length ? <p className="muted">{ratio > 1 ? "目安を超えています。" : ""}{layer.over_target_nights.length ? ` 超えた夜: ${layer.over_target_nights.map((d) => recordDayOf(d)).join("、")}。` : ""}{ratio > 1 ? " 夜の整理係が、まずここを縮めます。" : ""}</p> : null}
-      <p className="muted">ここにあるファイルは、毎ターン、エージェントが丸ごと読みます。1 ファイルは {size(layer.file_limit_bytes)} まで。</p>
+      <p className="muted">ここにあるファイルは、新しいセッションを開いたときにエージェントが丸ごと読みます。1 ファイルは {size(layer.file_limit_bytes)} まで。</p>
     </section>
     <section>
       <div className="memory-section-head"><h2>ファイル</h2><span className="muted">{files.length} ファイル</span></div>
@@ -131,9 +131,11 @@ function Diary({ files }: { files: MemoryFile[] }) {
 }
 
 export function FileView({ path, line, source, active }: { path: string; line: number | undefined; source: boolean; active: boolean }) {
-  const { api, overview, onFail } = useMemory();
+  const { api, overview, onFail, beginEdit } = useMemory();
   const head = overview?.head ?? undefined;
-  const read = useCallback(() => api.memoryFile(path, head), [api, path, head]);
+  const canEdit = beginEdit !== undefined;
+  // Only offer to edit a file read from the current head, not a pinned snapshot.
+  const read = useCallback(() => api.memoryFile(path, canEdit ? undefined : head), [api, path, head, canEdit]);
   const result = useReading(read, onFail);
   return <>
     <MemoryBack />
@@ -143,7 +145,7 @@ export function FileView({ path, line, source, active }: { path: string; line: n
 }
 
 function FileBody({ data, line, source, active }: { data: MemoryFileResponse; line: number | undefined; source: boolean; active: boolean }) {
-  const { overview } = useMemory();
+  const { overview, beginEdit } = useMemory();
   const { file, text = "" } = data;
   // The address says which of the two is shown, so that it comes back the same after a reload.
   const raw = source || data.kind === "text";
@@ -176,6 +178,7 @@ function FileBody({ data, line, source, active }: { data: MemoryFileResponse; li
     <div className="memory-controls">
       {data.kind === "markdown" ? <><button type="button" aria-pressed={!raw} onClick={() => show(false)}>読む</button><button type="button" aria-pressed={raw} onClick={() => show(true)}>元の文</button></> : null}
       <MemoryLink className="memory-hit" href={memoryHash({ kind: "history", path: file.path })}>履歴 {data.history_count}</MemoryLink>
+      {beginEdit && data.edit ? <button type="button" onClick={(event) => beginEdit({ path: file.path }, event.currentTarget)}>直す</button> : null}
     </div>
     <div className="memory-card memory-document">
       {data.kind === "image" && data.image_url?.startsWith("/api/memory/image?") ? <img src={data.image_url} alt={file.path} /> : data.kind === "unavailable" ? <p className="muted">本文を表示できないファイルです。</p> : raw ? (

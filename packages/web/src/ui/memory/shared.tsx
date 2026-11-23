@@ -8,6 +8,7 @@ import { recordSourceWord } from "../record.ts";
 import { RecordMark } from "../RecordRow.tsx";
 import { hashOf, type MemoryPage, parseRoute, type Route } from "../route.ts";
 import { triggerWords, words } from "../words.ts";
+import type { EditTarget } from "./Edit.tsx";
 
 export const TZ = Intl.DateTimeFormat().resolvedOptions().timeZone;
 export const HOME = "#/memory";
@@ -51,7 +52,12 @@ export function useFocusNew<T extends HTMLElement>(count: number) {
   return { root, remember };
 }
 
-export const MemoryScope = createContext<{ api: Api; overview: MemoryOverviewResponse | undefined; onFail: (error: unknown) => void }>(null!);
+export const MemoryScope = createContext<{
+  api: Api;
+  overview: MemoryOverviewResponse | undefined;
+  onFail: (error: unknown) => void;
+  beginEdit: ((target: EditTarget, trigger: HTMLButtonElement) => void) | undefined;
+}>(null!);
 export const useMemory = () => useContext(MemoryScope);
 
 export function groupBy<T, K>(items: Iterable<T>, keyOf: (item: T) => K): Map<K, T[]> {

@@ -1354,6 +1354,24 @@ button.record-row-body:hover {
 .memory-scroll button, .memory-fold summary { cursor: pointer; }
 .memory-controls > button[aria-pressed="true"] { border-color: currentColor; font-weight: 600; }
 .memory-controls > * { min-height: 44px; }
+.memory-controls > .memory-primary:not(:disabled) { border-color: currentColor; font-weight: 600; }
+.memory-editor {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 20rem;
+  padding: 12px;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-background-surface);
+  color: inherit;
+  font: 0.875rem/1.65 ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.memory-draft { display: block; }
+.memory-draft summary { display: list-item; line-height: 44px; cursor: pointer; }
+.memory-plain-preview { white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-save-notice { padding-inline: 12px; }
 .memory-meter {
   position: relative;
   height: 8px;

@@ -10,6 +10,8 @@ import type {
   MemoryFileResponse,
   MemoryHistoryResponse,
   MemoryOverviewResponse,
+  MemorySaveRequest,
+  MemorySaveResponse,
   MemorySearchResponse,
   MemoryWriterFilter,
   ModelSelection,
@@ -86,13 +88,14 @@ export type Api = {
   memoryHistory(path: string, head?: string, before?: string): Promise<MemoryHistoryResponse>;
   memoryCompare(path: string, from: string, to: string): Promise<MemoryCompareResponse>;
   memorySearch(q: string, head?: string): Promise<MemorySearchResponse>;
+  memorySave(body: MemorySaveRequest): Promise<MemorySaveResponse>;
 };
 
 /** The narrowing of `GET /api/record` (docs/ui-api.md, "活動の記録"). */
 export type RecordQuery = { day?: string; tz: string; failed?: boolean; agent?: string; kind?: RecordKind };
 
 export function createApi(fetch: Fetch): Api {
-  const call = async (path: string, init: RequestInit = {}): Promise<Response> => {
+  const call = async (path: string, init: RequestInit = {}, accepted: readonly number[] = []): Promise<Response> => {
     let response: Response;
     try {
       response = await fetch(path, { credentials: "same-origin", ...init });
@@ -100,7 +103,7 @@ export function createApi(fetch: Fetch): Api {
       throw new Unreachable(error instanceof Error ? error.message : String(error));
     }
     if (response.status === 401) throw new Unauthorized();
-    if (!response.ok) {
+    if (!response.ok && !accepted.includes(response.status)) {
       const body = (await response.json().catch(() => ({}))) as { error?: string };
       throw new Refused(response.status, body.error ?? response.statusText);
     }
@@ -122,6 +125,14 @@ export function createApi(fetch: Fetch): Api {
     memoryHistory: (path, head, before) => memory("/history", { path, head, before }),
     memoryCompare: (path, from, to) => memory("/compare", { path, from, to }),
     memorySearch: (q, head) => memory("/search", { q, head }),
+    memorySave: async (body) => {
+      const response = await call("/api/memory/save", {
+        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+      }, [403, 409, 422]);
+      const result = await response.json() as MemorySaveResponse | { error: string };
+      if (!("kind" in result)) throw new Refused(response.status, result.error);
+      return result;
+    },
     agent: async () => (await call("/api/agent")).json() as Promise<AgentResponse>,
     agents: async () => (await call("/api/agents")).json() as Promise<SubAgentsResponse>,
     history: async (before) =>

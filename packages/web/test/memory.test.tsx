@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
 import { afterEach, it } from "node:test";
 
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 
-import type { MemoryFileResponse, MemoryOverviewResponse } from "@penelope/contract";
+import type { MemoryFileResponse, MemoryOverviewResponse, MemorySaveRequest } from "@penelope/contract";
 
 import { App } from "../src/ui/App.tsx";
 import { FakeBackend } from "./fake-backend.ts";
@@ -56,6 +56,86 @@ it("does not render raw HTML elements from a memory document", async () => {
   }} />);
   await screen.findByRole("heading", { name: "道具の控え" });
   assert.equal(ui.container.querySelector("#raw-memory-html"), null);
+});
+
+const editableFile: MemoryFileResponse = {
+  head: id, file: { path: "notes.md", bytes: 6, always_read: false, reads: null, last_change: null },
+  edit: { max_bytes: 1048576 }, history_count: 1, broken_links: [], kind: "markdown", text: "# 元\n",
+};
+
+function openEditableFile(canEdit: boolean, save: () => Response = () => Response.json({ kind: "unchanged", head: id })) {
+  const backend = new FakeBackend();
+  window.history.replaceState(null, "", "/#/memory/files/notes.md");
+  render(<App fetch={(input, init) => {
+    const url = new URL(String(input), "http://example.com");
+    if (url.pathname === "/api/memory") return Promise.resolve(Response.json({ ...overview, can_edit: canEdit }));
+    if (url.pathname === "/api/memory/file") return Promise.resolve(Response.json(editableFile));
+    if (url.pathname === "/api/memory/save") return Promise.resolve(save());
+    return backend.fetch(input, init);
+  }} />);
+}
+
+it("keeps the owner's draft in the editor after a committed change conflicts", async () => {
+  openEditableFile(true, () => Response.json({
+    kind: "head_conflict", head: "b".repeat(40), exists: true, last_change: null,
+    diff: { kind: "text", hunks: [], truncated: false },
+  }, { status: 409 }));
+  const edit = await screen.findByRole("button", { name: "直す" });
+  await act(async () => edit.click());
+  const draft = await screen.findByRole<HTMLInputElement>("textbox", { name: "元の文" });
+  fireEvent.change(draft, { target: { value: "残しておきたい文" } });
+  await act(async () => screen.getByRole("button", { name: "保存する" }).click());
+  await screen.findByText("保存していません。直している間に、このファイルが書き換わりました。");
+  assert.equal(screen.getByRole<HTMLInputElement>("textbox", { name: "元の文" }).value, "残しておきたい文");
+});
+
+it("does not resend a save on its own after a committed change conflicts", async () => {
+  let saves = 0;
+  openEditableFile(true, () => {
+    saves++;
+    return Response.json({ kind: "head_conflict", head: "b".repeat(40), exists: true, last_change: null, diff: { kind: "text", hunks: [], truncated: false } }, { status: 409 });
+  });
+  const edit = await screen.findByRole("button", { name: "直す" });
+  await act(async () => edit.click());
+  await act(async () => (await screen.findByRole("button", { name: "保存する" })).click());
+  await screen.findByRole("button", { name: "自分の文で上書きする" });
+  assert.equal(saves, 1);
+});
+
+it("offers no edit action when the deployment cannot edit memory", async () => {
+  openEditableFile(false);
+  await screen.findByRole("heading", { name: "元" });
+  assert.equal(screen.queryByRole("button", { name: "直す" }), null);
+});
+
+it("restores the older text against the current version read when the confirmation opens", async () => {
+  const backend = new FakeBackend();
+  const older = "b".repeat(40);
+  const confirmationHead = "c".repeat(40);
+  const oldText = "# 以前の本文\n";
+  let currentHead = id;
+  let request: MemorySaveRequest | undefined;
+  window.history.replaceState(null, "", `/#/memory/history/notes.md?from=${older}&to=${id}`);
+  render(<App fetch={(input, init) => {
+    const url = new URL(String(input), "http://example.com");
+    if (url.pathname === "/api/memory") return Promise.resolve(Response.json({ ...overview, can_edit: true }));
+    if (url.pathname === "/api/memory/history") return Promise.resolve(Response.json({ head: id, changes: [change, { ...change, id: older, at: "2026-11-21T04:00:00Z" }] }));
+    if (url.pathname === "/api/memory/compare") return Promise.resolve(Response.json({ from: older, to: id, changes: 1, added: 1, removed: 1, diff: { kind: "text", hunks: [], truncated: false } }));
+    if (url.pathname === "/api/memory/file") {
+      return Promise.resolve(Response.json(url.searchParams.get("head") === older ? { ...editableFile, head: older, text: oldText } : { ...editableFile, head: currentHead }));
+    }
+    if (url.pathname === "/api/memory/save") {
+      request = JSON.parse(String(init?.body)) as MemorySaveRequest;
+      return Promise.resolve(Response.json({ kind: "unchanged", head: confirmationHead }));
+    }
+    return backend.fetch(input, init);
+  }} />);
+  const revert = await screen.findByRole("button", { name: /の版に戻す$/ });
+  currentHead = confirmationHead;
+  await act(async () => revert.click());
+  const confirm = await screen.findByRole("button", { name: "この版に戻す" });
+  await act(async () => confirm.click());
+  assert.deepEqual(request, { path: "notes.md", base_head: confirmationHead, text: oldText });
 });
 
 const overview: MemoryOverviewResponse = {

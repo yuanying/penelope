@@ -21,7 +21,7 @@ import type {
   Trigger,
 } from "@penelope/contract";
 
-import { MEMORY_TURN, type MemoryScene, memoryScene } from "./memory.ts";
+import { allowMemoryEdit, MEMORY_TURN, type MemoryScene, memoryScene } from "./memory.ts";
 import { MORNING_TRIGGERS, morning } from "./morning.ts";
 
 export type Scene = {
@@ -342,6 +342,21 @@ function withMemory(now: number, state: "normal" | "over" | "broken" | "empty" =
   };
 }
 
+function withMemoryEditing(now: number, mode?: "conflict" | "worktree" | "limit"): Scene {
+  const scene = withMemory(now);
+  const memory = scene.memory!;
+  if (mode === "limit") {
+    const file = memory.overview.files.find((f) => f.path === "always.md")!;
+    const limit = memory.overview.always_read.file_limit_bytes;
+    const padding = "\n<!--\n" + "  記録用の控え。\n".repeat(1000) + "-->\n";
+    memory.text[file.path] += padding + " ".repeat(limit - file.bytes - Buffer.byteLength(padding));
+    memory.overview.always_read.bytes += limit - file.bytes;
+    file.bytes = limit;
+  }
+  allowMemoryEdit(memory, mode === "limit" ? undefined : mode);
+  return scene;
+}
+
 export type SceneDef = { about: string; make: (now: number) => Scene };
 
 export const scenes: Record<string, SceneDef> = {
@@ -409,6 +424,11 @@ export const scenes: Record<string, SceneDef> = {
   "memory-over": { about: "memory: the always-read layer exceeds its target", make: (now) => withMemory(now, "over") },
   "memory-broken": { about: "memory: two missing link destinations", make: (now) => withMemory(now, "broken") },
   "memory-empty": { about: "memory: only personality.md, no night yet", make: (now) => withMemory(now, "empty") },
+  "memory-edit": { about: "memory: save, restore, or save an unchanged draft", make: withMemoryEditing },
+  "memory-edit-conflict": { about: "memory: an agent can commit while editing (see dev/README.md)", make: (now) => withMemoryEditing(now, "conflict") },
+  "memory-edit-worktree": { about: "memory: the agent is still writing the topic file", make: (now) => withMemoryEditing(now, "worktree") },
+  "memory-edit-limit": { about: "memory: always.md is at its per-file limit", make: (now) => withMemoryEditing(now, "limit") },
+  "memory-read-only": { about: "memory: editing is disabled for this deployment", make: withMemory },
   "memory-review": {
     about: "a weekly review with two curator turns, an over-target prompt layer and dropped records",
     make: (now) => {

@@ -18,6 +18,7 @@ import type {
   MemoryFileResponse,
   MemoryHistoryResponse,
   MemoryOverviewResponse,
+  MemorySaveRequest,
   MemorySearchResponse,
   ModelSelection,
   SettingsResponse,
@@ -35,7 +36,8 @@ import type {
   StreamEvent,
 } from "@penelope/contract";
 
-import { memoryDiff, type MemoryScene } from "./memory.ts";
+import { diffMemoryText } from "../src/model/memory-diff.ts";
+import { memoryDiff, memoryEditLimit, type MemoryScene, memoryTextAt, mockAgentMemoryChange, saveMockMemory } from "./memory.ts";
 import { AVATAR_DIR, AVATAR_ICONS, DAY_IMAGE, PLACEHOLDER_IMAGE, type Scene, scenes } from "./scenes.ts";
 
 const COOKIE = "penelope-dev-scene";
@@ -177,15 +179,27 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
   if (method === "GET" && path === "/api/push") return (json(200, {}), true);
   if (method === "POST" && path === "/api/push/subscriptions") return (json(503, { error: "web-push-not-configured" }), true);
   if (method === "POST" && path === "/api/push/subscriptions/delete") return (empty(), true);
+  if (method === "POST" && path === "/api/dev/memory/change" && w.memory && mockAgentMemoryChange(w.memory, url.searchParams.has("remove"))) return (empty(), true);
+  if (method === "POST" && path === "/api/dev/memory/finish" && w.memory?.editing?.worktreeBusy) {
+    w.memory.editing.worktreeBusy = false;
+    return (empty(), true);
+  }
   if (path === "/api/memory" || path.startsWith("/api/memory/")) {
-    if (method !== "GET") return (json(405, { error: "read only" }), true);
+    response.setHeader("cache-control", "no-store");
+    if (method === "POST" && path === "/api/memory/save") {
+      if (!request.headers["content-type"]?.startsWith("application/json")) return (json(415, { error: "expected JSON" }), true);
+      const body = await readMemorySave(request);
+      if (!body) return (json(400, { error: "invalid save request" }), true);
+      const answer = saveMockMemory(w.memory, body);
+      return (json(answer.status, answer.body), true);
+    }
+    if (method !== "GET") return (json(405, { error: "method not allowed" }), true);
     if (path === "/api/memory/image" && url.searchParams.get("path") === "avatar/sample.png" && w.memory?.overview.files.some((f) => f.path === "avatar/sample.png")) {
       response.writeHead(200, { "content-type": "image/png", "x-content-type-options": "nosniff", "cache-control": "no-store" });
       response.end(SAMPLE_IMAGE);
       return true;
     }
     const answer = memory(w.memory, url);
-    response.setHeader("cache-control", "no-store");
     return (answer === undefined ? json(404, { error: "not found" }) : json(200, answer), true);
   }
   if (path.startsWith("/api/record")) {
@@ -343,14 +357,32 @@ const SAMPLE_IMAGE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAA
 const EMPTY_MEMORY: MemoryOverviewResponse = { head: null, can_edit: false, files: [], broken_links: [], links_incomplete: false, last_night: null, always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] } };
 const MEMORY_PAGE = 50;
 
+async function readMemorySave(request: IncomingMessage): Promise<MemorySaveRequest | undefined> {
+  const chunks: Buffer[] = [];
+  let size = 0;
+  for await (const chunk of request as AsyncIterable<Buffer>) {
+    size += chunk.length;
+    if (size <= 6 * 1024 * 1024 + 32768) chunks.push(chunk);
+  }
+  if (size > 6 * 1024 * 1024 + 32768) return;
+  try {
+    const body = JSON.parse(Buffer.concat(chunks).toString("utf8")) as Partial<MemorySaveRequest> | null;
+    if (typeof body?.path === "string" && typeof body.base_head === "string" && typeof body.text === "string" && !body.text.includes("\0")) {
+      return { path: body.path, base_head: body.base_head, text: body.text };
+    }
+  } catch { /* Not JSON. */ }
+}
+
 function memory(scene: MemoryScene | undefined, url: URL): unknown {
   const parts = url.pathname.split("/").slice(3);
   const { searchParams: q } = url;
   const overview = scene?.overview ?? EMPTY_MEMORY;
-  const head = overview.head;
+  const head = q.get("head") ?? overview.head;
   const path = q.get("path") ?? "";
-  if (head !== q.get("head") && q.has("head")) return;
-  const changes = (scene?.changes ?? []).map((entry) => entry.change);
+  const allChanges = (scene?.changes ?? []).map((entry) => entry.change);
+  const at = head === overview.head ? 0 : scene?.editing ? allChanges.findIndex((c) => c.id === head) : -1;
+  if (at < 0) return;
+  const changes = allChanges.slice(at);
   const versions = changes.filter((c) => c.paths.includes(path));
   const before = q.get("before");
   const page = <T extends { id: string },>(items: T[]) => {
@@ -361,11 +393,16 @@ function memory(scene: MemoryScene | undefined, url: URL): unknown {
   if (!parts.length) return overview;
   if (parts[0] === "file") {
     const file = overview.files.find((f) => f.path === path);
-    if (!head || !file) return;
+    if (!head || !file || !scene) return;
+    const image = path.startsWith("avatar/");
+    const text = scene.editing ? memoryTextAt(scene, path, head) : scene.text[path];
+    if (!image && text === undefined) return;
     const moved = overview.last_night?.changes.flatMap((c) => c.moves).find((move) => move.to === path);
     return {
-      head, file, edit: null, history_count: versions.length, broken_links: overview.broken_links.filter((link) => link.path === path), ...(moved ? { moved_from: moved.from } : {}),
-      ...(path.startsWith("avatar/") ? { kind: "image", image_url: `/api/memory/image?${new URLSearchParams({ path, head })}` } : { kind: "markdown", text: scene?.text[path] ?? "" }),
+      head, file: text === undefined ? file : { ...file, bytes: Buffer.byteLength(text) },
+      edit: overview.can_edit && !image ? { max_bytes: memoryEditLimit(scene, file) } : null,
+      history_count: versions.length, broken_links: overview.broken_links.filter((link) => link.path === path), ...(moved ? { moved_from: moved.from } : {}),
+      ...(image ? { kind: "image", image_url: `/api/memory/image?${new URLSearchParams({ path, head })}` } : { kind: "markdown", text: text! }),
     } satisfies MemoryFileResponse;
   }
   if (parts[0] === "changes" && parts.length === 1) {
@@ -383,7 +420,7 @@ function memory(scene: MemoryScene | undefined, url: URL): unknown {
   if (parts[0] === "changes") {
     const change = scene?.changes.find((c) => c.change.id === parts[1]);
     if (parts.length === 2) return change;
-    if (parts[2] === "diff" && change?.files.some((f) => f.path === path)) return memoryDiff(path);
+    if (parts[2] === "diff" && change?.files.some((f) => f.path === path)) return scene?.editing?.diffs.get(change.change.id) ?? memoryDiff(path);
   }
   if (parts[0] === "history") {
     const { data, ...cursor } = page(versions);
@@ -395,6 +432,10 @@ function memory(scene: MemoryScene | undefined, url: URL): unknown {
     const oldest = versions.findIndex((c) => c.id === from);
     const newest = versions.findIndex((c) => c.id === to);
     if (newest < 0 || oldest <= newest) return;
+    if (scene?.editing && !path.startsWith("avatar/")) {
+      const { diff, added = 0, removed = 0 } = diffMemoryText(memoryTextAt(scene, path, from) ?? "", memoryTextAt(scene, path, to) ?? "");
+      return { from, to, changes: oldest - newest, diff, added, removed } satisfies MemoryCompareResponse;
+    }
     const diff = memoryDiff(path);
     const lines = diff.kind === "text" ? diff.hunks.flatMap((h) => h.lines) : [];
     return { from, to, changes: oldest - newest, diff, added: lines.filter((l) => l.kind === "added").length, removed: lines.filter((l) => l.kind === "removed").length } satisfies MemoryCompareResponse;

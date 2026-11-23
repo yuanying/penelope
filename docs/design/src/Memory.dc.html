@@ -434,7 +434,7 @@ a{color:inherit}
 <button type="button" style="min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer">自分の文で上書きする</button>
 <button type="button" style="min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; background: transparent; color: inherit; font: inherit; font-weight: 600; cursor: pointer">直しを捨てる</button>
 </div>
-<p style="margin: 0; font-size: 12px; color: var(--color-text-secondary)">取り込むと、エージェントが変えた行が欄に入り、同じ行を両方が変えたところだけ、2 つの文を並べて残します。上書きしても、エージェントの版は履歴に残ります。</p>
+<p style="margin: 0; font-size: 12px; color: var(--color-text-secondary)">取り込むと、新しい版が欄に入ります。取り込む前の文から必要な直しを写せます。上書きしても、新しい版は履歴に残ります。</p>
 </section>
 </sc-if>
 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
@@ -457,10 +457,6 @@ a{color:inherit}
 - 頼まれて、まだ終わっていないことは何か。
 - オーナーが嫌がる連絡の仕方は何か。
 - 家族の誕生日と、去年贈ったものは何か。</textarea>
-</label>
-<label style="display: flex; align-items: center; gap: 10px; min-height: 44px">
-<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: var(--color-accent)">
-<span>直したことをエージェントに知らせる<span style="color: var(--color-text-secondary)">（会話に「オーナーが PURPOSE.md を直しました」と 1 行出て、次のターンで読みます）</span></span>
 </label>
 <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px">
 <button type="button" style="min-height: 44px; padding: 0 20px; border: 0; border-radius: 9999px; background: var(--color-accent); color: var(--color-on-accent); font: inherit; font-weight: 600; cursor: pointer">保存する</button>
@@ -491,10 +487,6 @@ a{color:inherit}
 </div>
 </sc-for>
 </div>
-<label style="display: flex; align-items: center; gap: 10px; min-height: 44px">
-<input type="checkbox" checked style="width: 18px; height: 18px; accent-color: var(--color-accent)">
-<span>戻したことをエージェントに知らせる</span>
-</label>
 <div style="display: flex; flex-wrap: wrap; gap: 8px">
 <button type="button" style="min-height: 44px; padding: 0 20px; border: 0; border-radius: 9999px; background: var(--color-accent); color: var(--color-on-accent); font: inherit; font-weight: 600; cursor: pointer">この版に戻す</button>
 <a href="HybridMemoryHistory.dc.html" style="display: flex; align-items: center; min-height: 44px; padding: 0 16px; border: 1px solid var(--color-border); border-radius: 9999px; font-weight: 600; text-decoration: none">やめる</a>
