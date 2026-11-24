@@ -43,6 +43,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
 | 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted（一部を ADR-0044 で置き換え） |
 | 0039 | [Pi 拡張はオーナーの置き場と記憶から本人のセッションだけに読み込む](0039-load-owner-and-memory-extensions-in-the-main-session.md) | Accepted |
+| 0040 | [Signal は receivers のプラグインが signal-cli の JSON-RPC で受け、送り口は Sentinel から Unix socket で届ける](0040-signal-through-signal-cli-in-a-receivers-plugin-with-a-send-socket.md) | Accepted |
 | 0042 | [配置が一覧に載せる image の skill を選ぶ](0042-select-image-skills-per-deployment.md) | Accepted |
 | 0043 | [モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) | Accepted（一部を ADR-0044 で置き換え） |
 | 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted（一部を ADR-0050 と ADR-0051 で置き換え） |
