@@ -211,6 +211,7 @@ COPY --from=sandbox-porkadot /var/lib/gems/ /var/lib/gems/
 COPY --from=sandbox-porkadot /usr/local/bin/porkadot /usr/local/bin/porkadot
 COPY packages/runner/image/entrypoint.sh /usr/local/bin/penelope-sandbox
 COPY --chmod=0755 packages/runner/image/ask-agent /usr/local/bin/ask-agent
+COPY --chmod=0755 packages/runner/image/x-search /usr/local/bin/x-search
 COPY --chmod=0755 packages/runner/image/penelope-memory-eval /usr/local/bin/penelope-memory-eval
 WORKDIR /opt/penelope/runner
 COPY --from=ts-build /src/packages/runner/package.json ./
