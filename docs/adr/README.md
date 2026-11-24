@@ -61,4 +61,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0057 | [オーナーによる記憶の編集と復元は、backend が 1 ファイルずつ確定する](0057-edit-existing-memory-in-the-backend.md) | Accepted |
 | 0058 | [記憶の差分統計は必要な変更だけを計算し、Git の保守は backend が行う](0058-read-memory-history-on-demand.md) | Accepted |
 | 0059 | [トピックには今わかっていることを残し、棚卸しの同順位では大きいものを先に読む](0059-keep-topics-current-and-review-large-topics-first.md) | Accepted |
-| 0060 | [答えるときは出来事の口を使い、ターンの文だけで終わったら一度だけ知らせる](0060-answer-through-the-event-source.md) | Accepted |
+| 0060 | [答える口は出来事が持ち、送信を試みなければ一度だけ知らせる](0060-answer-through-the-event-source.md) | Accepted |
