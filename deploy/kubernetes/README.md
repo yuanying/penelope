@@ -14,7 +14,7 @@ penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動か�
 | --- | --- |
 | `base/` | 誰にも同じもの。StatefulSet（4 つのコンテナと init container）、init の台本（`init/`）、PVC 2 つ、Service、ServiceAccount |
 | `components/backup/` | 任意の部品。1 日 1 回の backup の CronJob（下の「backup」） |
-| `example/` | 1 人分の overlay の例。設定の ConfigMap、Ingress、名前空間、image の版、Slack・A2A・sd-webui・自分のアバターの例 |
+| `example/` | 1 人分の overlay の例。設定の ConfigMap、Ingress、名前空間、image の版、Slack・A2A・sd-webui・X 検索・自分のアバターの例 |
 | `migrate/` | natsumi から移すときに 1 回だけ使う、作業用の Pod と予約を移す道具（[natsumi からの移行の手引き](../../docs/migrate-from-natsumi.md)） |
 | `example_test.go` | `example/` の設定どうしが合っていることの確かめ（`make test`） |
 
@@ -110,12 +110,13 @@ base が決めている場所:
 | `sandbox/env` | `PENELOPE_THINKING`（任意） | 既定の思考の深さ。未指定は Pi の設定に従う |
 | `sandbox/env` | `PENELOPE_OWNER_EXTENSIONS_DIR`（任意、見本では未設定） | オーナーの Pi 拡張を読み取り専用で mount した絶対パス（下の「Pi 拡張」） |
 | `sandbox/surrogates.env`・`sandbox/models.json`・`sentinel/sentinel.yaml` | `surrogate-example-*` | 自分のサロゲート（下の「サロゲート」） |
-| `sentinel/sentinel.yaml` | `api.openai.com`・`sd-webui.example.com`・`helper.agents.example.com` | 鍵を差し替えるホスト |
-| `sandbox/surrogates.env` | `SDCTL_URL` | sd-webui の URL |
+| `sentinel/sentinel.yaml` | `api.openai.com`・`sd-webui.example.com`・`helper.agents.example.com`・`llm-proxy-xai.example.com` | 鍵を差し替えるホスト |
+| `sandbox/surrogates.env` | `SDCTL_URL`・`X_SEARCH_URL` | sd-webui・xAI モードの llm-proxy の URL |
+| `sandbox/env` | `X_SEARCH_MODEL` | X 検索に使う Grok のモデル ID（Pi のモデルとは別） |
 | `receivers/config.json`・`connectors/slack.md` | ワークスペース `work` | Slack のワークスペースの短い名前 |
 | `connectors/*.md` | ホスト・token の環境変数・宛先 | その配置のもの |
 | `patches/statefulset.yaml` | `AVATAR_REPO` など | 自分のアバターの置き場と名前（下の「アバター」） |
-| `patches/statefulset.yaml` | audience `a2a` | A2A の相手が求める token の audience |
+| `patches/statefulset.yaml` | audience `a2a`・`https://auth.example.com` | A2A の相手・gated がそれぞれ求める ServiceAccount の token の audience |
 | `ingress.yaml` | `ingressClassName: example`、ホスト、`penelope-tls` | 使う Ingress と証明書 |
 | `skills/skills.list` | 上流の skill | 要る skill（要らなければ ConfigMap ごと消す） |
 
@@ -194,6 +195,14 @@ kubectl -n penelope exec penelope-0 -c sandbox -- penelope-memory-eval
 
 設定用の schema 8 への migration は一方通行である。更新前に SQLite を backup し、版 7 までの backend に戻すときは更新前の backup も戻す。
 
+## X 検索（任意）
+
+`x-search` skill を含む sandbox image と、gated の背後で稼働する [xAI モードの llm-proxy](https://github.com/yuanying/llm-proxy) が必要である。`X_SEARCH_URL` はその HTTPS オリジン（`/v1` は付けない）、`X_SEARCH_MODEL` はそのログインで使える Grok のモデル ID にする。ホストは `sentinel.yaml` と `connectors/x-search.md` にも同じものを書く。`PENELOPE_IMAGE_SKILLS` で一覧を絞っているなら `x-search` を含める。
+
+`patches/statefulset.yaml` の例では、gated の `--serviceaccount-audience` を指定した projected token を Sentinel にだけ mount する。Sentinel が `X_SEARCH_TOKEN` のサロゲートをこの token に差し替える。gated の `NetworkRole` で `POST /v1/responses` を対象にし、Pod の ServiceAccount を `NetworkRoleBinding` と llm-proxy の `--allowed-subjects` の両方で許す。xAI のログインは llm-proxy が持ち、Pod には置かない。
+
+X 検索を使わない場合は、`X_SEARCH_*` の環境変数、コネクタ（`kustomization.yaml` の参照も含む）、Sentinel のホスト登録、`patches/statefulset.yaml` の `x-search-token` volume と mount を外す。
+
 ## アバター
 
 アバター（名前、表情の画像、姿の `appearance.yaml`、描画の既定の `sdctl-params.yaml`）は記憶の `/memory/avatar/` にあり、エージェントが育てる（[ADR-0036](../../docs/adr/0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md)、[docs/backend.md](../../docs/backend.md) の「アバター」）。
@@ -236,7 +245,7 @@ init container `skills`（`base/init/skills.sh`）が置くオーナーの skill
 `penelope-connectors` に置くのは、その配置だけのこと（ホスト、token の環境変数、ワークスペース、宛先）である。`slackctl`・`sdctl`・`a2a` などの道具の使い方は image の skill にある。
 
 - 文書の `hosts` は `sentinel.yaml` の登録の `name` と同じにし、鍵を差し替える登録はどれかの文書の `hosts` に入れる（[docs/sentinel-config.md](../../docs/sentinel-config.md) の「コネクタの文書」）。
-- `example/connectors/` にあるのは、Slack（`slack.md`）、A2A の相手（`agents.md`）、sd-webui（`sd-webui.md`）、モデル（`model.md`）、backend（`backend.md`。runner が使う。どの配置にも要る）。
+- `example/connectors/` にあるのは、Slack（`slack.md`）、A2A の相手（`agents.md`）、sd-webui（`sd-webui.md`）、X 検索（`x-search.md`）、モデル（`model.md`）、backend（`backend.md`。runner が使う。どの配置にも要る）。
 
 ## A2A
 

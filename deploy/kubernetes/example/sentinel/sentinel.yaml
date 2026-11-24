@@ -9,6 +9,7 @@
 #   /run/secrets/penelope-sentinel/ca/      Secret penelope-sentinel-ca (tls.crt, tls.key)
 #   /run/secrets/penelope-sentinel/keys/    Secret penelope-sentinel (model-api-key, slack-bot-token, sd-webui-token)
 #   /run/secrets/penelope-sentinel/a2a/     the ServiceAccount's token with the audience a2a
+#   /run/secrets/penelope-sentinel/x-search/  the ServiceAccount's token with gated's audience
 #   /run/penelope/backend-token/            the backend's sandbox API token, made for each Pod
 listen:
   proxy: ["0.0.0.0:15001", "[::]:15001"]
@@ -37,6 +38,12 @@ hosts:
       - place: bearer
         surrogate: surrogate-example-sd-webui-0001
         source: { file: /run/secrets/penelope-sentinel/keys/sd-webui-token }
+  # llm-proxy in xAI mode, behind gated (connectors/x-search.md).
+  - name: llm-proxy-xai.example.com
+    credentials:
+      - place: bearer
+        surrogate: surrogate-example-x-search-0001
+        source: { file: /run/secrets/penelope-sentinel/x-search/token }
   # An A2A agent that checks its callers' ServiceAccount tokens by TokenReview.
   - name: helper.agents.example.com
     credentials:

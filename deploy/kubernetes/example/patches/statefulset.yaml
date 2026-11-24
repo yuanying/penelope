@@ -9,6 +9,8 @@
 #   this and sets only PENELOPE_AVATAR.
 # - A ServiceAccount token with the audience a2a for the Sentinel, put in
 #   place of HELPER_AGENT_TOKEN (sentinel/sentinel.yaml).
+# - A ServiceAccount token with gated's audience for the Sentinel, put in
+#   place of X_SEARCH_TOKEN when calling llm-proxy in xAI mode.
 #
 # The containers are matched by name, so their order stays the base's. The
 # init container avatar comes first; it has to run before the redirect.
@@ -74,6 +76,9 @@ spec:
         - name: a2a-token
           mountPath: /run/secrets/penelope-sentinel/a2a
           readOnly: true
+        - name: x-search-token
+          mountPath: /run/secrets/penelope-sentinel/x-search
+          readOnly: true
       volumes:
       - name: avatars
         emptyDir:
@@ -84,5 +89,13 @@ spec:
           sources:
           - serviceAccountToken:
               audience: a2a
+              expirationSeconds: 3600
+              path: token
+      - name: x-search-token
+        projected:
+          defaultMode: 0444
+          sources:
+          - serviceAccountToken:
+              audience: https://auth.example.com
               expirationSeconds: 3600
               path: token

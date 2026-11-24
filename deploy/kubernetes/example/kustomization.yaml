@@ -51,6 +51,7 @@ configMapGenerator:
   - connectors/model.md
   - connectors/sd-webui.md
   - connectors/slack.md
+  - connectors/x-search.md
 - name: penelope-receivers
   files:
   - receivers/config.json

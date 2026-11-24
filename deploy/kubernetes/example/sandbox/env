@@ -6,6 +6,8 @@ PENELOPE_ROLE=The owner's companion, also on Slack
 PENELOPE_OWNER=example-owner (example-owner on GitHub)
 # <provider>/<model> of Pi. The provider's endpoint and surrogate are in models.json.
 PENELOPE_MODEL=openai/gpt-5.5
+# The Grok model for the x-search skill, separate from Pi's model.
+X_SEARCH_MODEL=grok-4.7
 # The time of the tools and of what the runner draws.
 TZ=Asia/Tokyo
 # Slack's events drawn into the turn: the source of the Slack plugin (receivers/config.json).
