@@ -1,7 +1,7 @@
 // What the events of a turn become in its input: one JSON object a line,
 // inside `<events>` and `</events>` (docs/events.md, "ターンに入る形").
 
-import type { Delivery, Source } from "./events.ts";
+import type { AnswerVia, Delivery, Source } from "./events.ts";
 import type { HeartbeatPending } from "./heartbeat.ts";
 import type { AgentId, Appended, DeliveredAttachment } from "./sandbox.ts";
 
@@ -17,6 +17,7 @@ type TurnEventBase = TurnLineBase & {
   /** The backend's order; what `reply`'s `in_reply_to` takes. */
   seq: number;
   delivery: Delivery;
+  answer_via?: AnswerVia;
   /** The occurrence time as delivered by the backend. */
   occurred_at: string;
   summary: string;

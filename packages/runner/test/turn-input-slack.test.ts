@@ -202,8 +202,14 @@ test("a drawing that fails leaves the events as they would come without it", asy
   const message = said({ seq: 1, minute: 0, text: "hello" });
   const root = await sources([message]);
   const slack = drawing(root, { timeZone: "Not/A_Zone" });
-  const [one, batch] = lines(formatEvents([delivered(message, "now", 1), delivered({ ...message, seq: 2 }, "batch", 2)], slack));
+  const answer_via = { command: "slackctl post" };
+  const [one, batch] = lines(formatEvents([
+    { ...delivered(message, "batch", 1), answer_via },
+    delivered({ ...message, seq: 2 }, "batch", 2),
+  ], slack));
   assert.equal(one!.text, "hello");
+  assert.ok(one && one.kind === undefined);
+  assert.deepEqual(one.answer_via, answer_via);
   assert.equal(batch!.kind, "batch");
   assert.equal(batch!.text, undefined);
   assert.deepEqual(batch!.seqs, [2]);

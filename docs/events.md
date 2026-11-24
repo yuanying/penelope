@@ -20,6 +20,7 @@ receivers のプラグインが封筒を作る形は [receivers.md](receivers.md
 | `summary` | ○ | 1 行の要約。人とモデルが読む |
 | `stream` | | `/sources/<source>/` の中の分け先（Slack のチャンネルなど） |
 | `delivery` | | `now` か `batch`。省けば受信元の既定（下の「`delivery`」） |
+| `answer_via` | | 返事をするなら使う口（下の「`answer_via`」）。`delivery` とは独立 |
 | `payload` | ○ | 受信元の中身そのまま（任意の JSON）。backend は形を知らない |
 
 backend は受けたときに、単調増加の整数 `seq` と、受けた時刻 `received_at` を付ける。順番は `seq` の順である。
@@ -37,6 +38,14 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - `batch`: `/sources` にはすぐ書くが、ターンへはまとめて後で渡す。`now` の出来事が来たら、それと一緒に渡す。いつ渡すかは backend が決める（下の「いつ渡すか」）。
 - **決めるのは受信元の側だけ**である。receivers のプラグインは自分の設定（例: Slack ならメンションと DM は `now`）に従って出来事ごとに付ける。backend はそれを上書きしない。
 - 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`）は backend の設定で決め、既定はどれも `now`。`control` と `heartbeat` は常に `now`。
+
+### `answer_via`
+
+[ADR-0060](adr/0060-answer-through-the-event-source.md) の答える口は、`{"tool":"…"}`（道具の名前）か `{"command":"…"}`（シェルコマンドの先頭）のどちらか一つ。値は空白だけではない文字列で、追加の欄（宛先・引数・本文など）は認めない。
+
+- backend は Web UI の発言（`ui`）には `{"tool":"reply"}`、A2A の依頼と聞き返しへの答え（`a2a`）には `{"tool":"reply_to_agent"}` を付ける。ほかの受信元は、出来事を作るプラグインが返事を想定するものにだけ付ける。
+- 外から届いた本文や `payload` の同名の欄はヒントにしない。ヒントには権限も宛先もなく、runner が実行することもない。送る場合は既存の権限と失敗時の扱いに従い、宛先が確かでなければ推測で送らない。
+- A2A で答えないと決めたときは、エージェントが出来事の `seq` を指定し、本文・画像なしの `completed` で Task を閉じる（[sandbox-api.md](sandbox-api.md#a2a-の-task-に返す)）。runner は代わりに閉じない。
 
 ### `inline`
 
@@ -89,6 +98,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 | `POST /v1/events` | body は封筒の JSON（`Content-Type: application/json`）。添付があるときは `multipart/form-data` で、封筒の JSON の部分と、ファイルの部分を並べる |
 
 - multipart では、封筒は `event` の部分（文字の欄でも、JSON のファイルでもよい）、ファイルは `file` の部分を繰り返す。ファイルの名前は部分の filename である。
+- JSON と multipart のどちらも、封筒の `answer_via` が不正なら `400` で断る。
 - 大きさの上限は、封筒とファイルを合わせた body の全体で 64 MiB。
 - backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
 
@@ -112,6 +122,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 | --- | --- |
 | `seq`・`received_at` | backend が付けたもの |
 | `occurred_at`・`source`・`stream`・`id`・`summary` | 封筒のもの（`stream` は無ければ省く） |
+| `answer_via` | 封筒の値そのまま（無ければ省く。古い記録にも補わない） |
 | `attachments` | 添付のパスの一覧（無ければ省く） |
 | `payload` | 封筒の `payload` そのまま |
 
@@ -151,6 +162,7 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `delivery` | `now` か `batch` |
 | `occurred_at` | 配送時の値をそのまま載せる（[sandbox-api.md](sandbox-api.md) の「出来事を取る」） |
 | `summary` | 封筒のもの |
+| `answer_via` | 封筒にあれば、そのまま載せる |
 | `text` | inline の出来事だけ。`payload` の `text`（文字列）。無ければ `payload` を JSON にした文字列 |
 | `appended` | inline でない出来事だけ。中身を足した場所。`path` と `lines`（`[from, to]`、1 始まり・両端を含む） |
 | `attachments` | 添付があるときだけ。1 件は `path`・`mime_type`・`size`（sandbox 向けの口の添付と同じ） |
@@ -175,7 +187,7 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 
 ### `batch` のまとめ
 
-一度に渡された `batch` の出来事（inline でないもの）は、受信元と `stream` ごとに 1 行にまとめる。
+一度に渡された `batch` の出来事（inline でないもの）は、受信元と `stream` ごとに 1 行にまとめる。ただし `answer_via` がある出来事は `seq` と答える口が対応するよう個別の行にする。配送の待ち方は変えない。
 
 | 欄 | 中身 |
 | --- | --- |
@@ -201,13 +213,19 @@ Slack のプラグインの出来事は、runner が `packages/slack` の描き�
 
 - 描くのは、その受信元の **inline の出来事だけ**である。backend の `PENELOPE_INLINE_SOURCES`（[backend.md](backend.md)）に無ければ、ほかの受信元と同じ形（要約と場所）で入る。
 - `now` の出来事は、ひとつの出来事の行のままで、`text` が描いた文になる。変化の前の発言を 3 件まで、`(earlier)` の付いた 1 行で添える（スレッドの返信なら、同じスレッドの前の返信）。`appended` は持たず、`attachments` は持つ。
-- `batch` の出来事は、受信元と `stream` ごとに 1 行のまとめになり、`text` に描いた文を持つ。前の発言は添えない（返信の親とリアクションの付いた発言だけを `(earlier)` で添える）。`count`・`seqs`・`summary`・`appended` は、省いた分も含めて、まとめた出来事すべてのものである。
+- `batch` の出来事は、`answer_via` があるものを除き、受信元と `stream` ごとに 1 行のまとめになり、`text` に描いた文を持つ。前の発言は添えない（返信の親とリアクションの付いた発言だけを `(earlier)` で添える）。`count`・`seqs`・`summary`・`appended` は、省いた分も含めて、まとめた出来事すべてのものである。
 - 同じ入力に `now` と `batch` が来たら、行はそれぞれの形で並ぶ。`batch` で描いた発言が、`now` の行に `(earlier)` で重ねて出ることがある。
 - 描くために、runner は変化の `stream` の `/sources` のファイルを、いちばん早い変化を受けた日（UTC）の前の日のものから読む。それより前の親やリアクションの付いた発言は `(not read)` と描く。
 - 時刻は runner の時間帯（`TZ`、無ければ UTC）で描く。
 - 量の上限を超えたら、上限を行に分ける。上限を行の数で等分した字数に収まる行はそのまま、残りの字数を長い行で分ける。行の中では古い変化から省き、`(<数> earlier changes left out; slackctl history <stream>)` を添える（`source` が `slack` でなければ `--source <source>` が入る）。1 つの変化だけでも収まらないときは、終わりを切って `…` にする。
-- 描けないとき（`payload` が描き方の知らない形、`stream` が無い、`/sources` のその `stream` の場所が読めない）は、その出来事を、ふつうの inline の出来事の行（`payload` の `text`、無ければ JSON）にする。`batch` でもまとめずに 1 件 1 行になる。runner のログに `slack: event <seq> of <source>/<stream> is not drawn: <理由>` を書く（本文は書かない）。描く途中で失敗したときは、その入力の描く出来事をどれも描かずに入れる（`now` はふつうの inline の行、`batch` は `text` の無いまとめ）。ログには `seq` の一覧と理由を書く。
+- 描けないとき（`payload` が描き方の知らない形、`stream` が無い、`/sources` のその `stream` の場所が読めない）は、その出来事を、ふつうの inline の出来事の行（`payload` の `text`、無ければ JSON）にする。`batch` でもまとめずに 1 件 1 行になる。runner のログに `slack: event <seq> of <source>/<stream> is not drawn: <理由>` を書く（本文は書かない）。描く途中で失敗したときは、その入力の描く出来事をどれも描かずに入れる（個別の出来事はふつうの inline の行で、`answer_via` があれば残す。まとめは `text` なし）。ログには `seq` の一覧と理由を書く。
 - 添付の画像は、ほかの inline の出来事と同じく、画像としても載る（上の「ひとつの出来事」。`batch` の出来事の画像も、1 つの入力に 4 枚までのうちに入る）。
+
+### 送信を試みなかった場合の念押し
+
+本体の日中の出来事のターンで、`answer_via` のある出来事が実際に入り（steer・follow-up を含む）、処理が正常に終わって最後のアシスタントメッセージに文があり、どの口も試みていなければ、runner は同じターンの続きとして一度だけ知らせる。畳む前の聞き取りとは別で、停止中や夜の各段、サブエージェントには入れない。道具名の一致、または `bash`・`job_start` に指定のコマンドの先頭が現れたこと（パイプの後ろも含む）を試みとして扱う。成否と宛先は調べない。
+
+続きは新しい出来事ではなく、通常の道具を使って送るか、そのまま終えるかをエージェントが選ぶ。runner は、ターンの終了・記憶のコミット・ack より前にこの続きまで処理し、その間に届いた出来事は次のターンに回す。runner のログには対象の `seq` と `source`、続きで送信を試みたか、道具の呼び出し回数、終わり方を 1 行に残す。本文や引数は残さない。
 
 ### 畳んだ後
 

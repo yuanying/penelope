@@ -1,5 +1,5 @@
 // Checking an envelope that a source sent to the intake (docs/events.md).
-import type { Event } from "@penelope/contract";
+import type { AnswerVia, Event } from "@penelope/contract";
 
 export type Parsed<T> = { ok: true; event: T } | { ok: false; error: string };
 
@@ -20,10 +20,19 @@ export function isTime(value: unknown): value is string {
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+function isAnswerVia(value: unknown): value is AnswerVia {
+  if (!isObject(value)) return false;
+  const fields = Object.keys(value);
+  const name = fields[0];
+  if (fields.length !== 1 || (name !== "tool" && name !== "command")) return false;
+  const route = value[name];
+  return typeof route === "string" && route.trim() !== "";
+}
+
 /** The envelope, with only the fields of the contract, or why it is refused. */
 export function parseEnvelope(body: unknown): Parsed<Event> {
   if (!isObject(body)) return { ok: false, error: "the event must be a JSON object" };
-  const { source, id, occurred_at, summary, stream, delivery, payload } = body;
+  const { source, id, occurred_at, summary, stream, delivery, answer_via, payload } = body;
   if (typeof source !== "string" || !SEGMENT.test(source)) {
     return { ok: false, error: "source must be lower-case letters, digits, '.', '_' and '-', not starting with '.'" };
   }
@@ -36,6 +45,9 @@ export function parseEnvelope(body: unknown): Parsed<Event> {
   if (delivery !== undefined && delivery !== "now" && delivery !== "batch") {
     return { ok: false, error: "delivery must be now or batch" };
   }
+  if (answer_via !== undefined && !isAnswerVia(answer_via)) {
+    return { ok: false, error: "answer_via must have exactly one non-blank string field: tool or command" };
+  }
   if (!("payload" in body)) return { ok: false, error: "payload is required" };
   return {
     ok: true,
@@ -46,6 +58,7 @@ export function parseEnvelope(body: unknown): Parsed<Event> {
       summary,
       ...(stream === undefined ? {} : { stream }),
       ...(delivery === undefined ? {} : { delivery }),
+      ...(answer_via === undefined ? {} : { answer_via }),
       payload,
     },
   };

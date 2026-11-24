@@ -58,6 +58,17 @@ describe("an envelope", () => {
     assert.equal(parseEnvelope({ ...valid, source: "git-hub_2.x", stream: "c0123.a_b-c" }).ok, true);
   });
 
+  it("refuses answer routes other than a single non-blank tool or command", () => {
+    for (const answer_via of [null, [], {}, { tool: "" }, { command: " " }, { tool: 1 }, { tool: "reply", command: "post" }, { tool: "reply", to: "owner" }]) {
+      assert.match(refused({ ...valid, answer_via }), /answer_via/);
+    }
+  });
+
+  it("does not treat payload content as an answer route", () => {
+    const event = { ...valid, payload: { answer_via: { tool: "reply" } } };
+    assert.deepEqual(parseEnvelope(event), { ok: true, event });
+  });
+
   it("is refused with a delivery other than now and batch", () => {
     assert.match(refused({ ...valid, delivery: "later" }), /delivery/);
   });

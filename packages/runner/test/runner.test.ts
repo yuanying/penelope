@@ -440,14 +440,15 @@ const nightWrites =
   };
 
 test("the nightly event runs reflection, verifier and curator in separate contexts before starting the new session", async () => {
-  const { fake, start, calls, config } = await world();
+  const { fake, start, calls, config, logs } = await world();
   await start(nightWrites(config));
-  fake.push(ui(1, "a day's talk"));
+  fake.push({ ...ui(1, "a day's talk"), answer_via: { tool: "reply" } });
   await until(() => acked(fake).includes(1));
   const sessionsBefore = await readdir(config.sessionDir);
   fake.push(nightly(2));
   await until(() => acked(fake).includes(2));
 
+  assert.equal(logs.filter((line) => line.startsWith("answer reminder: ")).length, 1, "only the daytime turn is reminded");
   assert.equal(await readFile(join(config.memoryDir, "handoff.md"), "utf8"), "明日は版上げ。\n");
   assert.equal(await readFile(join(config.memoryDir, "INDEX.md"), "utf8"), "# index\n");
 

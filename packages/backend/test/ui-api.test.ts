@@ -546,6 +546,7 @@ describe("the UI's API", () => {
       assert.equal(event?.summary, "hello");
       assert.equal(event?.delivery, "now");
       assert.deepEqual(event?.inline && event.payload, { text: "hello\nmore" });
+      assert.deepEqual(event?.answer_via, { tool: "reply" });
       assert.deepEqual(env.conversation.page().entries.map((e) => [e.kind, e.id, e.text]), [["owner", id, "hello\nmore"]]);
     });
 

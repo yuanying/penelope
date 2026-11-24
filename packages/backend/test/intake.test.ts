@@ -93,10 +93,11 @@ describe("the intake", () => {
     assert.deepEqual(queue.take({ after: 0 }), []);
   });
 
-  it("takes a multipart body with the envelope in `event` and files in `file`", async (t) => {
+  it("preserves a multipart envelope's answer route alongside its files", async (t) => {
     const { queue, target, sourcesDir } = await setup(t);
+    const answer_via = { command: "notify post" };
     const { body, contentType } = await multipart([
-      ["event", JSON.stringify(envelope)],
+      ["event", JSON.stringify({ ...envelope, answer_via })],
       ["file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])]), "graph.png"],
       ["file", new Blob(["log"], { type: "text/plain" }), "alert.log"],
     ]);
@@ -108,6 +109,7 @@ describe("the intake", () => {
       { path: path.join(sourcesDir, "alertmanager/files/1-alert.log"), mime_type: "text/plain", size: 3 },
     ]);
     assert.equal(readFileSync(taken!.attachments![1]!.path, "utf8"), "log");
+    assert.deepEqual(taken?.answer_via, answer_via);
   });
 
   it("takes the envelope of a multipart body as a JSON file part too", async (t) => {

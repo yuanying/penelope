@@ -119,21 +119,13 @@ test("the request before folding names no way to answer it", () => {
 });
 
 test("the system prompt says what the fields of <events> are", async () => {
-  // Guards against: an input of JSON lines whose fields she has to guess, such as which number `reply` answers to.
+  // Guards against: an input of JSON lines whose fields she has to guess.
   const places = await memory({});
   const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
   assert.match(prompt, /<events>/);
-  for (const field of ["seq", "source", "stream", "delivery", "occurred_at", "summary", "text", "attachments", "appended", "kind", "count", "seqs", "in_reply_to"]) {
+  for (const field of ["seq", "source", "stream", "delivery", "occurred_at", "summary", "text", "attachments", "appended", "kind", "count", "seqs", "answer_via"]) {
     assert.ok(prompt.includes(`\`${field}\``), field);
   }
-});
-
-test("the system prompt says that other agents ask over A2A and how they are answered", async () => {
-  // Guards against: an \`a2a\` event she cannot tell from the others, or an agent answered with \`reply\`, which only her owner reads.
-  const places = await memory({});
-  const prompt = systemPrompt(identity, places, await readPromptFiles(places.memory, 1000));
-  assert.ok(prompt.includes("`a2a`"));
-  assert.ok(prompt.includes("`reply_to_agent`"));
 });
 
 test("the system prompt says what a heartbeat event is, and nothing of what to do with it", async () => {

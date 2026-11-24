@@ -9,6 +9,7 @@ import { test } from "node:test";
 
 import type { SelfEventRequest, SubAgentStatus, TurnEndRequest, TurnEvent } from "@penelope/contract";
 
+import { formatEvents } from "../src/turn-input.ts";
 import { type FakeBackend, until } from "./fake-backend.ts";
 import { OTHER_MODEL, PROVIDER, type Answer, type Call, type Script } from "./fake-model.ts";
 import { acked, activities, heartbeat, ui, world } from "./world.ts";
@@ -75,7 +76,8 @@ test("a sub-agent runs in the background, and its last words reach the main agen
       return { text: "Found 3 alerts.\nThe details are in ~/agents/alerts/report.md." };
     }),
   );
-  const started = await ask(fake, "subagent_start", { name: "alerts", purpose: "Look at the alerts", prompt: "Look at the alerts of today." });
+  const prompt = formatEvents([{ ...ui(1, "Look at the alerts of today."), answer_via: { tool: "reply" } }]);
+  const started = await ask(fake, "subagent_start", { name: "alerts", purpose: "Look at the alerts", prompt });
   // Guards against: a start that waits for the sub-agent to finish, so the main agent cannot answer meanwhile.
   assert.equal(started.is_error, false, started.output);
   assert.equal(notices(fake).length, 0, "the main turn ended while the sub-agent was still running");
@@ -96,7 +98,7 @@ test("a sub-agent runs in the background, and its last words reach the main agen
       payload: { reason: "stopped", purpose: "Look at the alerts", text: "Found 3 alerts.\nThe details are in ~/agents/alerts/report.md." },
     },
   ]);
-  assert.deepEqual(subCalls(calls, "Look at the alerts of today.").length, 1, "the first request reached the sub-agent as it was");
+  assert.equal(subCalls(calls, prompt).length, 1, "an event quoted in a delegation does not trigger a reminder");
 
   // Its activities and the end of its turn are sent as its own, the activity's turn_end before the turn's end.
   const own = activities(fake, "alerts");

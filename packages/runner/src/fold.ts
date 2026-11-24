@@ -17,6 +17,8 @@ type Block = Assistant["content"][number];
 type ToolCall = Extract<Block, { type: "toolCall" }>;
 type ToolResult = Extract<AgentMessage, { role: "toolResult" }>;
 
+import { ANSWER_REMINDER } from "./answer-reminder.ts";
+
 /** The custom message that marks the end of a turn. It has no content. */
 export const TURN_END = "penelope.turn_end";
 /** The custom message that asks, before a turn is folded, for what she wants to keep. */
@@ -65,7 +67,7 @@ function foldTurn(turn: AgentMessage[]): AgentMessage[] {
   for (const message of turn) if (message.role === "toolResult") results.set(message.toolCallId, message);
   const out: AgentMessage[] = [];
   for (const message of turn) {
-    if (message.role === "toolResult" || isCustom(message, FOLD_ASK)) continue;
+    if (message.role === "toolResult" || isCustom(message, FOLD_ASK) || isCustom(message, ANSWER_REMINDER)) continue;
     if (message.role !== "assistant") {
       out.push(message);
       continue;

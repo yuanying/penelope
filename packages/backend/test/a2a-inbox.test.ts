@@ -59,6 +59,7 @@ describe("the A2A inbox", () => {
       assert.equal(event.stream, "claude");
       assert.equal(event.delivery, "now");
       assert.equal(event.summary, "Look at the alerts.");
+      assert.deepEqual(event.answer_via, { tool: "reply_to_agent" });
       const [line] = lines(path.join(sourcesDir, "a2a", "claude", "2026-11-14.jsonl"));
       assert.equal(line.seq, event.seq);
       assert.deepEqual(line.payload, {
@@ -180,6 +181,7 @@ describe("the A2A inbox", () => {
       const [answer] = queue.take({ after: request!.seq });
       assert.ok(answer);
       assert.equal(answer.stream, "claude");
+      assert.deepEqual(answer.answer_via, { tool: "reply_to_agent" });
       // Her reply can name either event of the task.
       assert.equal(inbox.reply({ in_reply_to: answer.seq, state: "completed", text: "Restarted." }).task_id, task.taskId);
       assert.deepEqual(

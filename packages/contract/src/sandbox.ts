@@ -1,7 +1,7 @@
 // The backend's API for the sandbox: the runner and the tools, through the
 // Sentinel (docs/sandbox-api.md).
 
-import type { Delivery, Source } from "./events.ts";
+import type { AnswerVia, Delivery, Source } from "./events.ts";
 import type { HeartbeatPending } from "./heartbeat.ts";
 
 /** Which agent is calling. The main agent is `main`; a sub-agent's is the name its parent gives it. */
@@ -59,6 +59,7 @@ type DeliveredBase = {
   received_at: string;
   summary: string;
   delivery: Delivery;
+  answer_via?: AnswerVia;
   /** Where its payload was written. */
   appended: Appended;
   /** Files that came with it, under /sources/<source>/files/. */

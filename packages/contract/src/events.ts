@@ -16,6 +16,9 @@ export type Source = BuiltinSource | (string & {});
  */
 export type Delivery = "now" | "batch";
 
+/** An optional hint for answering an event, not a destination or a grant of permission. */
+export type AnswerVia = { tool: string; command?: never } | { command: string; tool?: never };
+
 /** What a source sends to the intake. */
 export type Event = {
   /** The source's name. */
@@ -34,6 +37,7 @@ export type Event = {
   stream?: string;
   /** Left out, it is the source's default (batch for receivers' plugins). */
   delivery?: Delivery;
+  answer_via?: AnswerVia;
   /** The source's content as it is, any JSON. The backend appends it to /sources as part of one line. */
   payload: unknown;
 };
@@ -51,6 +55,7 @@ export type SourcesLine = {
   stream?: string;
   id: string;
   summary: string;
+  answer_via?: AnswerVia;
   /** Files that came with it, under /sources/<source>/files/. */
   attachments?: string[];
   payload: unknown;

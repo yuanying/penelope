@@ -71,7 +71,7 @@ function countLines(file: string): number {
 
 /** The fields in the order docs/events.md lists them, the payload last. */
 function ordered(line: SourcesLine): SourcesLine {
-  const { seq, received_at, occurred_at, source, stream, id, summary, attachments, payload } = line;
+  const { seq, received_at, occurred_at, source, stream, id, summary, answer_via, attachments, payload } = line;
   return {
     seq,
     received_at,
@@ -80,6 +80,7 @@ function ordered(line: SourcesLine): SourcesLine {
     ...(stream === undefined ? {} : { stream }),
     id,
     summary,
+    ...(answer_via === undefined ? {} : { answer_via }),
     ...(attachments === undefined ? {} : { attachments }),
     payload,
   };

@@ -82,7 +82,7 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
     name: "reply_to_agent",
     label: "Reply to an agent",
     description:
-      "Answer another agent in the A2A task of an `a2a` event. The event's stream is the agent's name, and its payload has the agent's text and the task. `completed` closes the task with optional text and images as its answer. `input-required` asks the agent the text and keeps the task open; the agent's answer comes as another `a2a` event of the same task. The agent fetches what you send from its task; your owner does not see it. A task the agent has not written to within the backend's deadline fails, and can no longer be answered.",
+      "Answer another agent in the A2A task of an `a2a` event. The event's stream is the agent's name, and its payload has the agent's text and the task. `completed` closes the task with optional text and images as its answer. To close the task without answering, use `completed` without text or images. `input-required` asks the agent the text and keeps the task open; the agent's answer comes as another `a2a` event of the same task. The agent fetches what you send from its task; your owner does not see it. A task the agent has not written to within the backend's deadline fails, and can no longer be answered.",
     parameters: Type.Object({
       in_reply_to: Type.Integer({ description: "The seq of an `a2a` event of the task." }),
       state: Type.Union([Type.Literal("completed"), Type.Literal("input-required")], {

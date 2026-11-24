@@ -336,6 +336,10 @@ export const MIGRATIONS: readonly string[] = [
     snapshot TEXT NOT NULL
   );
   `,
+  `
+  -- Optional answer route (ADR-0060). Existing events have no route.
+  ALTER TABLE events ADD COLUMN answer_via TEXT;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

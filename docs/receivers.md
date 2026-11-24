@@ -127,7 +127,7 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 
 - 1 回の要求（ヘッダーと body のバイト列）を受けて、次のどちらかを返す。
   - 断る: 応答の番号（`400` か `401`）。出来事は作らない。`400` には、本体がログに書く理由を付ける。理由は欄の名前と外れ方だけで、body の中身を写さない。
-  - 受ける: 出来事の一覧（0 件でもよい）と、捨てたものの数と、本体がログに書く行（Alertmanager の `truncatedAlerts` など。0 行でもよい）。出来事は封筒の `source` を除くすべての欄（`id`・`occurred_at`・`summary`・`stream`・`delivery`・`payload`）を持つ。
+  - 受ける: 出来事の一覧（0 件でもよい）と、捨てたものの数と、本体がログに書く行（Alertmanager の `truncatedAlerts` など。0 行でもよい）。出来事は封筒の `source` を除くすべての欄（`id`・`occurred_at`・`summary`・`stream`・`delivery`・`answer_via`・`payload`）を持つ。
 - 要求には、本体が受けた時刻を付けて渡す。プラグインは時計を読まない。
 - プラグインは取り込み口にも網にも触れない。要求から封筒を作るだけなので、HTTP のサーバーも socket も無しでテストできる。
 
@@ -144,7 +144,7 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 - 本体が止めるとき、プラグインは新しい出来事を受けるのをやめ、手元の出来事を送り終えてから接続を閉じる。
 - 取り込み口が受けなかった出来事は、本体が webhook と同じ形の 1 行を書く: `receivers: connection=<name> intake did not take <source>/<id>: <理由>`。
 
-封筒の欄の型は `packages/contract` の `src/events.ts` の `Event` に従う。
+封筒の欄の型は `packages/contract` の `src/events.ts` の `Event` に従う。返事を想定する出来事には、プラグインが使う口を `answer_via` に指定できる（[events.md](events.md#answer_via)）。外から届く本文や `payload` の同名の欄を封筒に写さない。
 
 ## Alertmanager のプラグイン
 
@@ -408,6 +408,7 @@ Slack の Socket Mode で、1 つ以上のワークスペースの発言・編�
 | `occurred_at` | 発言は `ts` の時刻。ほかは封筒の `event_time`、無ければ受けた時刻 |
 | `stream` | チャンネルは `<ワークスペース>.<チャンネルの名前>`、DM は `<ワークスペース>.dm.<相手のユーザー名>`。上の「`stream` の写し方」で写す（`work.dev`、`work.dm.alice`）。チャンネルの名前が分からなければ ID を使う |
 | `delivery` | 下の「`delivery`」 |
+| `answer_via` | `now` の発言だけ `{"command":"slackctl post"}`。それ以外は省く |
 | `summary` | 下の「`summary` の形」 |
 | `payload` | 下の「`payload`」 |
 
@@ -419,7 +420,7 @@ Slack の Socket Mode で、1 つ以上のワークスペースの発言・編�
 - 発言が `now` になるのは、エージェント自身の発言でなく、次のどれかに当たるとき: bot へのメンション（本文に `<@bot のユーザー ID>` がある）、DM（`im`）、`now_channels` のチャンネル。
 - ほかの発言、編集・削除・リアクションは、すべて `batch`。いつも明示する。
 - グループ DM はメンションのときだけ `now` である。
-- 取り直しで届いた発言も、同じ決め方をする。backend に既にあれば重複として落ちるので、ターンには入らない。
+- 取り直しで届いた発言も、`delivery` と `answer_via` を同じ決め方で付ける。backend に既にあれば重複として落ちるので、ターンには入らない。
 
 #### `summary` の形
 
@@ -534,6 +535,7 @@ Slack の出来事をターンに描いて載せるには、配置が、この�
 - 本文は標準入力を UTF-8 として読み、末尾の空白と改行を除いて、そのまま送る（複数行も Slack の記法もそのまま）。画像だけを送るときは標準入力を空にする（`</dev/null`）。本文も画像も無ければ書き方の誤りである。
 - `--channel` はチャンネルの ID（`C…`・`G…`・`D…`）か名前（`#` は付けても付けなくてもよい）。名前は `users.conversations` で、bot の入っている公開・非公開のチャンネルから探す。DM は ID で書く（読み取りの見出しの `channel <ID>`）。
 - `--thread` はスレッドの親の発言の `ts`。本文も画像もそのスレッドに入る。
+- 出来事に答えるときは、元のワークスペース・チャンネル（DM を含む）に返す。スレッド内の発言には同じスレッドで返す。宛先が確かでないときは推測で送らない。
 - `--image` は何度でも書ける。画像は Slack の 3 段で送る: `files.getUploadURLExternal`（`filename` と `length`）→ 返った `upload_url` へ中身を POST（`application/octet-stream`、`Authorization` を付けない）→ 全部を 1 回の `files.completeUploadExternal` で、本文と同じチャンネル（とスレッド）に共有する。本文があれば、画像は本文の後の別の投稿になる。
 - `--face` を書くと、表情の画像の URL を、本文の投稿と画像の共有の `icon_url` に入れる。URL は `PENELOPE_PUBLIC_URL` の `/api/agent`（ログインなし）が返す表情の道（[ui-api.md](ui-api.md) の「エージェント」、画像の拡張子で終わる）で、Slack はそれを外から取りにくる。表情の PNG（`png_icons`）があればその道、無ければ Web UI と同じ画像の道（`icons`）を使う。`PENELOPE_SLACK_ICON_BASE_URL` があるときは、その下の `<表情>.png` を使う（backend に Slack が届かない配置のため。表情の名前は backend から読む）。投稿の名前は変えない。
 

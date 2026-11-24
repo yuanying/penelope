@@ -210,7 +210,10 @@ export function uiHandler(options: UiOptions): Handler {
         try {
           files = conversation.ownerMessage({ id, text, files: attachments }, () =>
             queue.accept(
-              { source: "ui", id, occurred_at: iso(now()), summary: summaryOf(text, attachments.length), payload: { text } },
+              {
+                source: "ui", id, occurred_at: iso(now()), summary: summaryOf(text, attachments.length),
+                answer_via: { tool: "reply" }, payload: { text },
+              },
               { builtin: true, attachments },
             ),
           );

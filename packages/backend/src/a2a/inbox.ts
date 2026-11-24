@@ -233,6 +233,7 @@ export class Inbox {
         id: `${payload.task_id}/${messages + 1}`,
         occurred_at: iso(now),
         summary: first.length > SUMMARY_LENGTH ? `${first.slice(0, SUMMARY_LENGTH)}…` : first,
+        answer_via: { tool: "reply_to_agent" },
         payload,
       },
       { builtin: true, attachments },

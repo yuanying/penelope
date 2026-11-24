@@ -158,8 +158,11 @@ export class Workspace {
     };
     const nowChannel = this.options.nowChannels.includes(where.channel.name) || this.options.nowChannels.includes(where.channel.id);
     const delivery = !said.fields.own && (mention || where.channel.type === "im" || nowChannel) ? "now" : "batch";
-    const made = this.envelope(`${this.options.name}/${channelId}/${ts}`, new Date(Number(ts) * 1000), where, `${said.who}: ${said.plain}`, delivery, payload);
-    return files.attached.length > 0 ? { ...made, files: files.attached } : made;
+    return {
+      ...this.envelope(`${this.options.name}/${channelId}/${ts}`, new Date(Number(ts) * 1000), where, `${said.who}: ${said.plain}`, delivery, payload),
+      ...(delivery === "now" ? { answer_via: { command: "slackctl post" } } : {}),
+      ...(files.attached.length > 0 ? { files: files.attached } : {}),
+    };
   }
 
   private envelope(id: string, at: Date, where: Known, what: string | undefined, delivery: "now" | "batch", payload: SlackPayload, after = ""): ConnectionEvent {

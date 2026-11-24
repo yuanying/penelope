@@ -69,6 +69,17 @@ function lines(input: string): TurnLine[] {
   return match[1]!.split("\n").map((line) => JSON.parse(line) as TurnLine);
 }
 
+test("a non-inline batch event with an answer route keeps its own seq and route", () => {
+  const answer_via = { command: "slackctl post" };
+  const [target, rest] = lines(formatEvents([
+    { ...mention, delivery: "batch", answer_via },
+    batch(14, "ops", mention.appended.path, 4),
+  ]));
+  assert.deepEqual(target, { seq: 12, source: "slack", stream: "ops", delivery: "batch",
+    occurred_at: mention.occurred_at, summary: mention.summary, answer_via, appended: mention.appended });
+  assert.deepEqual(rest?.kind === "batch" && rest.seqs, [14]);
+});
+
 test("the input is one JSON object a line inside <events>", () => {
   // Guards against: an input she cannot read line by line, such as a text that spans lines unescaped.
   const input = formatEvents([mention, ui]);

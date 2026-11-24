@@ -445,7 +445,8 @@ describe("the Pod end to end", () => {
     await sleep(3000);
     assert.equal((await callsFor("/sources/e2e/feed/")).length, 0);
 
-    const now = { source: "e2e", stream: "feed", id: "now-1", occurred_at: new Date().toISOString(), summary: "E2E-NOW ping", delivery: "now", payload: { n: 2 } };
+    const answer_via = { tool: "reply" };
+    const now = { source: "e2e", stream: "feed", id: "now-1", occurred_at: new Date().toISOString(), summary: "E2E-NOW ping", delivery: "now", answer_via, payload: { n: 2 } };
     assert.equal(intake(now), "202");
     await replied("E2E-REPLY-EVENTS");
     // Both reach one turn as lines of its <events>, each pointing at where it was appended
@@ -468,6 +469,9 @@ describe("the Pod end to end", () => {
       ["e2e", "feed", 1, "E2E-BATCH one", [{ path: file, lines: [1, 1] }]],
     );
     assert.ok(batchLine.seqs[0]! < nowLine.seq, "the batch came before the now");
+    assert.deepEqual(nowLine.answer_via, answer_via, "the intake preserves the answer route through to the model");
+    const saved = exec("sandbox", `tail -n 1 ${file}`).stdout;
+    assert.deepEqual(JSON.parse(saved).answer_via, answer_via);
   }));
 
   it("takes Alertmanager's webhook in the receivers, and brings a critical alert into a turn", track(async () => {

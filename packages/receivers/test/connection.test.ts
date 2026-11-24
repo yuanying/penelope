@@ -86,15 +86,15 @@ test("each event it hands over goes to the intake with the activation's source, 
   try {
     assert.ok(state.io, "started");
     const taken = await state.io.deliver([
-      { ...EVENT, files: [{ name: "a.png", type: "image/png", data: new Uint8Array([1, 2, 3]) }] },
-      { ...EVENT, id: "work/C0DEV/1794819600.000200" },
+      { ...EVENT, answer_via: { command: "slackctl post" }, files: [{ name: "a.png", type: "image/png", data: new Uint8Array([1, 2, 3]) }] },
+      { ...EVENT, id: "work/C0DEV/1794819600.000200", delivery: "batch" },
     ]);
     assert.equal(taken, true);
     assert.deepEqual(
-      received.map(({ type, event }) => [type.split(";")[0], event.source, event.id]),
+      received.map(({ type, event }) => [type.split(";")[0], event.source, event.id, event.answer_via]),
       [
-        ["multipart/form-data", "slack-work", "work/C0DEV/1794819600.000100"],
-        ["application/json", "slack-work", "work/C0DEV/1794819600.000200"],
+        ["multipart/form-data", "slack-work", "work/C0DEV/1794819600.000100", { command: "slackctl post" }],
+        ["application/json", "slack-work", "work/C0DEV/1794819600.000200", undefined],
       ],
     );
     assert.equal("files" in received[0]!.event, false);

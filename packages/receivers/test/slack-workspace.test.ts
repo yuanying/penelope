@@ -152,23 +152,23 @@ describe("a message", () => {
   test("that mentions the bot is now, and so is a DM, but never the agent's own", async () => {
     const ws = workspace();
     const mention = await eventsOf(ws, callback(said("<@U0SELF> help")));
-    assert.equal(mention.events[0]!.delivery, "now");
+    assert.deepEqual([mention.events[0]!.delivery, mention.events[0]!.answer_via], ["now", { command: "slackctl post" }]);
     assert.equal((mention.events[0]!.payload as { mention: boolean }).mention, true);
 
     const dm = await eventsOf(ws, callback(said("psst", { channel: "D0ALICE", channel_type: "im" })));
-    assert.equal(dm.events[0]!.delivery, "now");
+    assert.deepEqual([dm.events[0]!.delivery, dm.events[0]!.answer_via], ["now", { command: "slackctl post" }]);
     assert.equal(dm.events[0]!.stream, "work.dm.alice");
     assert.deepEqual((dm.events[0]!.payload as { channel: unknown }).channel, { id: "D0ALICE", name: "Alice A.", type: "im" });
     assert.equal(dm.events[0]!.summary, "work DM with Alice A. Alice A.: psst");
 
     const own = await eventsOf(ws, callback(said("on it", { channel: "D0ALICE", channel_type: "im", user: "U0SELF", bot_id: "B0SELF" })));
-    assert.equal(own.events[0]!.delivery, "batch");
+    assert.deepEqual([own.events[0]!.delivery, own.events[0]!.answer_via], ["batch", undefined]);
     assert.equal((own.events[0]!.payload as { own: boolean }).own, true);
   });
 
   test("in a channel of now_channels is now", async () => {
     const { events } = await eventsOf(workspace(), callback(said("disk full", { channel: "C0OPS" })));
-    assert.equal(events[0]!.delivery, "now");
+    assert.deepEqual([events[0]!.delivery, events[0]!.answer_via], ["now", { command: "slackctl post" }]);
   });
 
   test("in a thread carries its parent's ts, and a private channel is a group", async () => {
@@ -358,6 +358,7 @@ describe("the fill-in after a (re)connection", () => {
         [["work/D0ALICE/1794819800.000100", "now", true]],
       ],
     );
+    assert.deepEqual(delivered.flat().map((event) => event.answer_via), [undefined, { command: "slackctl post" }, { command: "slackctl post" }]);
     assert.deepEqual((delivered[0]![0]!.payload as { reactions: unknown }).reactions, [{ name: "eyes", users: [{ id: "U0BOB", name: "Bob B." }], count: 1 }]);
     assert.ok(api.calls.includes(`conversations.history C0DEV ${oldest}`));
     assert.ok(api.calls.includes(`conversations.replies C0DEV ${TS} ${oldest}`));

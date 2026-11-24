@@ -3,7 +3,7 @@
 // runner has acked.
 import type { DatabaseSync } from "node:sqlite";
 
-import type { DeliveredAttachment, DeliveredEvent, Delivery, Event, HeartbeatPayload } from "@penelope/contract";
+import type { AnswerVia, DeliveredAttachment, DeliveredEvent, Delivery, Event, HeartbeatPayload } from "@penelope/contract";
 
 import { transaction } from "./db.ts";
 import type { Attachment, Sources } from "./sources.ts";
@@ -35,6 +35,7 @@ type Row = {
   delivery: Delivery;
   inline: number;
   payload: string;
+  answer_via: string | null;
   path: string;
   line: number;
   attachments: string | null;
@@ -78,8 +79,8 @@ export class Queue {
       // The row comes first for its seq; the files are named after it.
       const { lastInsertRowid } = this.db
         .prepare(
-          `INSERT INTO events (source, id, stream, occurred_at, received_ms, summary, delivery, inline, payload, path, line, due_ms)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?)`,
+          `INSERT INTO events (source, id, stream, occurred_at, received_ms, summary, delivery, inline, payload, answer_via, path, line, due_ms)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', 0, ?)`,
         )
         .run(
           event.source,
@@ -91,6 +92,7 @@ export class Queue {
           delivery,
           inline ? 1 : 0,
           JSON.stringify(event.payload ?? null),
+          event.answer_via === undefined ? null : JSON.stringify(event.answer_via),
           delivery === "now" ? now : null,
         );
       const seq = Number(lastInsertRowid);
@@ -103,6 +105,7 @@ export class Queue {
         ...(event.stream === undefined ? {} : { stream: event.stream }),
         id: event.id,
         summary: event.summary,
+        ...(event.answer_via === undefined ? {} : { answer_via: event.answer_via }),
         ...(saved.length === 0 ? {} : { attachments: saved.map((file) => file.path) }),
         payload: event.payload,
       });
@@ -131,7 +134,7 @@ export class Queue {
       this.releaseBatch(now);
       const rows = this.db
         .prepare(
-          `SELECT seq, source, id, stream, occurred_at, received_ms, summary, delivery, inline, payload, path, line, attachments
+          `SELECT seq, source, id, stream, occurred_at, received_ms, summary, delivery, inline, payload, answer_via, path, line, attachments
            FROM events
            WHERE acked_ms IS NULL AND due_ms IS NOT NULL AND due_ms <= ?
              AND (delivered_ms IS NULL OR seq > ? OR delivered_ms <= ?)
@@ -243,6 +246,7 @@ function delivered(row: Row, occurred_at: string): DeliveredEvent {
     received_at: iso(row.received_ms),
     summary: row.summary,
     delivery: row.delivery,
+    ...(row.answer_via === null ? {} : { answer_via: JSON.parse(row.answer_via) as AnswerVia }),
     appended: { path: row.path, lines: [row.line, row.line] as [number, number] },
     ...(row.attachments === null ? {} : { attachments: JSON.parse(row.attachments) as DeliveredAttachment[] }),
   };

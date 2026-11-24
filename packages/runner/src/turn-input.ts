@@ -48,6 +48,7 @@ function single(event: DeliveredEvent, drawn?: string): TurnEvent {
     source: event.source,
     ...(event.stream ? { stream: event.stream } : {}),
     delivery: event.delivery,
+    ...(event.answer_via === undefined ? {} : { answer_via: event.answer_via }),
     occurred_at: event.occurred_at,
     summary: event.summary,
   };
@@ -168,7 +169,7 @@ export function turnLines(events: DeliveredEvent[], slack?: SlackDrawing): TurnL
   const batches = new Map<string, Piece>();
   for (const event of [...events].sort((a, b) => a.seq - b.seq)) {
     const drawn = drawable(event);
-    if (event.delivery !== "batch" || (event.inline && !drawn)) {
+    if (event.delivery !== "batch" || event.answer_via !== undefined || (event.inline && !drawn)) {
       singles.push({ events: [event], drawn });
       continue;
     }

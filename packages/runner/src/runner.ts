@@ -27,6 +27,7 @@ import type {
 } from "@penelope/contract";
 
 import { TurnRecorder } from "./activities.ts";
+import { ANSWER_REMINDER, AnswerReminder } from "./answer-reminder.ts";
 import type { Backend } from "./backend.ts";
 import type { Config } from "./config.ts";
 import { type Connector, readConnectors } from "./connectors.ts";
@@ -88,8 +89,8 @@ export interface RunnerOptions {
 type Outcome = Required<Pick<TurnEndRequest, "result">> & Pick<TurnEndRequest, "reason">;
 
 interface TurnOptions {
-  /** The seqs of the events handed in as its input; events join an ordinary turn only. */
-  seqs?: number[];
+  /** The initial events; events join an ordinary turn only. */
+  events?: DeliveredEvent[];
   /** For a turn of the nightly switch: its control event and step. The turn is not ordinary. */
   night?: { seq: number; stage: NightTurnStage };
   afterCommit?: (turnId: string) => Promise<void>;
@@ -104,6 +105,7 @@ interface Turn {
   heartbeat: boolean;
   /** The steers and follow-ups handed to Pi during the turn, until Pi has them. */
   queued: Promise<unknown>[];
+  answers: AnswerReminder | undefined;
 }
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -301,9 +303,10 @@ export class Runner {
     turn.heartbeat &&= events.every(isHeartbeat);
     const steer = events.some((event) => event.delivery === "now");
     turn.queued.push(
-      this.input(events).then(([text, images]) =>
-        steer ? turn.session.steer(text, images) : turn.session.followUp(text, images),
-      ),
+      this.input(events).then(([text, images]) => {
+        turn.answers?.input(text, events);
+        return steer ? turn.session.steer(text, images) : turn.session.followUp(text, images);
+      }),
     );
   }
 
@@ -335,7 +338,7 @@ export class Runner {
       const events = this.inbox.splice(0, until < 0 ? this.inbox.length : until);
       const [text, images] = await this.input(events);
       await this.turnOf(this.session!.session, text, {
-        seqs: events.map((event) => event.seq),
+        events,
         ...(images ? { images } : {}),
         heartbeat: events.every(isHeartbeat),
       });
@@ -367,6 +370,8 @@ export class Runner {
     const main = this.session?.session === session ? this.session : undefined;
     const previous = lastAssistant(session.messages);
     const previousModelError = previous?.stopReason === "error" ? modelError(previous) : undefined;
+    const answers = ordinary && main && options.events ? new AnswerReminder() : undefined;
+    if (options.events) answers?.input(input, options.events);
     let preparing: string | undefined;
     try {
       input = withRunnerNotes(input, await main?.beforeTurn() ?? [], previousModelError);
@@ -379,6 +384,7 @@ export class Runner {
     let compactions = 0;
     const unsubscribe = session.subscribe((event) => {
       recorder.handle(event);
+      answers?.observe(event);
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_end") {
         spoke ||= event.assistantMessageEvent.content.trim() !== "";
       } else if (event.type === "message_update" && event.assistantMessageEvent.type === "toolcall_end") {
@@ -387,13 +393,14 @@ export class Runner {
         compactions++;
       }
     });
-    const turn: Turn = { session, seqs: [...(options.seqs ?? [])], heartbeat: options.heartbeat ?? false, queued: [] };
+    const turn: Turn = { session, seqs: options.events?.map((event) => event.seq) ?? [], heartbeat: options.heartbeat ?? false, queued: [], answers };
     this.turnId = recorder.turnId;
     this.folded = 0;
     recorder.start();
     let failed = false;
     let thrown: string | undefined;
     let asked = false;
+    let remindedAt: number | undefined;
     try {
       if (preparing !== undefined) throw new Error(preparing);
       if (this.stopping) throw new Error("The runner was stopping.");
@@ -416,6 +423,15 @@ export class Runner {
         const { steering, followUp } = session.clearQueue();
         text = [...steering, ...followUp].join("\n\n");
       }
+      // Like the fold request, this is part of the turn but takes no new events.
+      if (ordinary) this.turn = undefined;
+      if (answers && !this.stopping && this.outcome(session, undefined).result === "done") {
+        const notice = answers.notice();
+        if (notice !== undefined) {
+          remindedAt = answers.toolCalls;
+          await session.sendCustomMessage({ customType: ANSWER_REMINDER, content: notice, display: false }, { triggerTurn: true });
+        }
+      }
     } catch (error) {
       failed = true;
       thrown = failure(error);
@@ -424,9 +440,10 @@ export class Runner {
       if (ordinary) this.turn = undefined;
     }
     let outcome = this.outcome(session, thrown);
+    if (answers && remindedAt !== undefined) this.log(answers.result(remindedAt, outcome.result));
     if (ordinary && !failed) {
       const idle = turn.heartbeat && !called;
-      if (outcome.result === "done" && this.config.turnFold && !spoke && !idle && !this.stopping) {
+      if (remindedAt === undefined && outcome.result === "done" && this.config.turnFold && !spoke && !idle && !this.stopping) {
         asked = true;
         const asking = this.outcome(session, await this.ask(session, recorder.turnId));
         if (asking.result !== "done") {
