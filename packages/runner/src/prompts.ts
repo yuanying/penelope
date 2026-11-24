@@ -62,11 +62,11 @@ const MEMORY_SHAPE = (places: Places, owner?: string) => `- personality.md: the 
 - handoff.md: what one session leaves for the next.
 - ${PURPOSE} (optional): what the agent should know and the questions it should be able to answer, written with the owner's agreement.
 - INDEX.md: the index of the memory.
-- diary/YYYY-MM-DD.md: what happened on each day.
+- diary/YYYY-MM-DD.md: what happened on each day, including what was checked and when.
 - archive/: older facts, in summaries.
 - skills/<name>/SKILL.md: skills. Those in ${places.memory}/skills/ are listed in the agent's main sessions.${owner ? otherSkills(places, owner) : ""}
 - agents/<role>.md: the roles of sub-agents, one file each, with \`name\` and \`description\` in its front matter. When a sub-agent is started with a role, the body of its file follows the sub-agent's system prompt; without one, the body of agents/default.md does.
-- Any other file: one topic each, where knowledge is kept.
+- Any other file: one topic each, reflecting what is known now.
 - For facts that can change, record when they were true and what was used to verify them.`;
 
 /** The skills listed beside the memory's, and which one of a name is listed (pi.ts reads them in this order). */
@@ -259,7 +259,9 @@ export function curatorSystemPrompt(identity: Identity, places: Places, memory: 
     : "make what is needed easy to find and current";
   return `${nightRole(identity, places, "curator")}${nightKnowledge(places, memory)}
 
-${promptMemory(withPurpose)} The rest is read as needed, usually starting from INDEX.md. Your purpose is to keep that always-read layer small and ${aim}: the topics should preserve what is known now, while the diary keeps the day-by-day record.`;
+${promptMemory(withPurpose)} The rest is read as needed, usually starting from INDEX.md. Your purpose is to keep that always-read layer small and ${aim}: the topics should preserve what is known now, while the diary keeps the day-by-day record.
+
+When updating topic contents, summarise day-by-day check logs from topics in archive/ instead of keeping them there. Do the same for past scheduled events and deadlines only when the owner's words or the records show they are settled. A date passing is not evidence of that. Keep unresolved or unconfirmed events and deadlines, upcoming events, and anything still relevant after its date (such as a later reminder) in the topics.`;
 }
 
 function changesInput(changed: string[], haveBaseline: boolean): string {
@@ -304,9 +306,9 @@ export function reviewContentInput(
 ): string {
   return `${layerPriority(layer)}# Content review (${date})
 
-The diary shows what happened. Topics should capture patterns across days and reflect what is true now. Older facts removed from topics belong as summaries in ${archive.current}; daily diary entries remain as they are. Existing archive summaries are due to be combined as follows (sources and destination, relative to the memory root): ${JSON.stringify(archive.groups)}.
+Use the diary to find patterns across days for the topics, leaving the diary entries intact. Apply the curator's topic cleanup to the topics in scope. Use ${archive.current} for summaries of material removed from topics. Existing archive summaries are due to be combined as follows (sources and destination, relative to the memory root): ${JSON.stringify(archive.groups)}.
 
-Topics are prioritised from least recently in scope, starting with topics not yet reviewed.
+Topics are prioritised from least recently in scope, starting with topics not yet reviewed. With the same review date (or none), larger topics come first.
 Topic bodies in scope: ${JSON.stringify(topics)}.
 Diary entries for this week: ${JSON.stringify(diary)}.
 ${promptLayerSizes(layer)}.

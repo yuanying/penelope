@@ -1,7 +1,7 @@
 # 0050. 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す
 
 - Date: 2026-11-21
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0059 トピックには今わかっていることを残し、棚卸しの同順位では大きいものを先に読む](0059-keep-topics-current-and-review-large-topics-first.md) で置き換え）
 
 ## Context
 
@@ -57,6 +57,7 @@ runner は毎晩、整理係に記憶全体の見取り図を渡す。ファイ�
 - Related: [ADR-0052 夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md)（夜の係が動かしたファイルの参照と、切れたリンクを次の見取り図に出す扱い）。
 - Related: [ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md)（本体のセッションは 1 本のまま）。
 - Related: [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md)（配置ごとの知識の目的を共通の入力に足し、モデル別の手順の層は変えない）。
+- Superseded by（一部）: [ADR-0059 トピックには今わかっていることを残し、棚卸しの同順位では大きいものを先に読む](0059-keep-topics-current-and-review-large-topics-first.md)（Decision 項 3（週の棚卸しだけ、整理係を 2 ターンにする）のうち、中身のターンで本文を見直す優先順位と、過ぎた予定・期限や日ごとの確認記録をトピックから外す条件）。
 
 ## References
 

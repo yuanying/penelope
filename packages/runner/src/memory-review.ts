@@ -8,7 +8,11 @@ export function reviewTopics(
   files: readonly Pick<MemoryFile, "path" | "bytes">[], lastReviews: ReadonlyMap<string, string>, maxBytes: number,
 ): string[] {
   const topics = files.filter(({ path }) => /\.md$/i.test(path) && !nonTopics.has(path) && !/^(diary|archive|goals|skills|agents|extensions)\//.test(path));
-  topics.sort((a, b) => (lastReviews.get(a.path) ?? "").localeCompare(lastReviews.get(b.path) ?? "") || a.path.localeCompare(b.path));
+  topics.sort((a, b) =>
+    (lastReviews.get(a.path) ?? "").localeCompare(lastReviews.get(b.path) ?? "")
+    || b.bytes - a.bytes
+    || a.path.localeCompare(b.path)
+  );
   const selected: string[] = [];
   let remaining = maxBytes;
   for (const { path, bytes } of topics) {

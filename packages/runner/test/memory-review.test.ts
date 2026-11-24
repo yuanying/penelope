@@ -14,8 +14,19 @@ test("the topic budget gives priority to never reviewed and least recently revie
     { path: "archive/2026-11.md", bytes: 1 },
     { path: "diary/2026-11-15.md", bytes: 1 },
   ];
-  const lastReviews = new Map([["recent.md", "2026-11-12"], ["old.md", "2026-10-20"]]);
+  const lastReviews = new Map([["recent.md", "2026-11-12"], ["old.md", "2026-10-20"], ["wide.md", "2026-10-20"]]);
   assert.deepEqual(reviewTopics(files, lastReviews, 8), ["new.md", "old.md"]);
+});
+
+test("topics last reviewed on the same day compete for the budget by size, then by path", () => {
+  const files = [
+    { path: "a-small.md", bytes: 3 },
+    { path: "z-large.md", bytes: 6 },
+    { path: "b-large.md", bytes: 6 },
+  ];
+  for (const lastReviews of [new Map<string, string>(), new Map(files.map(({ path }) => [path, "2026-11-15"]))]) {
+    assert.deepEqual(reviewTopics(files, lastReviews, 8), ["b-large.md"]);
+  }
 });
 
 test("a topic larger than the entire budget gets a review to itself when its turn comes", () => {

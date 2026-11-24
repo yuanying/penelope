@@ -1,7 +1,7 @@
 # 0045. 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す
 
 - Date: 2026-11-20
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0059 トピックには今わかっていることを残し、棚卸しの同順位では大きいものを先に読む](0059-keep-topics-current-and-review-large-topics-first.md) で置き換え）
 
 ## Context
 
@@ -39,6 +39,7 @@
 - Related: [ADR-0043 モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) の Decision（オーナーが選んだモデルを各ターンで使い、自動では切り替えない）。
 - Related: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（日中と夜の係の記憶の形に時点と根拠の 1 行を加える。モデル別の手順の層は変えない）。
 - Related: [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md)（照合係と整理係に伝える目的を、配置ごとの知識づくりに沿って具体化する）。
+- Superseded by（一部）: [ADR-0059 トピックには今わかっていることを残し、棚卸しの同順位では大きいものを先に読む](0059-keep-topics-current-and-review-large-topics-first.md)（Decision 項 1（夜の各係に共通の事実と目的を渡す）のうち、整理係に伝える目的に、過ぎた予定・期限と日ごとの確認記録の扱いを加える。モデル別の手順は変えない）。
 
 ## References
 
