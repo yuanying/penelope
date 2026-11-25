@@ -145,7 +145,7 @@ async function writeMemoryExtension(config: Config): Promise<void> {
   await writeFile(join(dir, "index.ts"), greetingExtension("memory_greet"));
 }
 
-test("the main session reloads extensions between turns without loading them in the curator", async () => {
+test("the main session reloads disk extensions between turns, keeping codemode", async () => {
   const { fake, start, calls, config } = await world();
   config.imageSkills = [];
   await skills(config.imageSkillsDir, { goals: "Goals of the image." });
@@ -153,10 +153,16 @@ test("the main session reloads extensions between turns without loading them in 
   const ownerEntries = join(config.ownerExtensionsDir, "extensions");
   await mkdir(ownerEntries, { recursive: true });
   await writeFile(join(ownerEntries, "greet.ts"), greetingExtension("owner_greet"));
-  await start((call) => call.userTexts.length === 1 ? { thinking: "first turn thinking", text: "hello" } : { text: "hello" });
+  await start((call) => {
+    if (call.lastRole === "user" && call.lastText.includes('"text":"hello again"')) {
+      return { calls: [{ tool: "codemode", args: { code: "return await tools.memory_greet({});" } }] };
+    }
+    return call.userTexts.length === 1 ? { thinking: "first turn thinking", text: "hello" } : { text: "hello" };
+  });
   fake.push(ui(1, "hello"));
   await until(() => acked(fake).includes(1));
   assert.ok(calls[0]!.tools.includes("owner_greet"));
+  assert.ok(calls[0]!.tools.includes("codemode"));
 
   await writeMemoryExtension(config);
   await skills(join(config.memoryDir, "skills"), { example: "A new skill in memory." });
@@ -164,6 +170,8 @@ test("the main session reloads extensions between turns without loading them in 
   await until(() => acked(fake).includes(2));
   const afterReload = calls.at(-1)!;
   assert.ok(afterReload.tools.includes("owner_greet") && afterReload.tools.includes("memory_greet"));
+  assert.equal(afterReload.lastRole, "toolResult");
+  assert.match(afterReload.lastText, /Script completed[\s\S]*Hello/);
   assert.match(afterReload.systemPrompt, /A new skill in memory/);
   assert.doesNotMatch(afterReload.systemPrompt, /Goals of the image/, "reload keeps the empty image skill allow-list");
   assert.ok(afterReload.userTexts.some((text) => text.includes('"text":"hello"')), "reload preserves the current session");
@@ -174,6 +182,18 @@ test("the main session reloads extensions between turns without loading them in 
   const curator = calls.find((call) => isCurator(config, call));
   assert.ok(curator);
   assert.ok(!curator.tools.includes("owner_greet") && !curator.tools.includes("memory_greet"));
+});
+
+test("codemode cannot send replies that would be lost from the folded context", async () => {
+  const { fake, start, calls } = await world();
+  await start((call) => call.lastRole === "user"
+    ? { calls: [{ tool: "codemode", args: {
+      code: 'return ALL_TOOLS.some(({name}) => name === "reply" || name === "reply_to_agent") ? "reply available" : "no reply tools";',
+    } }] }
+    : { text: "done" });
+  fake.push(ui(1, "Check the script's available tools."));
+  await until(() => acked(fake).includes(1));
+  assert.match(calls.at(-1)!.lastText, /Script completed[\s\S]*no reply tools/);
 });
 
 test("an invalid owner extension is reported in the next turn without stopping the main session", async () => {

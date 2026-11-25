@@ -135,7 +135,7 @@ test("the sub-agent's tools are Pi's, without the main agent's own", async () =>
   // Guards against: a sub-agent that can reply to the owner, answer over A2A, schedule, or start sub-agents of its own.
   for (const tool of MAIN_ONLY_TOOLS) assert.ok(main.tools.includes(tool), `the main agent has ${tool}`);
   for (const tool of MAIN_ONLY_TOOLS) assert.ok(!sub.tools.includes(tool), `the sub-agent has no ${tool}`);
-  for (const tool of ["bash", "read", "write", "edit"]) assert.ok(sub.tools.includes(tool), `the sub-agent has ${tool}`);
+  for (const tool of ["bash", "read", "write", "edit", "codemode"]) assert.ok(sub.tools.includes(tool), `the sub-agent has ${tool}`);
 });
 
 test("more words go on in the same session; a closed sub-agent takes none, and its name is not used again", async () => {

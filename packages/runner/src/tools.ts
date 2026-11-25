@@ -45,8 +45,10 @@ async function readImages(paths: readonly string[], home: string, maxImages = RE
 
 /** `turn` names the turn under way, for a reply to carry (ADR-0038). */
 export function backendTools(backend: Backend, { home, turn }: { home: string; turn?: () => string | undefined }): ToolDefinition[] {
+  // Folding keeps direct replies from the transcript. Pi records nested calls only inside codemode.
   const reply = defineTool({
     name: "reply",
+    exposure: "model-only",
     label: "Reply",
     description:
       "Send a message to your owner. It is the only way your words reach them; the text of your turn is not shown to anyone.",
@@ -80,6 +82,7 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
 
   const replyToAgent = defineTool({
     name: "reply_to_agent",
+    exposure: "model-only",
     label: "Reply to an agent",
     description:
       "Answer another agent in the A2A task of an `a2a` event. The event's stream is the agent's name, and its payload has the agent's text and the task. `completed` closes the task with optional text and images as its answer. To close the task without answering, use `completed` without text or images. `input-required` asks the agent the text and keeps the task open; the agent's answer comes as another `a2a` event of the same task. The agent fetches what you send from its task; your owner does not see it. A task the agent has not written to within the backend's deadline fails, and can no longer be answered.",

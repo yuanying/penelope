@@ -7,6 +7,7 @@ import { join, resolve } from "node:path";
 import {
   type AgentSession,
   createAgentSession,
+  createCodemodeExtension,
   DefaultResourceLoader,
   type ModelRuntime,
   type ExtensionFactory,
@@ -157,9 +158,11 @@ export async function openSession(
     settingsManager,
     noExtensions: true,
     noSkills: fileOnly === true,
-    extensionFactories: setup.imageLimits?.size
-      ? [...setup.extensions, imageLimitExtension(setup.imageLimits)]
-      : setup.extensions,
+    extensionFactories: [
+      ...setup.extensions,
+      ...(setup.imageLimits?.size ? [imageLimitExtension(setup.imageLimits)] : []),
+      ...(fileOnly ? [] : [createCodemodeExtension({ mode: "on" })]),
+    ],
     ...(disk ? { additionalExtensionPaths: disk.paths } : {}),
     noContextFiles: true,
     noPromptTemplates: true,
@@ -187,7 +190,9 @@ export async function openSession(
     settingsManager,
     resourceLoader,
     sessionManager,
-    ...(fileOnly ? { noTools: "all" as const, tools: setup.tools.map((tool) => tool.name) } : {}),
+    ...(fileOnly
+      ? { noTools: "all" as const, tools: setup.tools.map((tool) => tool.name) }
+      : { tools: ["+codemode"] }),
     customTools: setup.tools,
   });
   if (disk) {
