@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { describe, it } from "node:test";
 
@@ -13,7 +14,7 @@ import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { ModelSettings } from "../src/model-settings.ts";
 import { Feed } from "../src/feed.ts";
-import { close, listenUnix } from "../src/http.ts";
+import { close, listenTcp } from "../src/http.ts";
 import { MemoryView } from "../src/memory-view.ts";
 import { Memory } from "../src/memory.ts";
 import { Queue } from "../src/queue.ts";
@@ -56,19 +57,20 @@ async function setup(
   const schedules = new Schedules(db, { now: Date.now, timeZone: "UTC" });
   const inbox = new Inbox(db, queue, { assets, now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
-  const socketPath = path.join(dir, "sandbox.sock");
   const modelSettings = new ModelSettings(db, clock.now);
-  const server = await listenUnix(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, now: Date.now, log: () => {} }),
-    socketPath,
+  const logs: string[] = [];
+  const server = await listenTcp(
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, now: Date.now, log: (line) => logs.push(line) }),
+    "127.0.0.1", 0,
   );
+  const { port } = server.address() as AddressInfo;
   t.after(async () => {
     await close(server);
     db.close();
   });
   const call = (pathname: string, options: Ask = {}) =>
-    ask({ socketPath }, pathname, { ...options, headers: { authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, agents, record, streamed, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, socketPath, inbox, db, feed, clock, assets, assetsDir, modelSettings };
+    ask({ port }, pathname, { ...options, headers: { connection: "close", authorization: `Bearer ${TOKEN}`, ...options.headers } });
+  return { queue, conversation, agents, record, streamed, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, logs, inbox, db, feed, clock, assets, assetsDir, modelSettings };
 }
 
 /** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
@@ -452,6 +454,25 @@ describe("the sandbox's API", () => {
       assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-2" } })).status, 204);
       const files = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "ls-files"], { cwd: memoryDir, encoding: "utf8" });
       assert.equal(files, "always.md\n");
+    });
+
+    it("logs the reason and affected count, not the paths from a Git commit error", async (t) => {
+      const { call, memoryDir, logs } = await setup(t);
+      execFileSync("git", ["init", "--quiet", "--initial-branch=main"], { cwd: memoryDir });
+      writeFileSync(path.join(memoryDir, "private-note.md"), "private text");
+      writeFileSync(path.join(memoryDir, ".git", "index.lock"), "");
+      const answer = await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-lock" } });
+
+      assert.deepEqual(logs, ["memory: a turn could not be committed: git add: index.lock (affected=1)"]);
+      assert.deepEqual(answer.json(), { error: "/memory could not be committed" });
+    });
+
+    it("distinguishes unreadable worktree files from an existing index lock", { skip: process.geteuid?.() === 0 }, async (t) => {
+      const { call, memoryDir, logs } = await setup(t);
+      writeFileSync(path.join(memoryDir, "unreadable.md"), "private text", { mode: 0o000 });
+      await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-denied" } });
+
+      assert.deepEqual(logs, ["memory: a turn could not be committed: git add: permission denied (affected=1)"]);
     });
 
     it("sets the agent waiting", async (t) => {

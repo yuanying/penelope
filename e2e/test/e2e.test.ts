@@ -219,7 +219,7 @@ describe("the Pod end to end", () => {
     assert.deepEqual(new Set(calls.map((call) => call.credential)), new Set(["real"]));
   }));
 
-  it("commits /memory at the end of the turn, and the sandbox cannot write its .git", track(async () => {
+  it("commits /memory even after a turn leaves private modes, and the sandbox cannot write its .git", track(async () => {
     // Guards against: a turn's memory left uncommitted, the sandbox rewriting the history, or the history unreadable to her.
     const log = await eventually("the turn's commit", () => {
       const text = memoryLog();
@@ -227,6 +227,8 @@ describe("the Pod end to end", () => {
     });
     assert.match(log, /^Turn [0-9a-f-]{36}\nAgent: main\n/m);
     assert.equal(exec("backend", "cat /memory/notes/e2e.md").stdout, "# E2E\n\nWritten in the first turn.\n");
+
+    exec("backend", "test -w /memory/notes/e2e.md && test -w /memory/notes && test -g /memory/notes");
 
     const write = exec("sandbox", "touch /memory/.git/e2e 2>&1", { check: false });
     assert.notEqual(write.status, 0);

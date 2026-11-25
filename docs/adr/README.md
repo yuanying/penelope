@@ -62,3 +62,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0058 | [記憶の差分統計は必要な変更だけを計算し、Git の保守は backend が行う](0058-read-memory-history-on-demand.md) | Accepted |
 | 0059 | [トピックには今わかっていることを残し、棚卸しの同順位では大きいものを先に読む](0059-keep-topics-current-and-review-large-topics-first.md) | Accepted |
 | 0060 | [答える口は出来事が持ち、送信を試みなければ一度だけ知らせる](0060-answer-through-the-event-source.md) | Accepted |
+| 0061 | [ターンのコミット前に runner が記憶の共有権限をそろえる](0061-share-memory-worktree-access-before-turn-commits.md) | Accepted |

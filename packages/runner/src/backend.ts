@@ -45,7 +45,7 @@ export class Backend {
   private readonly url: string;
   private readonly token: string;
   readonly agent: AgentId;
-  private turns: { last: Promise<void> } = { last: Promise.resolve() };
+  private turns: { last: Promise<void>; prepare?: () => Promise<void> } = { last: Promise.resolve() };
 
   constructor(options: BackendOptions) {
     this.url = options.url.replace(/\/+$/, "");
@@ -84,11 +84,16 @@ export class Backend {
     await this.post("/v1/activity", { activities });
   }
 
+  beforeTurnEnd(prepare: () => Promise<void>): void {
+    this.turns.prepare = prepare;
+  }
+
   /** `POST /v1/turns/end`: the backend commits /memory, and records how the turn went (ADR-0038). */
   async turnEnd(end: Without<TurnEndRequest>, afterCommit?: () => Promise<void>): Promise<void> {
     // A sub-agent's turn end commits the entire working tree too. Keep it
     // from committing a curator turn's reference edits before their own commit.
     const next = this.turns.last.then(async () => {
+      await this.turns.prepare?.();
       await this.post("/v1/turns/end", end);
       await afterCommit?.();
     });

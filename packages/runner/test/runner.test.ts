@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmod, mkdir, readFile, readdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readFile, readdir, stat, symlink, unlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { test } from "node:test";
 
@@ -76,6 +76,26 @@ test("an event becomes a turn; the reply, the activities, the turn's end and the
 
   const order = fake.order().filter((r) => r === "POST /v1/turns/end" || r === "POST /v1/events/ack");
   assert.deepEqual(order, ["POST /v1/turns/end", "POST /v1/events/ack"]);
+});
+
+test("turn-end permission repair leaves .git and aliases of HOME files private", async () => {
+  const { fake, start, config, logs } = await world();
+  await chmod(config.memoryDir, 0o2770);
+  const note = join(config.home, "private.md");
+  const git = join(config.memoryDir, ".git");
+  await mkdir(git);
+  await writeFile(join(git, "config"), "", { mode: 0o600 });
+  await writeFile(note, "private", { mode: 0o600 });
+  await symlink(note, join(config.memoryDir, "symlink.md"));
+  await link(note, join(config.memoryDir, "hardlink.md"));
+
+  await start(() => ({ text: "Received" }));
+  fake.push(ui(1, "hello"));
+  await until(() => acked(fake).includes(1));
+
+  assert.equal((await stat(note)).mode & 0o777, 0o600);
+  assert.equal((await stat(join(git, "config"))).mode & 0o777, 0o600);
+  assert.ok(logs.includes("memory: permissions repaired=0 unrepaired=1"));
 });
 
 test("the owner's new model and thinking level apply on the next turn without losing the conversation", async () => {

@@ -108,7 +108,7 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("E2E-TURN-1")) {
       return [
         { calls: [write("/memory/notes/e2e.md", "# E2E\n\nWritten in the first turn.\n")] },
-        { calls: [{ name: "bash", args: { command: "echo E2E-BASH-$((40 + 2))" } }] },
+        { calls: [{ name: "bash", args: { command: "chmod 2700 /memory/notes && chmod 600 /memory/notes/e2e.md && echo E2E-BASH-$((40 + 2))" } }] },
         { calls: [reply("E2E-REPLY-1")] },
         { text: "E2E-TEXT-1" },
       ];

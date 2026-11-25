@@ -37,6 +37,7 @@ import { withHeartbeatPending } from "./heartbeat-pending.ts";
 import { inlineImages } from "./images.ts";
 import { Jobs } from "./jobs.ts";
 import { memoryMap } from "./memory-map.ts";
+import { shareMemory } from "./memory-permissions.ts";
 import { memoryReads, NIGHT_REFLECTION } from "./memory-reads.ts";
 import { planArchive, reviewTopics, weekDiary } from "./memory-review.ts";
 import { TurnModels } from "./model-settings.ts";
@@ -159,6 +160,7 @@ export class Runner {
     this.config = options.config;
     this.backend = options.backend;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
+    this.backend.beforeTurnEnd(() => shareMemory(this.config.memoryDir, this.log));
     this.extensionTrials = new MemoryExtensionTrials(join(this.config.home, ".penelope-extension-trials.json"), this.log);
     const turnModels = new TurnModels(options.modelRuntime, this.backend, this.log);
     const pi = { config: options.config, modelRuntime: options.modelRuntime, turnModels, settings: options.settings, log: this.log, imageLimits: options.imageLimits };

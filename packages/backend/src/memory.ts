@@ -15,6 +15,31 @@ import { replaceMemoryFile } from "./memory-worktree.ts";
 
 const run = promisify(execFile);
 
+type CommitStep = "init" | "add" | "status" | "commit";
+
+/** A Git failure summarized without any text or paths from the process. */
+export class MemoryCommitError extends Error {
+  constructor(step: CommitStep, error: unknown) {
+    const stderr = (error as { stderr?: unknown } | null | undefined)?.stderr;
+    const lines = typeof stderr === "string" ? stderr.split("\n") : [];
+    const reasons = [
+      ["index.lock", /^fatal: Unable to create '.*\.git\/index\.lock': File exists\.$/],
+      ["permission denied", /^(?:error|fatal|warning): .*: Permission denied\.?$/],
+      ["unable to index file", /^error: unable to index file /],
+    ] as const;
+    // One cause per failed command; e.g. Git reports "unable to index"
+    // after the permission error for the same file.
+    for (const [reason, pattern] of reasons) {
+      const affected = lines.filter((line) => pattern.test(line)).length;
+      if (affected > 0) {
+        super(`git ${step}: ${reason} (affected=${affected})`);
+        return;
+      }
+    }
+    super(`git ${step}: unclassified (affected=unknown)`);
+  }
+}
+
 export type Author = { name: string; email: string };
 
 export class Memory {
@@ -117,13 +142,17 @@ export class Memory {
   }
 
   private async commitNow(message: string[], paths: string[] = []): Promise<"committed" | "clean"> {
+    const git = async (step: CommitStep, ...args: string[]) => {
+      try { return await this.git(step, ...args); }
+      catch (error) { throw new MemoryCommitError(step, error); }
+    };
     // A Pod mounts .git on its own, so it can be there and empty: a repository has its HEAD.
-    if (!existsSync(path.join(this.dir, ".git", "HEAD"))) await this.git("init", "--quiet", "--initial-branch=main");
+    if (!existsSync(path.join(this.dir, ".git", "HEAD"))) await git("init", "--quiet", "--initial-branch=main");
     const only = paths.length === 0 ? [] : ["--", ...paths.map((name) => `:(literal)${name}`)];
-    await this.git("add", "--all", ...only);
-    const { stdout } = await this.git("status", "--porcelain", ...only);
+    await git("add", "--all", ...only);
+    const { stdout } = await git("status", "--porcelain", ...only);
     if (stdout === "") return "clean";
-    await this.git("commit", "--quiet", "--no-verify", ...message.flatMap((paragraph) => ["--message", paragraph]), ...only);
+    await git("commit", "--quiet", "--no-verify", ...message.flatMap((paragraph) => ["--message", paragraph]), ...only);
     return "committed";
   }
 
@@ -175,7 +204,7 @@ export class Memory {
       {
         cwd: this.dir,
         env: {
-          PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0",
+          PATH: process.env.PATH ?? "/usr/bin:/bin", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C",
           ...(index === undefined ? {} : { GIT_INDEX_FILE: index }),
           ...(author === undefined ? {} : { GIT_AUTHOR_NAME: author.name, GIT_AUTHOR_EMAIL: author.email }),
         },

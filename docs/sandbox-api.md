@@ -252,7 +252,8 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 ## ターンの終わり
 
 - body は `{agent, turn_id, result?, reason?, seqs?, night?}`（型は `TurnEndRequest`）。`turn_id` は前後に空白がない 1 行の文字列。`night` はコミットの印にもなり、それ以外の追加欄は活動の記録のためである（下の「ターンの結果ときっかけ」）。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
-- backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。本体の夜のターン（`night` あり）では backend がコミットの変更量も数える。数を取れなくても応答は変えず、runner に数は返さない。
+- runner はこの要求の直前に、夜やサブエージェントのターンも含め、作業ツリーの共有権限をそろえる。変更か未修正があった場合はその件数だけを 1 行に残し、未修正があっても要求は送る（[Pod の仕様書](pod.md)、[ADR-0061](adr/0061-share-memory-worktree-access-before-turn-commits.md)）。
+- backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。backend のログには、Git の処理・分類した理由（権限拒否・インデックスへの追加失敗・インデックスのロックなど）と、その理由を示す診断の件数だけを残す。件数が不明なら `affected=unknown` とする。要求への応答は汎用のエラーのままで、ログにも応答にもパス・本文・Git の生の出力は載せない。本体の夜のターン（`night` あり）では backend がコミットの変更量も数える。数を取れなくても応答は変えず、runner に数は返さない。
 - UI の流れでは、エージェントを `waiting` にする。
 - runner は、ターンの `turn_end` の途中経過を送り終えてから、この口を呼ぶ。`turn_end` を送れなかったとき（途中経過は送り直さない）は、流れでは `waiting` になるが、記録から引く `state`（`GET /api/agents`）は次のターンの `turn_start` か `turn_end` まで `thinking` のままである。
 - サブエージェントのターンの終わりにも、runner は `agent` をサブエージェントの名前にして送り、backend は同じくコミットする。サブエージェントが `/memory` に書いたものを、本体の次のターンを待たずに残すためである。本体のターンの途中の変更も一緒にコミットされる（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントの途中経過とターンの終わり」）。

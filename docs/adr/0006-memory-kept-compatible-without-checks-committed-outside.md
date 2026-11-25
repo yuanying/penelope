@@ -36,6 +36,7 @@ natsumi の server は、ターンの終わりに記憶をコミットし、そ�
 - `/memory` の `.git` は、sandbox からは読むだけにする。エージェントは履歴を見られるが、書き換えられない。
 - ターンの終わりに、backend が sandbox の外で、変わったものをそのままコミットする。
 - オーナーが ssh で自分の変更をコミットする道は残す。
+- [ADR-0061](0061-share-memory-worktree-access-before-turn-commits.md) で、runner がコミットの依頼の前に作業ツリーの共有権限をそろえる。中身の検査は行わない。
 - backend による定期的な Git の保守は [ADR-0058](0058-read-memory-history-on-demand.md) で加える。sandbox からは引き続き読むだけとする。
 
 ### プロンプトに入れるときだけ長さを見る
@@ -68,6 +69,7 @@ natsumi の server は、ターンの終わりに記憶をコミットし、そ�
 - Related（natsumi、このリポジトリの外）: ADR 0018「記憶を git で持ち、shell で読み書きし、夜に組み直す」、ADR 0055「記憶の組み直しは、人格を持たない整理係が夜に行う」、ADR 0067「本人が ssh で記憶を自分でコミットする」、ADR 0068「整理係は人間の記憶のように、工程を分けて古い記憶を要約し、出来事を知識にする」
 - Superseded by（一部）: [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)（Decision「`/memory` の形を保つ」と「検査をやめる」に任意の固定名と、強制しない書き手の約束を加える）。
 - Related: [ADR-0052 夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md)（Decision「コミットは sandbox の外で backend がする」は維持し、runner は参照を直す）。
+- Related: [ADR-0061 ターンのコミット前に runner が記憶の共有権限をそろえる](0061-share-memory-worktree-access-before-turn-commits.md)（backend によるコミットは維持する）。
 - Superseded by（一部）: [ADR-0058 記憶の差分統計は必要な変更だけを計算し、Git の保守は backend が行う](0058-read-memory-history-on-demand.md)（Decision「コミットは sandbox の外で backend がする」に、backend による保守を加える）。
 
 ## References

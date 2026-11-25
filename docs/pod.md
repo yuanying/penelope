@@ -53,6 +53,7 @@
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
 - 自分で作った VM への ssh の鍵は、エージェントが HOME に自分で作る（[ADR-0021](adr/0021-her-own-ssh-key-in-home-for-the-vms-she-makes.md)）。配置は ssh の鍵も ssh-agent も置かない。ssh の接続は、ほかの外向きと同じく Sentinel へ向け直され、既定の扱いに従う。
 - `/memory` の `.git` は sandbox からは読むだけである。backend がターンの終わりにコミットする（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。
+- runner はコミットの依頼の直前に、作業ツリーのうち共有グループに属して sandbox ユーザーが所有する通常ファイルに `g+rw`、ディレクトリに `g+rwx` を補う。元の権限（set-group-ID を含む）は保つ。共有グループは作業ツリーのルートのグループとする。`.git` は走査せず、シンボリックリンクはたどらない。外に同じファイルがあるか分からないハードリンクのファイルも変更しない（[ADR-0061](adr/0061-share-memory-worktree-access-before-turn-commits.md)）。
 - `/sources` を書くのは backend だけ（[events.md](events.md)）。receivers は mount しない。
 - 取り込み口の socket は sandbox に mount しない。送れるのは socket が見えるコンテナだけである（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。
 - 管理口の socket も sandbox に mount しない（[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)）。

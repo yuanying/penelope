@@ -15,7 +15,7 @@ import { type Handler, HttpError, readJson, sendEmpty, sendJson } from "./http.t
 import { memoryPath } from "./memory-git.ts";
 import { readSnapshot } from "./memory-record.ts";
 import type { MemoryView } from "./memory-view.ts";
-import type { Memory } from "./memory.ts";
+import { type Memory, MemoryCommitError } from "./memory.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import type { Queue } from "./queue.ts";
 import type { ActivityRecord, TurnEnd } from "./record.ts";
@@ -216,8 +216,9 @@ export function sandboxHandler(options: SandboxOptions): Handler {
               },
             }),
           });
-        } catch {
-          log("memory: a turn could not be committed");
+        } catch (error) {
+          const detail = error instanceof MemoryCommitError ? error.message : "unclassified (affected=unknown)";
+          log(`memory: a turn could not be committed: ${detail}`);
           throw new HttpError(500, "/memory could not be committed");
         }
         sendEmpty(response, 204);
