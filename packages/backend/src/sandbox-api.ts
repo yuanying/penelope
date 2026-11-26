@@ -204,7 +204,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         const { agent } = request;
         const turn_id = end.turn_id;
         keep(() => record.turnEnded(agent, end));
-        conversation.turnEnded(agent);
+        conversation.turnEnded(agent, turn_id);
         try {
           const night = agent === "main" ? end.night : undefined;
           await memory.commit({

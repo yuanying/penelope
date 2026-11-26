@@ -285,14 +285,24 @@ export function uiHandler(options: UiOptions): Handler {
         sendJson(response, 200, page);
         return;
       }
+      case "POST /api/history/read": {
+        const through = (await readJson(request, 1024) as { through?: unknown } | null)?.through;
+        if (typeof through !== "string" || through === "") throw new HttpError(400, "through must be a message id");
+        if (!conversation.markRead(through)) throw new HttpError(404, "no such history message");
+        sendEmpty(response, 204);
+        return;
+      }
+      case "GET /api/summary/stream":
+      case "GET /api/stream": {
+        const token = appToken;
+        const stillSignedIn = token === undefined ? undefined : () => appTokens.authenticate(token, ownerId) !== undefined;
+        if (route === "GET /api/summary/stream") summaryStream(conversation, record, feed, response, stillSignedIn);
+        else stream(feed, request, response, stillSignedIn);
+        return;
+      }
       case "GET /api/agents":
         sendJson(response, 200, { agents: agents.list() } satisfies SubAgentsResponse);
         return;
-      case "GET /api/stream": {
-        const token = appToken;
-        stream(feed, request, response, token === undefined ? undefined : () => appTokens.authenticate(token, ownerId) !== undefined);
-        return;
-      }
       // Only the main agent has schedules. The UI adds none.
       case "GET /api/schedules":
         sendJson(response, 200, { schedules: schedules.entries("main") } satisfies SchedulesResponse);
@@ -427,8 +437,49 @@ async function sendAsset(assets: Assets, rest: string, request: http.IncomingMes
   response.end(body);
 }
 
-/** Server-sent events until the browser goes away, a comment now and then to keep the line open. */
 function stream(feed: Feed, request: http.IncomingMessage, response: http.ServerResponse, stillSignedIn?: () => boolean): void {
+  const lastEventId = request.headers["last-event-id"];
+  events(response, (write) => feed.subscribe(typeof lastEventId === "string" ? lastEventId : undefined, (id, event) => {
+    write(`id: ${id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+  }), stillSignedIn);
+}
+
+function summaryStream(
+  conversation: Conversation,
+  record: ActivityRecord,
+  feed: Feed,
+  response: http.ServerResponse,
+  stillSignedIn?: () => boolean,
+): void {
+  let unseen = record.unseen();
+  let last = JSON.stringify(conversation.summary(unseen));
+  events(response, (write) => {
+    write(`event: summary\ndata: ${last}\n\n`);
+    const update = () => {
+      const next = JSON.stringify(conversation.summary(unseen));
+      if (next === last) return;
+      last = next;
+      write(`event: summary\ndata: ${next}\n\n`);
+    };
+    const stopConversation = conversation.onSummaryChange(update);
+    const stopRecord = feed.subscribe(undefined, (_id, event) => {
+      if (event.event !== "record" || unseen === event.data.unseen) return;
+      unseen = event.data.unseen;
+      update();
+    });
+    return () => {
+      stopConversation();
+      stopRecord();
+    };
+  }, stillSignedIn);
+}
+
+/** Server-sent events until the browser goes away, a comment now and then to keep the line open. */
+function events(
+  response: http.ServerResponse,
+  subscribe: (write: (text: string) => void) => () => void,
+  stillSignedIn?: () => boolean,
+): void {
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -448,10 +499,7 @@ function stream(feed: Feed, request: http.IncomingMessage, response: http.Server
     }
     response.end();
   };
-  const lastEventId = request.headers["last-event-id"];
-  const stop = feed.subscribe(typeof lastEventId === "string" ? lastEventId : undefined, (id, event) => {
-    write(`id: ${id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
-  });
+  const stop = subscribe(write);
   const heartbeat = setInterval(() => write(": ping\n\n"), HEARTBEAT_MS);
   response.once("close", () => {
     clearInterval(heartbeat);

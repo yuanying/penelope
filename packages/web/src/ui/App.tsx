@@ -141,6 +141,7 @@ export function App({ fetch, sleep, push }: AppProps) {
     offline: state.connection === "offline",
     onSend: (text: string, files: File[]) => outbox.submit({ text, files, duringTurn: busy }),
     onOlder,
+    onRead: api.markRead,
     status,
     flow: currentFlow(state),
     subAgents: subAgentsOf(state),

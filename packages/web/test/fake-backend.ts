@@ -33,6 +33,7 @@ export class FakeBackend {
   readonly historyPages = new Map<string, HistoryEntry[]>();
   /** The cursors GET /api/history was read with. */
   readonly historyBefores: string[] = [];
+  readonly readThrough: string[] = [];
   /** The activity record's days, by `YYYY-MM-DD`; GET /api/record without a day answers `today`. */
   readonly recordDays = new Map<string, RecordDayResponse>();
   today = "2026-11-17";
@@ -77,6 +78,10 @@ export class FakeBackend {
       if (before === null) return json(200, { entries: [...this.history].reverse() });
       this.historyBefores.push(before);
       return json(200, { entries: this.historyPages.get(before) ?? [] });
+    }
+    if (method === "POST" && url.pathname === "/api/history/read") {
+      this.readThrough.push((JSON.parse(String(init.body)) as { through: string }).through);
+      return new Response(null, { status: 204 });
     }
     if (url.pathname.startsWith("/api/record")) return this.record(method, url);
     if (method === "GET" && url.pathname === "/api/agents") {

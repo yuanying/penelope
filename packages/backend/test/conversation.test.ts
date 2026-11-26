@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import path from "node:path";
 import { describe, it } from "node:test";
 
 import type { Activity, StreamEvent } from "@penelope/contract";
@@ -44,6 +45,21 @@ describe("the conversation", () => {
         { kind: "owner", id: "m-1", at: "2026-11-14T09:00:00.000Z", text: "hello" },
       ],
     });
+  });
+
+  it("keeps the read position when the backend opens the database again", (t) => {
+    const file = path.join(tempDir(t), "backend.sqlite");
+    const db = openDatabase(file);
+    const clock = new FakeClock(at);
+    const conversation = new Conversation(db, new Feed(), { now: clock.now });
+    const { id } = conversation.reply({ agent: "main", text: "already read" });
+    conversation.markRead(id);
+    conversation.reply({ agent: "main", text: "still unread" });
+    db.close();
+
+    const reopened = openDatabase(file);
+    t.after(() => reopened.close());
+    assert.equal(new Conversation(reopened, new Feed(), { now: clock.now }).summary(0).unread, 1);
   });
 
   it("gives each reply its own images on every page, in the order sent", (t) => {

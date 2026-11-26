@@ -460,6 +460,42 @@ describe("the iPhone login", () => {
     assert.equal((await reader.read()).done, true);
   });
 
+  async function openAppSummary(env: Awaited<ReturnType<typeof setup>>, token: string) {
+    const response = await fetch(`http://127.0.0.1:${env.target.port}/api/summary/stream`, {
+      headers: bearer(token), signal: AbortSignal.timeout(2000),
+    });
+    assert.equal(response.status, 200);
+    const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
+    let initial = "";
+    while (!/event: summary\ndata: [^\n]+\n\n/.test(initial)) {
+      const { done, value } = await reader.read();
+      assert.equal(done, false);
+      initial += value;
+    }
+    return reader;
+  }
+
+  it("ends an open app summary stream before sending a changed summary after revocation", async (t) => {
+    const env = await setup(t, https);
+    const { token } = (await appExchange(env, await appCode(env))).json();
+    const reader = await openAppSummary(env, token);
+    assert.equal((await env.call("/api/app/devices/current", undefined, { method: "DELETE", headers: bearer(token) })).status, 204);
+
+    env.conversation.reply({ agent: "main", text: "a new reply" });
+    assert.equal((await reader.read()).done, true);
+  });
+
+  it("ends an idle app summary stream at keepalive when the credential has expired", async (t) => {
+    const env = await setup(t, https);
+    const { token, expires_at } = (await appExchange(env, await appCode(env))).json();
+    t.mock.timers.enable({ apis: ["setInterval"] });
+    const reader = await openAppSummary(env, token);
+
+    env.clock.advance(Math.ceil((Date.parse(expires_at) - env.clock.now()) / 60_000));
+    t.mock.timers.tick(25_000);
+    assert.equal((await reader.read()).done, true);
+  });
+
   it("lets the app revoke the credential making the request, not the Web session", async (t) => {
     const env = await setup(t, https);
     const { token } = (await appExchange(env, await appCode(env))).json();
@@ -622,6 +658,8 @@ describe("the UI's API", () => {
     for (const [pathname, options] of [
       ["/api/history", {}],
       ["/api/stream", {}],
+      ["/api/summary/stream", {}],
+      ["/api/history/read", { json: { through: "r-1" } }],
       ["/api/messages", { json: { text: "hi" } }],
       ["/api/agents", {}],
       ["/api/schedules", {}],
@@ -775,6 +813,64 @@ describe("the UI's API", () => {
       assert.equal((await env.call("/api/assets/no-such-image", cookie)).status, 404);
       assert.equal((await env.call(`/api/assets/${id}/more`, cookie)).status, 404);
       assert.equal((await env.call(`/api/assets/${id}`, cookie, { method: "POST", body: "" })).status, 405);
+    });
+  });
+
+  describe("the summary stream", () => {
+    it("streams only the changing execution summary, not the main agent's detailed activity", async (t) => {
+      const env = await setup(t);
+      const reader = new SseReader();
+      t.after(() => reader.close());
+      const at = new Date(env.clock.now()).toISOString();
+      const block = { at, turn_id: "t-1" };
+      env.conversation.activities("main", [{ kind: "turn_start", ...block }]);
+      await reader.open(env.target, "/api/summary/stream", { cookie: env.signIn(), "last-event-id": "999" });
+      assert.equal(reader.status, 200);
+      await reader.waitFor(1);
+      env.conversation.activities("main", [
+        { kind: "thinking", text: "private thoughts", ...block },
+        { kind: "tool_call", name: "bash", call_id: "c-1", arguments: { command: "ls\nsecond line" }, ...block },
+        { kind: "thinking", text: "more thoughts", ...block },
+        { kind: "tool_result", call_id: "c-1", output: "private tool output", is_error: false, ...block },
+      ]);
+      env.conversation.turnEnded("main");
+      await reader.waitFor(4);
+      assert.deepEqual(reader.events.map(({ event, data }) => [event, data]),
+        [{ kind: "thinking" }, { kind: "tool", tool: "bash: ls" }, { kind: "thinking" }, { kind: "waiting" }]
+          .map((state) => ["summary", { state, last_message: null, unread: 0, unseen_failures: 0 }]));
+    });
+
+    it("acknowledges only through the given message across sessions, even when replies share a timestamp", async (t) => {
+      const env = await setup(t);
+      const first = env.conversation.reply({ agent: "main", text: "first reply" });
+      const owner = await env.call("/api/messages", env.signIn(), { json: { text: "owner message\nno preview of this line" } });
+      const reader = new SseReader();
+      t.after(() => reader.close());
+      await reader.open(env.target, "/api/summary/stream", { cookie: env.signIn() });
+      await reader.waitFor(1);
+      assert.deepEqual(reader.events[0]?.data.last_message, { kind: "owner", at: new Date(env.clock.now()).toISOString(), text: "owner message" });
+      env.conversation.reply({ agent: "main", text: "new reply" });
+      assert.equal((await env.call("/api/history/read", env.signIn(), { json: { through: owner.json().id } })).status, 204);
+      assert.equal((await env.call("/api/history/read", env.signIn(), { json: { through: first.id } })).status, 204);
+      await reader.waitFor(3);
+      assert.deepEqual(reader.events.map(({ data }) => data.unread), [1, 2, 1]);
+      assert.equal(reader.events[2]?.data.last_message.text, "new reply");
+    });
+
+    it("keeps the activity failure badge independent of conversation reads", async (t) => {
+      const env = await setup(t);
+      const { id } = env.conversation.reply({ agent: "main", text: "an unread reply" });
+      const session = env.signIn();
+      const reader = new SseReader();
+      t.after(() => reader.close());
+      await reader.open(env.target, "/api/summary/stream", { cookie: session });
+      await reader.waitFor(1);
+      env.clock.advance(1);
+      env.record.turnEnded("main", { turn_id: "a-failed-turn", result: "failed" });
+      await env.call("/api/history/read", session, { json: { through: id } });
+      await env.call("/api/record/seen", session, { method: "POST" });
+      await reader.waitFor(4);
+      assert.deepEqual(reader.events.map(({ data }) => data.unseen_failures), [0, 1, 1, 0]);
     });
   });
 

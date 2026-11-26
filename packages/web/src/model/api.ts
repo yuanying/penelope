@@ -20,6 +20,7 @@ import type {
   PushResponse,
   PushSubscriptionRequest,
   PushUnsubscribeRequest,
+  ReadHistoryRequest,
   RecordDayResponse,
   RecordKind,
   RecordNightResponse,
@@ -58,6 +59,7 @@ export type Api = {
   /** The sub-agents that are not closed. */
   agents(): Promise<SubAgentsResponse>;
   history(before?: string): Promise<HistoryResponse>;
+  markRead(through: string): Promise<void>;
   send(text: string, files: readonly File[]): Promise<PostMessageResponse>;
   logout(): Promise<void>;
   /** The kinds of notice the deployment sends, with the key to subscribe with. */
@@ -140,6 +142,13 @@ export function createApi(fetch: Fetch): Api {
     agents: async () => (await call("/api/agents")).json() as Promise<SubAgentsResponse>,
     history: async (before) =>
       (await call(before === undefined ? "/api/history" : `/api/history?before=${encodeURIComponent(before)}`)).json() as Promise<HistoryResponse>,
+    markRead: async (through) => {
+      await call("/api/history/read", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ through } satisfies ReadHistoryRequest),
+      });
+    },
     send: async (text, files) => {
       let init: RequestInit;
       if (files.length === 0) {

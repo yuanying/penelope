@@ -157,6 +157,10 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
     return true;
   }
   if (method === "GET" && path === "/api/history") return (json(200, historyPage(w, url.searchParams.get("before") ?? undefined)), true);
+  if (method === "POST" && path === "/api/history/read") {
+    request.resume();
+    return (empty(), true); // The Web mock has no other client to share unread counts with.
+  }
   if (method === "GET" && path === "/api/agents") return (json(200, { agents: w.agents }), true);
   if (method === "GET" && path === "/api/app/devices") return (json(200, { devices: w.appDevices } satisfies AppDevicesResponse), true);
   const appDevice = /^\/api\/app\/devices\/([^/]+)$/.exec(path)?.[1];

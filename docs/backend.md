@@ -95,6 +95,12 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - 出来事・会話の履歴・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。途中経過と活動の記録の 1 行は、下の「活動の記録」の期間で消す。
 - `/sources` の保存期間による削除はまだ無い。
 
+## 会話の既読と要約
+
+- 会話の既読は [ADR-0066](adr/0066-agent-summary-stream-and-shared-unread.md) に従い、オーナーの状態として配置ごとに 1 つ持つ。schema 15 の `conversation_read.through_row` は、既読にした最後の `history.row`。移行時点までの履歴は既読扱いにし、その行より後に保存された `kind = 'agent'` の履歴を未読に数える。schema 15 への移行も一方通行。
+- `POST /api/history/read` で受け取ったメッセージの ID を行番号に引き、今より先の場合だけ進める。時刻や端末内の状態には頼らず、複数の端末から順序が前後して届いても既読位置は戻らない。活動の記録の「見た」は別に持つ。
+- 一覧向けの SSE は、接続直後の要約と変更後の要約だけを送る。会話の書き込みと既読、本体のターンとツールの進行、活動の記録の失敗数を使う。本体の進行はメモリ上で追い、backend の起動時は保存済みのターンと途中経過から復元する。詳細な途中経過は配信しない。口と欄は [UI 向けの API の仕様書](ui-api.md) の「要約の流れ（SSE）」。
+
 ## 作ったものの写し
 
 [ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md) の「写しの置き場所」をここで決める。今あるのはオーナーへの返事の画像、オーナーがメッセージに添えた画像（[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md)）、A2A の成果画像（[ADR-0047](adr/0047-exchange-images-over-a2a.md)）である。

@@ -6,11 +6,12 @@
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Activity, AgentId, AgentState, HistoryEntry, HistoryResponse, OwnerFile, OwnerFiles, ReplyImage, ReplyRequest, Trigger } from "@penelope/contract";
+import type { Activity, AgentId, AgentState, AgentSummary, HistoryEntry, HistoryResponse, OwnerFile, OwnerFiles, ReplyImage, ReplyRequest, Trigger } from "@penelope/contract";
 
 import { type Assets, type CheckedImage, splitOwnerFiles, type StoredImage } from "./assets.ts";
 import { transaction } from "./db.ts";
 import type { Feed } from "./feed.ts";
+import { MainActivity, preview } from "./main-activity.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
 
@@ -35,6 +36,8 @@ export class Conversation {
   private readonly feed: Feed;
   private readonly now: () => number;
   private readonly assets: Assets | undefined;
+  private readonly main: MainActivity;
+  private readonly summaryListeners = new Set<() => void>();
 
   /** Without `assets`, a reply carries no images. */
   constructor(db: DatabaseSync, feed: Feed, { now, assets }: { now: () => number; assets?: Assets }) {
@@ -42,6 +45,7 @@ export class Conversation {
     this.feed = feed;
     this.now = now;
     this.assets = assets;
+    this.main = new MainActivity(db);
   }
 
   /**
@@ -67,6 +71,7 @@ export class Conversation {
       this.assets?.discard(stored);
       throw error;
     }
+    this.summaryChanged();
     return ownerFiles(kept(stored), others);
   }
 
@@ -108,7 +113,41 @@ export class Conversation {
         ...(copies.length === 0 ? {} : { images: copies }),
       },
     });
+    this.summaryChanged();
     return { id };
+  }
+
+  /** The owner read through a known history message. Older acknowledgements cannot move it back. */
+  markRead(through: string): boolean {
+    const line = this.db.prepare("SELECT row FROM history WHERE id = ?").get(through) as { row: number } | undefined;
+    if (line === undefined) return false;
+    const updated = this.db.prepare("UPDATE conversation_read SET through_row = ? WHERE through_row < ?")
+      .run(line.row, line.row);
+    if (Number(updated.changes) > 0) this.summaryChanged();
+    return true;
+  }
+
+  summary(unseenFailures: number): AgentSummary {
+    const last = this.db.prepare("SELECT kind, at, substr(text, 1, 201) AS text FROM history ORDER BY row DESC LIMIT 1")
+      .get() as AgentSummary["last_message"] | undefined;
+    const { unread } = this.db.prepare(
+      "SELECT count(*) AS unread FROM history WHERE kind = 'agent' AND row > (SELECT through_row FROM conversation_read WHERE singleton = 1)",
+    ).get() as { unread: number };
+    return {
+      state: this.main.state(),
+      last_message: last == null ? null : { ...last, text: preview(last.text) },
+      unread,
+      unseen_failures: unseenFailures,
+    };
+  }
+
+  onSummaryChange(listener: () => void): () => void {
+    this.summaryListeners.add(listener);
+    return () => this.summaryListeners.delete(listener);
+  }
+
+  private summaryChanged(): void {
+    for (const listener of this.summaryListeners) listener();
   }
 
   /** The event a reply answers, as the UI shows it: its source and summary, not its payload. */
@@ -151,12 +190,14 @@ export class Conversation {
       if (activity.kind === "turn_start") this.feed.publish({ event: "state", data: { agent, state: "thinking" } });
       this.feed.publish({ event: "activity", data: { agent, activity } });
       if (activity.kind === "turn_end") this.feed.publish({ event: "state", data: { agent, state: "waiting" } });
+      if (agent === "main" && this.main.accept(activity)) this.summaryChanged();
     }
   }
 
   /** The turn is over: the agent waits for events again. */
-  turnEnded(agent: AgentId): void {
+  turnEnded(agent: AgentId, turnId?: string): void {
     this.feed.publish({ event: "state", data: { agent, state: "waiting" } });
+    if (agent === "main" && this.main.end(turnId)) this.summaryChanged();
   }
 
   /**

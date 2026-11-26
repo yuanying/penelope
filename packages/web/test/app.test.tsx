@@ -102,6 +102,35 @@ describe("the Web UI", () => {
     assert.ok(text.indexOf("first words") < text.indexOf("an answer"));
   });
 
+  it("reports the conversation read only when its document is visible", async (t) => {
+    const backend = new FakeBackend();
+    backend.history = [{ kind: "agent", id: "r-1", at: "2026-11-14T09:01:00Z", text: "an unread answer", agent: "main" }];
+    const visibility = t.mock.getter(document, "visibilityState", () => "hidden");
+    start(backend);
+    await screen.findByText("an unread answer");
+    assert.deepEqual(backend.readThrough, []);
+    visibility.mock.mockImplementation(() => "visible");
+    await act(async () => document.dispatchEvent(new Event("visibilitychange")));
+    await waitFor(() => assert.deepEqual(backend.readThrough, ["r-1"]));
+  });
+
+  it("leaves live replies unread while another place is open", async (t) => {
+    const backend = new FakeBackend();
+    window.history.replaceState(null, "", "/#/events");
+    t.after(() => window.history.replaceState(null, "", "/"));
+    start(backend);
+    await backend.connected();
+    await act(async () => backend.send({
+      event: "reply",
+      data: { kind: "agent", id: "r-1", at: "2026-11-14T09:01:00Z", text: "a live answer", agent: "main" },
+    }));
+    assert.deepEqual(backend.readThrough, []);
+
+    await act(async () => { window.location.hash = "#/talk"; });
+    await screen.findByText("a live answer");
+    await waitFor(() => assert.deepEqual(backend.readThrough, ["r-1"]));
+  });
+
   it("sends what the owner writes and puts it in the timeline at once", async () => {
     const backend = start();
     await backend.connected();

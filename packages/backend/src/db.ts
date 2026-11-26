@@ -350,6 +350,15 @@ export const MIGRATIONS: readonly string[] = [
     expires_ms     INTEGER NOT NULL
   );
   `,
+  `
+  CREATE TABLE conversation_read (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    through_row INTEGER NOT NULL
+  );
+  -- Before unread was tracked, existing messages had no read status.
+  INSERT INTO conversation_read VALUES (1, (SELECT coalesce(max(row), 0) FROM history));
+  CREATE INDEX history_replies ON history (row) WHERE kind = 'agent';
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

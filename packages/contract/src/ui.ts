@@ -79,6 +79,25 @@ export type HistoryEntry =
 /** `GET /api/history?before=`: newest first. `before` is the cursor of the next, older page. */
 export type HistoryResponse = { entries: HistoryEntry[]; before?: string };
 
+/** `POST /api/history/read`: the history message seen, including this message. */
+export type ReadHistoryRequest = { through: string };
+
+/** The main agent's status for the deployments list (ADR-0066). */
+export type SummaryState =
+  | { kind: "waiting" }
+  | { kind: "thinking" }
+  | { kind: "tool"; tool: string }
+  /** Reserved until Sentinel supports approvals. */
+  | { kind: "approval"; pending: number };
+
+/** The data of a `summary` event on `GET /api/summary/stream`. */
+export type AgentSummary = {
+  state: SummaryState;
+  last_message: Pick<HistoryEntry, "kind" | "at" | "text"> | null;
+  unread: number;
+  unseen_failures: number;
+};
+
 /** Whether an agent is in a turn or waiting for events. */
 export type AgentState = "thinking" | "waiting";
 

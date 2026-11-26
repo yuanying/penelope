@@ -37,7 +37,7 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 - このログインの 2 つの口は、`PENELOPE_PUBLIC_URL` が HTTPS でなければ `503`（`app-login-requires-https`）。challenge の形式や方式が違うと開始は `400`（`invalid-code-challenge`）。引き換えでは不正な body は `400`、不明・期限切れ・使用済みの code や verifier の不一致は `400`（`invalid-grant`）。失敗時に cookie に切り替えない。
 - Web の設定は cookie で `GET /api/app/devices` を読み、有効な端末だけを発行の新しい順で受ける（`AppDevicesResponse`: `{devices: [{id, name, created_at, expires_at}]}`、`id` は UUID）。`DELETE /api/app/devices/<id>` はその端末を失効させる（既になくても `204`）。どちらも Bearer では `403`。
 - アプリで配置を外す前は Bearer で `DELETE /api/app/devices/current` を送る。その token だけを失効させて `204` を返す。cookie だけでは `403`。サーバー側で失効したことを確認できなければ、端末内の資格は消した上で、Web の設定から失効できることを知らせる。
-- Bearer で開いた会話の SSE は、次の配信または keepalive のときに token を確かめ、無効なら閉じる。Web のログアウトと端末の失効は互いに影響しない。
+- Bearer で開いた会話と要約の SSE は、イベントや keepalive を送る前に token を確かめ、失効・期限切れなどで無効なら送らずに閉じる。Web のログアウトと端末の失効は互いに影響しない。
 
 ## 口の一覧
 
@@ -45,7 +45,9 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 | --- | --- |
 | `POST /api/messages` | オーナーのメッセージを送る |
 | `GET /api/history?before=` | 会話の履歴 |
+| `POST /api/history/read` | 会話を指定したメッセージまで既読にする |
 | `GET /api/stream` | 返事・途中経過・状態の流れ（SSE） |
+| `GET /api/summary/stream` | 配置の要約の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
 | `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
@@ -82,6 +84,12 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 - 1 ページは 50 件。backend の渡していない `before` は `400`。
 - 途中経過は履歴に含めない。途中経過は流れで送り、過去の途中経過は活動の記録で読む（「活動の記録」）。
 
+### 会話の既読
+
+- `POST /api/history/read` の JSON は `{"through": "<履歴の id>"}`（型は `ReadHistoryRequest`）。オーナーの発言でもエージェントの返事でもよい。指定した行まで（その行も含む）に保存された返事を既読にし、`204` を返す。不正な body は `400`、存在しない ID は `404`。
+- 既読は配置のオーナーで 1 つ。古い位置を伝え直しても戻らず、指定した行の後に届いた返事は未読のまま。時刻が同じ発言も、backend に保存された順で区別する。履歴を読むだけでは既読にならない。
+- Web は会話が開いていてタブが見えているときに、表示した会話の位置を伝える。活動の記録の「見た」は別で、会話の既読で失敗の数は消えない。
+
 ## 流れ（SSE）
 
 - `GET /api/stream` は Server-Sent Events。出来事の名前（SSE の `event`）と、JSON の `data` を送る。
@@ -97,12 +105,28 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 - 細かさは、sandbox 向けの口と同じくブロックが閉じるごと。トークンごとの流れが UI に要るなら、後で足す。
 
 - SSE の `id` に連番を付ける。つなぎ直したときに `Last-Event-ID` があれば、その後のものから送り直す。backend が覚えているのは最近の 1000 件だけで、backend が再起動すると連番は 1 から数え直す。足りなければ UI が履歴を読み直す。
-- Web UI は、最初につなぐときも、つなぎ直すときも `Last-Event-ID: 0` を付け、覚えている分をすべて受け取り直す。今の状態と今のターンの途中経過を、その中の最後の `state` と最後の `turn_start` から後で知るためである（状態だけを返す口は無い）。backend の再起動で連番が戻っても、これなら取りこぼさない。返事は `id` で履歴と重ねる。
+- Web UI は、最初につなぐときも、つなぎ直すときも `Last-Event-ID: 0` を付け、覚えている分をすべて受け取り直す。今の状態と今のターンの途中経過を、その中の最後の `state` と最後の `turn_start` から後で知るためである（下の要約の流れに途中経過は含まれない）。backend の再起動で連番が戻っても、これなら取りこぼさない。返事は `id` で履歴と重ねる。
 - 25 秒ごとに SSE のコメントを送り、つながりを保つ。
 
 未決:
 
 - オーナー自身のメッセージを流れにも送るか（複数のタブで見ているとき）。今は送らない（`StreamEvent` にオーナーのメッセージの形が無い）。
+
+## 要約の流れ（SSE）
+
+`GET /api/summary/stream` は [ADR-0066](adr/0066-agent-summary-stream-and-shared-unread.md) の配置一覧向けの SSE。会話の一部を含むので、他の非公開 UI API と同じくオーナーの認証が必要。接続直後に現在の要約を 1 件送り、その後は欄が変わったときだけ要約全体を送る。イベント名は `summary`、JSON の `data` は `AgentSummary`。
+
+| 欄 | 中身 |
+| --- | --- |
+| `state` | 本体の状態（下記） |
+| `last_message` | 最後に保存された発言の `{kind, at, text}`。発言が無いときは `null`。履歴と同じく `kind` は `owner` または `agent`、`at` は RFC 3339。本文が無い発言の `text` は空文字 |
+| `unread` | オーナーがまだ読んでいない返事の数。オーナーの発言は数えない |
+| `unseen_failures` | `GET /api/record/unseen` の `unseen` と同じ数（「まだ見ていない失敗と『見た』」） |
+
+- `state` は `{kind: "waiting"}`（出来事を待つ）、`{kind: "thinking"}`（ターン中）、`{kind: "tool", tool: "..."}`（ターン中で、結果がまだ届いていない最後のツール）。ツールの表示は名前と、分かる場合はコマンド・パターン・パスなどの先頭だけ。
+- `{kind: "approval", pending: 1}` は「止まって承認を待っている」状態と承認の件数を表す予約形。現行 backend は待機・思考・ツール使用の 3 状態だけを配信する。承認待ちの配信は Sentinel の承認機能の実装後に行う。
+- 発言とツールの表示には先頭の 1 行を使い、200 文字を超えたら `…` を付けて切る。思考の本文やツールの結果、添付は送らない。
+- 要約に SSE の `id` は付けず、`Last-Event-ID` は使わない。再接続では途中の変化を再生せず、その時点の要約から始める。接続中は 25 秒ごとにコメントを送る。
 
 ## サブエージェント
 

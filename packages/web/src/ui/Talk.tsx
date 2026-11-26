@@ -18,6 +18,8 @@ export type TalkProps = {
   offline: boolean;
   onSend: (text: string, files: File[]) => void;
   onOlder: (() => Promise<void>) | undefined;
+  /** Acknowledge the conversation through a message that was rendered. */
+  onRead?: (through: string) => Promise<void>;
   strip?: ReactNode;
   /** Room at the top of the timeline for what floats over it (the phone's avatar). */
   topInset?: boolean;
@@ -29,7 +31,10 @@ export type TalkProps = {
   onJump?: (before: string) => Promise<void>;
 };
 
-export function Talk({ items, busy, offline, onSend, onOlder, strip, topInset = false, density = "spacious", jump, onJump }: TalkProps) {
+export function Talk({ items, busy, offline, onSend, onOlder, onRead, strip, topInset = false, density = "spacious", jump, onJump }: TalkProps) {
+  // Ignore optimistic messages with client timestamps; they must not hide newer replies.
+  const through = items.findLast((item) => item.kind === "agent" || (item.key === item.id && item.delivery === "sent"))?.id;
+  useRead(through, offline ? undefined : onRead);
   const [files, setFiles] = useState<File[]>([]);
   const add = (more: File[]) => setFiles((list) => [...list, ...more]);
   const drop = useFileDrop(add);
@@ -53,6 +58,29 @@ export function Talk({ items, busy, offline, onSend, onOlder, strip, topInset = 
       ) : null}
     </div>
   );
+}
+
+/** Talk is mounted only at the conversation route; a hidden tab must not mark it read. */
+function useRead(through: string | undefined, onRead: TalkProps["onRead"]): void {
+  const read = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (through === undefined || onRead === undefined) return;
+    let current = true;
+    let pending = false;
+    const report = () => {
+      if (document.visibilityState !== "visible" || read.current === through || pending) return;
+      pending = true;
+      void onRead(through).then(() => {
+        if (current) read.current = through;
+      }, () => {}).finally(() => { pending = false; });
+    };
+    report();
+    document.addEventListener("visibilitychange", report);
+    return () => {
+      current = false;
+      document.removeEventListener("visibilitychange", report);
+    };
+  }, [through, onRead]);
 }
 
 /** Whether a drag carries files from outside the page: text, links and the page's own images do not count. */
