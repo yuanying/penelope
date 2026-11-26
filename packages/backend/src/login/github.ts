@@ -1,4 +1,4 @@
-// The owner's login through GitHub OAuth (ADR-0010), for the browser. It
+// The owner's login through GitHub OAuth (ADR-0010, ADR-0064). It
 // follows natsumi's: a one-time state and a PKCE verifier of the backend's
 // own per attempt, the account matched by its numeric user ID, and GitHub's
 // access token used once to read that ID and never kept.
@@ -24,7 +24,7 @@ const MAX_ATTEMPTS = 64;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
 export type Start = { kind: "redirect"; location: string } | Refused;
-export type Finish = { kind: "signed-in"; session: Session } | Refused;
+export type Finish = { kind: "signed-in"; session: Session } | { kind: "app-login"; userId: number; challenge: string } | Refused;
 export type Refused = { kind: "refused"; status: number; code: string };
 
 const random = () => randomBytes(32).toString("base64url");
@@ -34,7 +34,7 @@ const refused = (status: number, code: string): Refused => ({ kind: "refused", s
 
 export class GitHubLogin {
   /** Attempts in flight, by the hash of their state. In memory: a restart drops them. */
-  private readonly attempts = new Map<string, { verifier: string; expiresMs: number }>();
+  private readonly attempts = new Map<string, { verifier: string; expiresMs: number; appChallenge: string | undefined }>();
   private readonly settings: GitHubSettings | undefined;
   private readonly endpoints: GitHubEndpoints;
   private readonly sessions: LoginSessions;
@@ -55,7 +55,7 @@ export class GitHubLogin {
     this.log = options.log ?? console.error;
   }
 
-  start(): Start {
+  start(appChallenge?: string): Start {
     const settings = this.settings;
     if (!settings) return refused(503, "login-not-configured");
     const now = this.now();
@@ -63,7 +63,7 @@ export class GitHubLogin {
     if (this.attempts.size >= MAX_ATTEMPTS) return refused(429, "too-many-logins");
     const state = random();
     const verifier = random();
-    this.attempts.set(digest(state), { verifier, expiresMs: now + ATTEMPT_TTL_MS });
+    this.attempts.set(digest(state), { verifier, expiresMs: now + ATTEMPT_TTL_MS, appChallenge });
     const url = new URL(this.endpoints.authorizeUrl);
     url.search = new URLSearchParams({
       client_id: settings.clientId,
@@ -102,6 +102,7 @@ export class GitHubLogin {
     const userId = await this.userId(exchanged);
     if (userId === undefined) return refused(502, "github-unavailable");
     if (userId !== settings.ownerId) return refused(403, "account-not-allowed");
+    if (attempt.appChallenge !== undefined) return { kind: "app-login", userId, challenge: attempt.appChallenge };
     return { kind: "signed-in", session: this.sessions.create(userId) };
   }
 

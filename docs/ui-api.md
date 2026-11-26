@@ -1,6 +1,6 @@
 # UI 向けの API の仕様
 
-Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-web-ui-first-with-a-new-api-and-astryx.md) と
+Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-web-ui-first-with-a-new-api-and-astryx.md) と
 [ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md) にある。型は `packages/contract` の `src/ui.ts` が正である。
 
 **この文書は、画面の一覧と流れをオーナーと合意した後に直す。** ここにあるのは、backend を先に作るための最小の形である。
@@ -9,21 +9,35 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 
 ## 認証
 
-- backend の GitHub OAuth のログインで作るセッションの cookie で確かめる（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。通すのはオーナーの GitHub アカウントだけ。
-- cookie が無いか通らなければ `401`。失敗の応答の body は `{error}`。
-- セッションの寿命と cookie の形は [backend.md](backend.md) の「オーナーのログイン」にある。
+- Web UI は GitHub OAuth で作るセッションの cookie を、iPhone は `Authorization: Bearer <token>` を使う（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)・[ADR-0064](adr/0064-backend-issued-bearer-tokens-for-iphone.md)）。どちらも同じ GitHub OAuth App でオーナーの GitHub アカウントだけを通す。
+- 認証が必要な `/api/…` では `Authorization` があれば Bearer だけを確かめる。形式違い、不明、期限切れ、失効済みの token は `401`。`Authorization` がないときは cookie を確かめ、無いか通らなければ `401`。失敗の応答の body は `{error}`。
+- セッションの寿命、cookie と端末の資格の保存は [backend.md](backend.md) の「オーナーのログイン」にある。
 
 | 口 | 中身 |
 | --- | --- |
 | `GET /auth/github/start` | GitHub へ送る（`302`）。ログインが設定されていなければ `503`（`login-not-configured`） |
-| `GET /auth/github/callback` | GitHub から戻る口。オーナーなら cookie を付けて `/` へ送る（`302`）。そうでなければ `{error}` で断る |
+| `GET /auth/github/callback` | GitHub から戻る共通の口。オーナーなら Web の要求には cookie を付けて `/` へ、iPhone の要求には code を付けてアプリへ送る（`302`）。そうでなければ `{error}` で断る |
 | `POST /auth/logout` | セッションを取り消し、cookie を消す（`204`） |
+| `GET /auth/app/start` | iPhone の PKCE challenge を受け、GitHub へ送る（`302`） |
+| `POST /auth/app/token` | code と verifier を端末の token に引き換える（`200`） |
 
-- callback の断りの `error` は、`invalid-state`・`login-expired`・`invalid-request`（`400`）、`github-denied`・`account-not-allowed`（`403`）、`github-exchange-failed`・`github-unavailable`（`502`）、`too-many-logins`（`429`）のどれか。
-- 戻る先は `/` に決めてあり、要求の中身では変わらない。
+- ログインの断りの `error` は、`invalid-state`・`login-expired`・`invalid-request`（`400`）、`github-denied`・`account-not-allowed`（`403`）、`too-many-logins`（`429`）、`github-exchange-failed`・`github-unavailable`（`502`）、`login-not-configured`（`503`）。
+- 戻る先は Web の場合は `/`、iPhone の場合は `penelope://auth` に固定する。URL で戻り先を指定する欄は無い。
 - `GET /healthz` は認証なしで `200` を返す（配置の確かめのため）。
 - `GET /api/agent` と `GET /api/agent/icons/<表情>` は認証なしで読める（「エージェント」）。ログインの画面とホーム画面のアイコンが、ログインの前にエージェントの名前とアイコンを出すためである。この 2 つにはそれ以外のものを載せない。
 - `/.well-known/agent-card.json`、`/a2a`、`/a2a/` の下は A2A の道で、オーナーのログインは使わない。JSON-RPC の呼び出しは受け口が送り手を確かめる（[a2a.md](a2a.md)）。受け口が閉じていれば `404` で、Web UI のページにはならない。
+
+### iPhone のログインと端末の失効
+
+1. アプリは端末で PKCE の verifier を要求ごとに新しく生成する（43〜128 文字、`A–Z a–z 0–9 - . _ ~`。例: 32 バイトの乱数を padding なしの base64url にする）。UTF-8 の verifier の SHA-256 を padding なしの base64url にして challenge とする。
+2. `ASWebAuthenticationSession` で配置の `GET /auth/app/start?code_challenge=<challenge>&code_challenge_method=S256` を開く。backend は既存の GitHub callback を使ってオーナーを確かめ、`penelope://auth?code=<code>` に戻す（Web の cookie は発行しない）。アプリの PKCE は backend と GitHub の間の PKCE とは別である。
+3. 開始したのと同じ配置に JSON `{code, code_verifier, device_name}`（`AppTokenRequest`）を `POST /auth/app/token` で送る。端末名は前後の空白を取り、1〜100 Unicode 文字（制御文字なし）。成功は `200` と `{token, expires_at}`（`AppTokenResponse`）。時刻は RFC 3339（UTC）。code は発行から 5 分間で、正しい verifier で一度だけ引き換えられる。token は発行から 365 日間で、使っても延びない。
+4. token を Keychain に保存し、発行元の HTTPS の UI 向け API にだけ Bearer として送る。URL に入れたり、別の配置や Safari に渡したりしない。失効・期限切れの後はログインし直す。
+
+- このログインの 2 つの口は、`PENELOPE_PUBLIC_URL` が HTTPS でなければ `503`（`app-login-requires-https`）。challenge の形式や方式が違うと開始は `400`（`invalid-code-challenge`）。引き換えでは不正な body は `400`、不明・期限切れ・使用済みの code や verifier の不一致は `400`（`invalid-grant`）。失敗時に cookie に切り替えない。
+- Web の設定は cookie で `GET /api/app/devices` を読み、有効な端末だけを発行の新しい順で受ける（`AppDevicesResponse`: `{devices: [{id, name, created_at, expires_at}]}`、`id` は UUID）。`DELETE /api/app/devices/<id>` はその端末を失効させる（既になくても `204`）。どちらも Bearer では `403`。
+- アプリで配置を外す前は Bearer で `DELETE /api/app/devices/current` を送る。その token だけを失効させて `204` を返す。cookie だけでは `403`。サーバー側で失効したことを確認できなければ、端末内の資格は消した上で、Web の設定から失効できることを知らせる。
+- Bearer で開いた会話の SSE は、次の配信または keepalive のときに token を確かめ、無効なら閉じる。Web のログアウトと端末の失効は互いに影響しない。
 
 ## 口の一覧
 
@@ -38,6 +52,8 @@ Web UI が backend を呼ぶ API を決める。方針は [ADR-0009](adr/0009-we
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
 | `GET /api/settings`・`PUT /api/settings` | モデルと思考の深さの設定 |
+| `GET /api/app/devices`・`DELETE /api/app/devices/<id>` | iPhone の端末の一覧と失効（Web の cookie） |
+| `DELETE /api/app/devices/current` | 呼び出した iPhone の端末の失効（Bearer） |
 | `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
 | `GET /api/memory` および `/api/memory/…` | コミット済みの記憶の閲覧（「記憶」） |
 | `POST /api/memory/save` | 既存の記憶ファイル 1 つの保存（「保存と復元」） |
@@ -276,7 +292,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 返事に添えられた画像は、backend が返事を受けた時点で写したものである（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)、[sandbox-api.md](sandbox-api.md) の「返事の画像」）。オーナーがメッセージに添えた画像も、backend がメッセージを受けた時点で同じように写す（[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md)）。
 
 - 履歴（`agent` と `owner`）と流れの `reply` の `images` の 1 件は、`id`・`mime_type`（PNG・JPEG・GIF・WebP。中身の先頭の bytes から）・`size`（byte）・`name`（写した元のファイルの名前）を持つ。
-- `GET /api/assets/<id>` は、その写しの中身を `mime_type` の型で返す。ログインしたオーナーのセッションだけが読める（ほかは `401`）。無い ID、読めない写しは `404`。GET のほかの method は `405`。
+- `GET /api/assets/<id>` は、その写しの中身を `mime_type` の型で返す。オーナーの cookie または Bearer で読める（ほかは `401`）。無い ID、読めない写しは `404`。GET のほかの method は `405`。
 - 同じ ID の写しは変わらないので、`cache-control: private, max-age=31536000, immutable` を付ける。`x-content-type-options: nosniff` も付ける。
 - Web UI は返事の文の下に縮小して並べ、押すと大きく見せる（[docs/design](design/README.md) の「返事の画像」）。オーナーの画像は吹き出しの上に並べる。送った直後はブラウザの持つファイルで出し、backend が受け付けたら応答の `images` の写しに替える。読み込み直した後と同じ見た目にするためである。
 - 返事の知らせには画像を載せず、数だけを `images` に入れる（「知らせの中身」）。

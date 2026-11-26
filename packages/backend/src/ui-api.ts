@@ -8,7 +8,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ICON_TYPES } from "@penelope/avatar";
-import type { AgentResponse, PostMessageResponse, PushResponse, RecordKind, RecordResultResponse, RecordUnseenResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
+import type { AgentResponse, AppDevicesResponse, PostMessageResponse, PushResponse, RecordKind, RecordResultResponse, RecordUnseenResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import type { SubAgents } from "./agents.ts";
@@ -17,8 +17,9 @@ import { type AgentSettings, faceBytes } from "./avatar.ts";
 import type { Conversation } from "./conversation.ts";
 import type { Feed } from "./feed.ts";
 import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
+import { appChallengeOf, type AppTokens, appTokenRequestOf } from "./login/app-tokens.ts";
 import { CALLBACK_PATH, type GitHubLogin } from "./login/github.ts";
-import type { LoginSessions, Session } from "./login/sessions.ts";
+import type { LoginSessions } from "./login/sessions.ts";
 import { MEMORY_PATH, memoryRoute } from "./memory-api.ts";
 import type { MemoryView } from "./memory-view.ts";
 import type { Memory } from "./memory.ts";
@@ -60,6 +61,7 @@ export type UiOptions = {
   feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
+  appTokens: AppTokens;
   modelSettings: ModelSettings;
   /** The owner's GitHub user ID. Without one, no one gets in. */
   ownerId: number | undefined;
@@ -78,7 +80,7 @@ export type UiOptions = {
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, assets, agents, schedules, record, memory, memoryView, feed, login, sessions, ownerId, now } = options;
+  const { queue, conversation, assets, agents, schedules, record, memory, memoryView, feed, login, sessions, appTokens, ownerId, now } = options;
   const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
@@ -92,16 +94,34 @@ export function uiHandler(options: UiOptions): Handler {
       sendJson(response, 200, { ok: true });
       return;
     }
-    if (route === "GET /auth/github/start") {
-      const start = login.start();
+    if (route === "GET /auth/github/start" || route === "GET /auth/app/start") {
+      const isApp = route === "GET /auth/app/start";
+      const challenge = isApp ? appChallengeOf(url.searchParams) : undefined;
+      if (isApp && !secure) throw new HttpError(503, "app-login-requires-https");
+      if (isApp && challenge === undefined) throw new HttpError(400, "invalid-code-challenge");
+      const start = login.start(challenge);
       if (start.kind === "refused") sendError(response, start.status, start.code);
       else sendEmpty(response, 302, { location: start.location, "cache-control": "no-store" });
+      return;
+    }
+    if (route === "POST /auth/app/token") {
+      if (!secure) throw new HttpError(503, "app-login-requires-https");
+      if (ownerId === undefined) throw new HttpError(503, "login-not-configured");
+      const exchange = appTokenRequestOf(await readJson(request, 4096));
+      if (exchange === undefined) throw new HttpError(400, "invalid-request");
+      const result = appTokens.exchange(exchange, ownerId);
+      if (result === undefined) throw new HttpError(400, "invalid-grant");
+      sendJson(response, 200, result);
       return;
     }
     if (route === `GET ${CALLBACK_PATH}`) {
       const finish = await login.callback(url.searchParams);
       if (finish.kind === "refused") sendError(response, finish.status, finish.code);
-      else {
+      else if (finish.kind === "app-login") {
+        const code = appTokens.issueCode(finish.userId, finish.challenge);
+        if (code === undefined) throw new HttpError(429, "too-many-logins");
+        sendEmpty(response, 302, { location: `penelope://auth?code=${code}`, "cache-control": "no-store", "referrer-policy": "no-referrer" });
+      } else {
         sendEmpty(response, 302, {
           location: "/",
           "set-cookie": cookie(finish.session.token, finish.session.expiresMs),
@@ -167,11 +187,41 @@ export function uiHandler(options: UiOptions): Handler {
       return;
     }
 
-    const token = cookieValue(request);
-    const session: Session | undefined = token === undefined ? undefined : sessions.use(token, ownerId);
-    if (!session) throw new HttpError(401, "not signed in");
-    // Each use moves the session's end on; the cookie follows it.
-    response.setHeader("set-cookie", cookie(session.token, session.expiresMs));
+    if (ownerId === undefined) throw new HttpError(401, "not signed in");
+    const authorization = request.headersDistinct.authorization;
+    let appToken: string | undefined;
+    let deviceId: string | undefined;
+    if (authorization !== undefined) {
+      const [value] = authorization;
+      appToken = secure && authorization.length === 1 ? /^Bearer +([A-Za-z0-9_-]+)$/i.exec(value ?? "")?.[1] : undefined;
+      deviceId = appToken === undefined ? undefined : appTokens.authenticate(appToken, ownerId);
+      if (deviceId === undefined) throw new HttpError(401, "not signed in");
+    } else {
+      const token = cookieValue(request);
+      const session = token === undefined ? undefined : sessions.use(token, ownerId);
+      if (!session) throw new HttpError(401, "not signed in");
+      // Each use moves the session's end on; the cookie follows it.
+      response.setHeader("set-cookie", cookie(session.token, session.expiresMs));
+    }
+
+    if (route === "GET /api/app/devices") {
+      if (deviceId !== undefined) throw new HttpError(403, "requires a Web session");
+      sendJson(response, 200, { devices: appTokens.list(ownerId) } satisfies AppDevicesResponse);
+      return;
+    }
+    if (route === "DELETE /api/app/devices/current") {
+      if (deviceId === undefined) throw new HttpError(403, "requires an app token");
+      appTokens.revoke(deviceId, ownerId);
+      sendEmpty(response, 204, { "cache-control": "no-store" });
+      return;
+    }
+    const selectedDevice = /^\/api\/app\/devices\/([a-f0-9-]{36})$/.exec(url.pathname)?.[1];
+    if (request.method === "DELETE" && selectedDevice !== undefined) {
+      if (deviceId !== undefined) throw new HttpError(403, "requires a Web session");
+      appTokens.revoke(selectedDevice, ownerId);
+      sendEmpty(response, 204, { "cache-control": "no-store" });
+      return;
+    }
 
     if (url.pathname.startsWith(ASSETS_PATH)) {
       await sendAsset(assets, url.pathname.slice(ASSETS_PATH.length), request, response);
@@ -238,9 +288,11 @@ export function uiHandler(options: UiOptions): Handler {
       case "GET /api/agents":
         sendJson(response, 200, { agents: agents.list() } satisfies SubAgentsResponse);
         return;
-      case "GET /api/stream":
-        stream(feed, request, response);
+      case "GET /api/stream": {
+        const token = appToken;
+        stream(feed, request, response, token === undefined ? undefined : () => appTokens.authenticate(token, ownerId) !== undefined);
         return;
+      }
       // Only the main agent has schedules. The UI adds none.
       case "GET /api/schedules":
         sendJson(response, 200, { schedules: schedules.entries("main") } satisfies SchedulesResponse);
@@ -376,7 +428,7 @@ async function sendAsset(assets: Assets, rest: string, request: http.IncomingMes
 }
 
 /** Server-sent events until the browser goes away, a comment now and then to keep the line open. */
-function stream(feed: Feed, request: http.IncomingMessage, response: http.ServerResponse): void {
+function stream(feed: Feed, request: http.IncomingMessage, response: http.ServerResponse, stillSignedIn?: () => boolean): void {
   response.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
     "cache-control": "no-store",
@@ -384,11 +436,23 @@ function stream(feed: Feed, request: http.IncomingMessage, response: http.Server
     "x-accel-buffering": "no",
   });
   response.write(": stream\n\n");
+  const write = (text: string) => {
+    if (response.writableEnded) return;
+    try {
+      if (stillSignedIn === undefined || stillSignedIn()) {
+        response.write(text);
+        return;
+      }
+    } catch {
+      // If the credential cannot be checked, stop sending private events.
+    }
+    response.end();
+  };
   const lastEventId = request.headers["last-event-id"];
   const stop = feed.subscribe(typeof lastEventId === "string" ? lastEventId : undefined, (id, event) => {
-    response.write(`id: ${id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
+    write(`id: ${id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
   });
-  const heartbeat = setInterval(() => response.write(": ping\n\n"), HEARTBEAT_MS);
+  const heartbeat = setInterval(() => write(": ping\n\n"), HEARTBEAT_MS);
   response.once("close", () => {
     clearInterval(heartbeat);
     stop();

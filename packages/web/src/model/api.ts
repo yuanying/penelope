@@ -2,6 +2,7 @@
 // replace.
 import type {
   AgentResponse,
+  AppDevicesResponse,
   HistoryResponse,
   MemoryChangeResponse,
   MemoryChangesResponse,
@@ -67,6 +68,8 @@ export type Api = {
   schedules(): Promise<SchedulesResponse>;
   settings(): Promise<SettingsResponse>;
   saveSettings(selection: ModelSelection): Promise<SettingsResponse>;
+  appDevices(): Promise<AppDevicesResponse>;
+  revokeAppDevice(id: string): Promise<void>;
   /** Removes one of her schedules; Refused with 404 when it is already gone. */
   removeSchedule(id: string): Promise<void>;
   /** One day of the activity record, newest first, narrowed as asked; today when no day is given. */
@@ -165,6 +168,10 @@ export function createApi(fetch: Fetch): Api {
     saveSettings: async (selection) => (await call("/api/settings", {
       method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(selection),
     })).json() as Promise<SettingsResponse>,
+    appDevices: async () => (await call("/api/app/devices")).json() as Promise<AppDevicesResponse>,
+    revokeAppDevice: async (id) => {
+      await call(`/api/app/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
     removeSchedule: async (id) => {
       await call(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },

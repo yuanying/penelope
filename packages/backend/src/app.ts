@@ -21,6 +21,7 @@ import { Feed } from "./feed.ts";
 import { Heartbeat } from "./heartbeat.ts";
 import { close, listenTcp, listenUnix } from "./http.ts";
 import { intakeHandler } from "./intake.ts";
+import { AppTokens } from "./login/app-tokens.ts";
 import { type GitHubEndpoints, GitHubLogin } from "./login/github.ts";
 import { LoginSessions } from "./login/sessions.ts";
 import { MemoryView } from "./memory-view.ts";
@@ -84,6 +85,7 @@ export async function startBackend(
     log,
   });
   const sessions = new LoginSessions(db, { now });
+  const appTokens = new AppTokens(db, { now });
   const inbox = new Inbox(db, queue, { assets, now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
   const subscriptions = new PushSubscriptions(db, { now });
@@ -132,6 +134,7 @@ export async function startBackend(
           feed,
           login,
           sessions,
+          appTokens,
           modelSettings,
           ownerId: config.github?.ownerId,
           publicUrl: config.publicUrl,

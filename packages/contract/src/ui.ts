@@ -1,8 +1,18 @@
-// The backend's API for the Web UI (docs/ui-api.md). It is reworked once the
-// screens are agreed with the owner.
+// The backend's API for the Web UI and iPhone (docs/ui-api.md).
 
 import type { Source } from "./events.ts";
 import type { Activity, AgentId, JobEndKind, MemoryMove, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
+
+/** `GET /auth/app/start` query (separate from the backend's PKCE with GitHub). */
+export type AppLoginQuery = { code_challenge: string; code_challenge_method: "S256" };
+/** `POST /auth/app/token` body. */
+export type AppTokenRequest = { code: string; code_verifier: string; device_name: string };
+export type AppTokenResponse = { token: string; expires_at: string };
+
+/** Web settings metadata. Never includes the token or its hash. */
+export type AppDevice = { id: string; name: string; created_at: string; expires_at: string };
+/** `GET /api/app/devices`. */
+export type AppDevicesResponse = { devices: AppDevice[] };
 
 /** `POST /api/messages` (JSON, or multipart with files). */
 export type PostMessageRequest = { text: string };

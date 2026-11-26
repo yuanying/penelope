@@ -14,6 +14,7 @@ import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
 import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
+import { AppTokens } from "../src/login/app-tokens.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
 import { MemoryView } from "../src/memory-view.ts";
@@ -123,6 +124,7 @@ async function setup(
       feed,
       login,
       sessions,
+      appTokens: new AppTokens(db, { now }),
       modelSettings,
       ownerId: settings?.ownerId,
       publicUrl,
@@ -360,8 +362,8 @@ function parseCookie(line: string | undefined): { name: string; value: string; a
 }
 
 /** Follows a login through GitHub as a browser would, and answers the callback's response. */
-async function logIn(env: Awaited<ReturnType<typeof setup>>, { tamperState = false } = {}) {
-  const start = await env.call("/auth/github/start", undefined);
+async function logIn(env: Awaited<ReturnType<typeof setup>>, { tamperState = false, startPath = "/auth/github/start" } = {}) {
+  const start = await env.call(startPath, undefined);
   assert.equal(start.status, 302);
   const authorize = new URL(String(start.headers.location));
   const code = `code-${Math.random()}`;
@@ -369,6 +371,106 @@ async function logIn(env: Awaited<ReturnType<typeof setup>>, { tamperState = fal
   const state = tamperState ? "forged" : authorize.searchParams.get("state");
   return env.call(`/auth/github/callback?code=${code}&state=${state}`, undefined);
 }
+
+const appVerifier = "a".repeat(43);
+const appChallenge = createHash("sha256").update(appVerifier).digest("base64url");
+const appStart = `/auth/app/start?code_challenge=${appChallenge}&code_challenge_method=S256`;
+const appExchange = (env: Awaited<ReturnType<typeof setup>>, code: string, code_verifier = appVerifier) =>
+  env.call("/auth/app/token", undefined, { json: { code, code_verifier, device_name: "旅先の iPhone" } });
+const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
+
+async function appCode(env: Awaited<ReturnType<typeof setup>>): Promise<string> {
+  const callback = await logIn(env, { startPath: appStart });
+  assert.equal(callback.status, 302);
+  assert.equal(callback.headers["set-cookie"], undefined);
+  const location = new URL(String(callback.headers.location));
+  assert.equal(`${location.protocol}//${location.host}${location.pathname}`, "penelope://auth");
+  const code = location.searchParams.get("code");
+  assert.ok(code);
+  return code;
+}
+
+describe("the iPhone login", () => {
+  const https = { publicUrl: "https://penelope.example.com" };
+
+  it("issues no code when GitHub identifies someone other than the owner", async (t) => {
+    const env = await setup(t, https);
+    env.github.state.userId = 7;
+    const callback = await logIn(env, { startPath: appStart });
+    assert.equal(callback.status, 403);
+    assert.equal(callback.headers.location, undefined);
+  });
+
+  it("binds the one-use code to the app verifier, not GitHub's verifier", async (t) => {
+    const env = await setup(t, https);
+    const code = await appCode(env);
+    assert.equal((await appExchange(env, code, "b".repeat(43))).status, 400);
+    const response = await appExchange(env, code);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["cache-control"], "no-store");
+    const { token } = response.json();
+    const history = await env.call("/api/history", undefined, { headers: bearer(token) });
+    assert.equal(history.status, 200);
+    assert.equal(history.headers["set-cookie"], undefined);
+    assert.equal((await appExchange(env, code)).status, 400);
+  });
+
+  it("rejects a code after five minutes even with the right verifier", async (t) => {
+    const env = await setup(t, https);
+    const code = await appCode(env);
+    env.clock.advance(5);
+    assert.equal((await appExchange(env, code)).status, 400);
+  });
+
+  it("rejects an expired Bearer rather than falling back to a valid cookie", async (t) => {
+    const env = await setup(t, https);
+    const { token } = (await appExchange(env, await appCode(env))).json();
+    env.clock.advance(365 * 24 * 60);
+    assert.equal((await env.call("/api/history", env.signIn(), { headers: bearer(token) })).status, 401);
+  });
+
+  it("lets Web settings revoke only the chosen device, without exposing its credential", async (t) => {
+    const env = await setup(t, https);
+    const first = (await appExchange(env, await appCode(env))).json();
+    env.clock.advance(1);
+    const second = (await appExchange(env, await appCode(env))).json();
+    const list = "/api/app/devices";
+    const cookie = env.signIn();
+    const [{ id, ...device }] = (await env.call(list, cookie)).json().devices;
+    assert.deepEqual(device, {
+      name: "旅先の iPhone", created_at: new Date(env.clock.now()).toISOString(), expires_at: second.expires_at,
+    });
+    const path = `${list}/${id}`;
+    assert.equal((await env.call(path, undefined, { method: "DELETE", headers: bearer(first.token) })).status, 403);
+    assert.equal((await env.call(path, cookie, { method: "DELETE" })).status, 204);
+    assert.equal((await env.call("/api/history", undefined, { headers: bearer(second.token) })).status, 401);
+    assert.equal((await env.call("/api/history", undefined, { headers: bearer(first.token) })).status, 200);
+    assert.equal((await env.call(list, cookie)).json().devices.length, 1);
+  });
+
+  it("stops an open app stream before it sends another event after revocation", async (t) => {
+    const env = await setup(t, https);
+    const { token } = (await appExchange(env, await appCode(env))).json();
+    const response = await fetch(`http://127.0.0.1:${env.target.port}/api/stream`, { headers: bearer(token), signal: AbortSignal.timeout(2000) });
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    assert.equal(new TextDecoder().decode((await reader.read()).value), ": stream\n\n");
+    assert.equal((await env.call("/api/app/devices/current", undefined, { method: "DELETE", headers: bearer(token) })).status, 204);
+    env.conversation.reply({ agent: "main", text: "private reply" });
+    assert.equal((await reader.read()).done, true);
+  });
+
+  it("lets the app revoke the credential making the request, not the Web session", async (t) => {
+    const env = await setup(t, https);
+    const { token } = (await appExchange(env, await appCode(env))).json();
+    const path = "/api/app/devices/current";
+    const cookie = env.signIn();
+    assert.equal((await env.call(path, cookie, { method: "DELETE" })).status, 403);
+    assert.equal((await env.call(path, cookie, { method: "DELETE", headers: bearer(token) })).status, 204);
+    assert.equal((await env.call("/api/history", undefined, { headers: bearer(token) })).status, 401);
+    assert.equal((await env.call("/api/history", cookie)).status, 200);
+  });
+});
 
 describe("the login", () => {
   it("sends the browser to GitHub with a state and a PKCE challenge", async (t) => {

@@ -11,6 +11,8 @@ import { extname, join } from "node:path";
 
 import { modelRef } from "@penelope/contract";
 import type {
+  AppDevice,
+  AppDevicesResponse,
   HistoryEntry,
   HistoryResponse,
   MemoryChangesResponse,
@@ -54,6 +56,7 @@ type World = Scene & {
   started: boolean;
   messages: number;
   settings: SettingsResponse;
+  appDevices: AppDevice[];
   /** The images the owner sent, by id. */
   assets: Map<string, { type: string; body: Buffer }>;
 };
@@ -63,9 +66,11 @@ const worlds = new Map<string, World>();
 function world(name: string): World {
   let found = worlds.get(name);
   if (found === undefined) {
-    const scene = scenes[name]!.make(Date.now());
+    const now = Date.now();
+    const scene = scenes[name]!.make(now);
     found = {
       ...scene, name, lines: new Set(), timers: new Set(), kept: [], started: false, messages: 0, assets: new Map(),
+      appDevices: [{ id: "00000000-0000-4000-8000-000000000001", name: "旅先の iPhone", created_at: new Date(now).toISOString(), expires_at: new Date(now + 365 * 86_400_000).toISOString() }],
       settings: {
         selection: null,
         default: { model: "example/iris-large", thinking: "medium" },
@@ -153,6 +158,12 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
   }
   if (method === "GET" && path === "/api/history") return (json(200, historyPage(w, url.searchParams.get("before") ?? undefined)), true);
   if (method === "GET" && path === "/api/agents") return (json(200, { agents: w.agents }), true);
+  if (method === "GET" && path === "/api/app/devices") return (json(200, { devices: w.appDevices } satisfies AppDevicesResponse), true);
+  const appDevice = /^\/api\/app\/devices\/([^/]+)$/.exec(path)?.[1];
+  if (method === "DELETE" && appDevice !== undefined) {
+    w.appDevices = w.appDevices.filter((device) => device.id !== appDevice);
+    return (empty(), true);
+  }
   if (method === "GET" && path === "/api/settings") return (json(200, w.settings), true);
   if (method === "PUT" && path === "/api/settings") {
     const chunks: Buffer[] = [];

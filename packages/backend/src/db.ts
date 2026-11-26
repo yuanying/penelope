@@ -340,6 +340,16 @@ export const MIGRATIONS: readonly string[] = [
   -- Optional answer route (ADR-0060). Existing events have no route.
   ALTER TABLE events ADD COLUMN answer_via TEXT;
   `,
+  `
+  CREATE TABLE app_devices (
+    id             TEXT NOT NULL PRIMARY KEY,
+    name           TEXT NOT NULL,
+    token_hash     TEXT NOT NULL UNIQUE,
+    github_user_id INTEGER NOT NULL,
+    created_ms     INTEGER NOT NULL,
+    expires_ms     INTEGER NOT NULL
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

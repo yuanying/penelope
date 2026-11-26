@@ -183,6 +183,16 @@ body {
   border-radius: var(--radius-element);
   background: var(--color-neutral);
 }
+.settings-devices {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-device {
+  justify-content: space-between;
+}
 .settings-form label {
   display: grid;
   gap: 6px;

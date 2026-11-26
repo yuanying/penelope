@@ -119,6 +119,14 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - 使うたびに、セッションの GitHub の user ID が今の設定のオーナーと同じかを確かめる。設定のオーナーを変えると、前のセッションは通らなくなる。
 - ログアウトはセッションを取り消し、cookie を消す。
 
+### iPhone の端末
+
+[ADR-0064](adr/0064-backend-issued-bearer-tokens-for-iphone.md) の端末の資格は Web のセッションとは別に持つ。口と寿命は [ui-api.md](ui-api.md#iphone-のログインと端末の失効) にある。
+
+- GitHub の確認に使う state と、確認後にアプリへ返す短命の code はメモリにだけ置く。code は SHA-256 をキーに、GitHub の user ID・アプリの PKCE challenge・期限を持つ。再起動すると、引き換えていない code は使えなくなる。
+- SQLite の `app_devices`（schema 14）には端末の UUID、端末名、GitHub の user ID、発行時刻・期限、256 bit の乱数 token の SHA-256 だけを置く。平文の token は引き換えの応答で一度だけ返す。認証のたびに期限と今のオーナーを確かめる。失効時は行を削除し、期限切れは次の引き換え時に削除する。
+- schema 14 は表の追加だけで、既存の行は移さない。ただし古い backend は新しい版のファイルを開かないため、前の backend に戻すには migration 前の SQLite のバックアップが要る。
+
 ## `/memory` のコミット
 
 [ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md) の「コミットの作者とメッセージの形」をここで決める。
