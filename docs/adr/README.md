@@ -64,3 +64,8 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0060 | [答える口は出来事が持ち、送信を試みなければ一度だけ知らせる](0060-answer-through-the-event-source.md) | Accepted |
 | 0061 | [ターンのコミット前に runner が記憶の共有権限をそろえる](0061-share-memory-worktree-access-before-turn-commits.md) | Accepted |
 | 0062 | [本体とサブエージェントに Pi の codemode を加える](0062-add-codemode-to-main-and-sub-agent-sessions.md) | Accepted |
+| 0063 | [複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る](0063-native-iphone-app-with-a-passive-view-tree.md) | Accepted |
+| 0064 | [iPhone の Bearer token は配置の backend が端末ごとに発行する](0064-backend-issued-bearer-tokens-for-iphone.md) | Accepted |
+| 0065 | [iPhone へは各 backend が本文を暗号化して APNs で知らせる](0065-encrypted-reply-notifications-over-apns.md) | Accepted |
+| 0066 | [一覧は配置ごとの要約の流れを読み、未読は backend が持つ](0066-agent-summary-stream-and-shared-unread.md) | Accepted |
+| 0067 | [iPhone アプリは CI で署名し、TestFlight の内部テストだけに配る](0067-distribute-iphone-builds-through-internal-testflight.md) | Accepted |
