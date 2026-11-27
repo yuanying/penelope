@@ -45,6 +45,7 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 | receivers | TypeScript | `packages/receivers` | `ghcr.io/yuanying/penelope-receivers` (`receivers`) |
 | Web UI | TypeScript | `packages/web` | served by the backend |
 | shared types | TypeScript | `packages/contract` | — |
+| iPhone app | Swift | `apple/` | — (built by Xcode) |
 
 - The Go module is the repository root. go.mod ignores `node_modules/` and `packages/`.
 - The TypeScript parts are npm workspaces under `packages/`. Each has `typecheck`, `test` (`node --test`) and
@@ -55,6 +56,10 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
   `make fmt-check`. Check that `git status --porcelain` is empty.
 - CI runs the full suite (`make test`, `lint`, `tidy`, `vuln`, `images` and `e2e`, along with formatting, vetting
   and type checks). Do not run it locally for every change; fix any failures CI reports.
+
+- The iPhone app is outside both: an Xcode project (`apple/Penelope.xcodeproj`) and a Swift package for its core
+  (`apple/PenelopeCore`, Foundation only). Its rules are in [apple/CLAUDE.md](apple/CLAUDE.md). For a change under
+  `apple/`, run `make apple-test`, and `make apple-build` on a Mac with Xcode; CI runs the core's tests on Linux too.
 
 ### The Web UI over a mock backend
 
@@ -71,6 +76,8 @@ picked. What is changed through the UI (a message, a removed schedule) lasts unt
   and needs only the Go and Node toolchains: no cluster, no root, no outside service.
 - A test that needs more than that goes behind a make target and, in Go, a build tag of its own, so that `make test`
   never picks it up.
+- The iPhone app's targets (`make apple-test`, `make apple-build`) need a Swift toolchain or Xcode, so `make test`
+  does not run them either.
 - To run `make e2e` in several worktrees on one machine at once, give each its own `COMPOSE_PROJECT_NAME` and
   `VERSION` ([e2e/README.md](e2e/README.md)).
 

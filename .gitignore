@@ -2,6 +2,11 @@
 /bin/
 dist/
 node_modules/
+apple/build/
+.build/
+.swiftpm/
+xcuserdata/
+*.xcuserstate
 
 # Test artifacts
 *.test

@@ -117,6 +117,39 @@ jobs:
           cache: npm
       - run: make e2e
 
+  # The core of the iPhone app depends on Foundation alone, so that what it
+  # decides can be tested without an Apple platform (ADR 0063). Running its
+  # tests on Linux is what holds that: an import of UIKit, SwiftUI or the
+  # Keychain does not build here.
+  apple-core:
+    name: iPhone app core (Linux)
+    runs-on: ubuntu-latest
+    container: swift:6.4.3-bookworm
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      # The Swift image has no make.
+      - run: apt-get update && apt-get install -y --no-install-recommends make
+      - run: swift --version
+      - run: make apple-test
+
+  # The app itself needs Xcode. It is built for the simulator and unsigned,
+  # so this uses no secret and runs on any pull request. The core's tests run
+  # again with the toolchain the app is built with.
+  apple-app:
+    name: iPhone app (Xcode)
+    runs-on: xcode-27
+    timeout-minutes: 30
+    env:
+      # By its version, so that the image's default moving on does not change
+      # what builds the app.
+      DEVELOPER_DIR: /Applications/Xcode_27.2.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v7
+      - run: xcodebuild -version
+      - run: make apple-test
+      - run: make apple-build
+
   # On a push to main, every image of a release is pushed under the moving
   # tag main, for the vulnerability tracker to scan: it tells a vulnerability
   # fixed on main but not yet released from one not fixed (ADR 0037). Nothing

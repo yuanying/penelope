@@ -27,3 +27,4 @@ make images   # Dockerfile の target ごとの image
 
 Go（Sentinel）と Node（ほかの部品）の版は、`go.mod` と `.github/workflows/ci.yml` の `setup-node` にあります。
 リポジトリの形とテストの層は [AGENTS.md](AGENTS.md) にあります。
+iPhone のアプリは [apple/](apple/) にあります（Xcode のプロジェクトと、Foundation だけに依存する Core の Swift Package）。作り方の規約は [apple/CLAUDE.md](apple/CLAUDE.md) にあります。

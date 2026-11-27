@@ -168,6 +168,22 @@ test-browser: node_modules/.package-lock.json ## Measure the Web UI's layout in 
 e2e: images node_modules/.package-lock.json ## Run the Pod end to end with Docker Compose and fakes. Needs Docker.
 	PENELOPE_E2E_TAG="$(VERSION)" $(NPM) run e2e --workspace=@penelope/e2e
 
+##@ iPhone app
+
+# The iPhone app (apple/) is Swift, outside the Go module and the npm
+# workspaces, so `make test` never runs these. The core's tests need only a
+# Swift toolchain and run on Linux too; the app needs macOS with Xcode. It is
+# built for the simulator and unsigned, so no team or certificate is needed.
+.PHONY: apple-test
+apple-test: ## Unit tests of the iPhone app's core, with swift test. Needs a Swift toolchain.
+	swift test --package-path apple/PenelopeCore
+
+.PHONY: apple-build
+apple-build: ## Build the iPhone app for the simulator, unsigned. Needs macOS with Xcode.
+	xcodebuild build -project apple/Penelope.xcodeproj -scheme PenelopePhone \
+		-destination 'generic/platform=iOS Simulator' -derivedDataPath apple/build \
+		CODE_SIGNING_ALLOWED=NO
+
 ##@ Housekeeping
 
 .PHONY: tidy
@@ -176,4 +192,4 @@ tidy: ## Tidy go.mod and go.sum.
 
 .PHONY: clean
 clean: ## Remove build artifacts.
-	rm -rf bin packages/*/dist
+	rm -rf bin packages/*/dist apple/build apple/PenelopeCore/.build
