@@ -57,9 +57,8 @@ function streamed(event: string, test: (data: Record<string, unknown>) => boolea
   return stream.events.find((entry) => entry.event === event && test(entry.data as Record<string, unknown>));
 }
 
-/** The lines of an input's `<events>` (docs/events.md, "ターンに入る形"); fails unless the input is that block. */
 function eventLines(input: string): TurnLine[] {
-  const block = /^<events>\n([\s\S]*)\n<\/events>$/.exec(input)?.[1];
+  const block = /^<events>\n([\s\S]*?)\n<\/events>(?:\n|$)/.exec(input)?.[1];
   assert.ok(block !== undefined, `an <events> block: ${JSON.stringify(input)}`);
   return block.split("\n").map((line) => JSON.parse(line) as TurnLine);
 }
@@ -924,8 +923,8 @@ describe("the Pod end to end", () => {
   }));
 
   it("makes a turn of a heartbeat after the quiet time, and asks nothing before folding it", track(async () => {
-    // Guards against: no heartbeat after a quiet stretch (ADR-0031), a heartbeat that carries more than the fact,
-    // or a heartbeat's turn with no tool costing a second call for the request before folding. That a second one
+    // Guards against: no heartbeat after a quiet stretch (ADR-0031), or a heartbeat's turn with no tool
+    // costing a second call for the request before folding. That a second one
     // is counted again from the end of the first one's turn is the backend's unit tests' (test/heartbeat.test.ts).
     // The backend is made again with a heartbeat after a few quiet seconds; the next scenario makes it again without.
     composeEnv.PENELOPE_E2E_HEARTBEAT_SECONDS = "5";
