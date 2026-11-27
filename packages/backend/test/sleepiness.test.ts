@@ -19,5 +19,5 @@ test("the status keeps the awake origin, current context and sleepiness peak acr
   clock.advance(30);
   const second = openDatabase(file);
   t.after(() => second.close());
-  assert.deepEqual(new Sleepiness(second, clock.now, "UTC").status(), { sleep: { state: "awake" }, sleepiness: 80, awake_seconds: 1_800, context });
+  assert.deepEqual(new Sleepiness(second, clock.now, "UTC").status(), { sleep: { state: "awake" }, sleepiness: 80, awake_seconds: 1_800, context, mood: null });
 });

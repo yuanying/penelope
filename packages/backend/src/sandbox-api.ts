@@ -4,7 +4,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type ContextUsage, type DeliveredEvent, isSubAgentName, type MemoryMove, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
+import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type ContextUsage, type DeliveredEvent, isSubAgentName, type MemoryMove, MOOD_MAX_LENGTH, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
@@ -103,6 +103,17 @@ export function sandboxHandler(options: SandboxOptions): Handler {
           if (error instanceof SleepRefusal) throw new HttpError(error.status, error.message);
           throw error;
         }
+        return;
+      }
+      case "POST /v1/mood": {
+        const { agent, mood } = withAgent(await body());
+        mainOnly(agent, "sets the mood");
+        if (typeof mood !== "string" || mood.length > 2 * MOOD_MAX_LENGTH || [...mood].length > MOOD_MAX_LENGTH
+          || /[\0\r\n\u0085\u2028\u2029\uD800-\uDFFF]/u.test(mood) || !mood.trim()) {
+          throw new HttpError(400, `mood must be a nonempty line of up to ${MOOD_MAX_LENGTH} Unicode code points`);
+        }
+        options.sleepiness.setMood(mood.trim());
+        sendEmpty(response, 204);
         return;
       }
       case "GET /v1/model-settings": {
@@ -347,7 +358,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/status", "/v1/sleep", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/status", "/v1/sleep", "/v1/mood", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };

@@ -21,15 +21,16 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 同じ UID で動くエージェントを、backend と UI が見分けるための欄である。確かめはしない（sandbox の中の名乗り）。
 
 - サブエージェントは出来事を取らない。本体からサブエージェントへの頼みは runner の中で直接渡り、backend はサブエージェントの列を持たない（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。`agent` が `main` でない `GET /v1/events` は `400` で断る。
-- サブエージェントには返事・A2A の返事・眠り・予約・裏の仕事の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・`POST /v1/sleep`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
+- サブエージェントには返事・A2A の返事・眠り・気分・予約・裏の仕事の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・`POST /v1/sleep`・`POST /v1/mood`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
 
 ## 口の一覧
 
 | 口 | 中身 |
 | --- | --- |
 | `GET /v1/events?agent=&after=&wait=` | 出来事を取る（long-poll） |
-| `GET /v1/status?agent=main` | 眠りの状態と眠気を読む |
+| `GET /v1/status?agent=main` | 眠りの状態、眠気、気分を読む |
 | `POST /v1/sleep` | 本体のターンの後に眠りを始める |
+| `POST /v1/mood` | 本体の気分を置き換える |
 | `PUT /v1/model-settings` | runner のモデル候補を知らせ、オーナーの設定を読む |
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
@@ -318,6 +319,12 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 runner は本体にだけ `sleep` ツールを渡す。ツールは受け付けた時刻と、そこまでの長さを返す。切り替えは今のターンを終えてから始まる。眠りの間の配送は [出来事を渡す条件](events.md#いつ渡すか) に従う。
 
+## 気分を決める
+
+`POST /v1/mood` の body は `{agent: "main", mood}`（`MoodRequest`）。sandbox の通常の認証が必要である。`mood` は Unicode コードポイントで最大 160 文字の 1 行のプレーンテキスト。前後の空白を除いて保存する。空白だけの文、改行、NUL、不正な Unicode、または本体以外の名乗りは `400`。失敗しても保存済みの気分は変わらない。
+
+成功は `204`。runner は本体だけに `mood` ツールを渡す。呼び出すと、次のターンを待たずに保存済みの気分を置き換える。
+
 ## セッションの切り替えの知らせ
 
 - 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?, memory_reads?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
@@ -371,6 +378,7 @@ runner は本体にだけ `sleep` ツールを渡す。ツールは受け付け�
 | --- | --- |
 | `sleep` | 起きていれば `{state: "awake"}`。寝つく間は `{state: "falling_asleep", wake_at}`、寝ていれば `{state: "asleep", wake_at}`。 `wake_at` は配置の時間帯での RFC 3339 の予定時刻 |
 | `sleepiness` | backend が計算した眠気。0〜100 の整数 |
+| `mood` | 本体が決めた現在の気分。初回の設定前は `null` |
 | `awake_seconds` | 実際に起きた時刻からの秒数。眠りの間は増えない |
 | `context` | 直近の本体の通常のターンのコンテキストを表す `{tokens, context_window}`。報告がなければ欄ごと省く |
 

@@ -185,6 +185,8 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 
 本体の通常のターンの最初の入力では、`</events>` の後の `<runner_notes>` の JSON に `status` を載せる。runner がターン開始時に読んだ値であり、heartbeat または `wake` を列に入れた時点の値と異なることがある。途中で出来事を渡すときは `<runner_notes>` に `status` を添えない。
 
+`status.mood` は本体が決めた 1 行の文で、まだ決めていなければ `null`。気分に対応する前に列に入れた heartbeat と `wake` の `status` には、この欄がないことがある。
+
 ### heartbeat と起きたときの `pending`
 
 `pending`（型は `HeartbeatPending`）は、本体への `heartbeat` と `wake` の行だけに載る。種類ごとに `{items, omitted}` を持ち、`items` は最大 5 件、`omitted` は入りきらなかった件数（全件が載れば 0）。空の種類は省き、すべて空なら `pending` も省く。時刻は RFC 3339。

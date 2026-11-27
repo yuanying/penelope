@@ -398,6 +398,9 @@ export const MIGRATIONS: readonly string[] = [
   UPDATE events SET acked_ms = received_ms
     WHERE source = 'control' AND id LIKE 'nightly@%' AND acked_ms IS NULL;
   `,
+  `
+  ALTER TABLE sleepiness ADD COLUMN mood TEXT;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

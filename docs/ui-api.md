@@ -50,7 +50,7 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 | `GET /api/summary/stream` | 配置の要約の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
-| `GET /api/status` | 眠りの状態と眠気 |
+| `GET /api/status` | 眠りの状態、眠気、気分 |
 | `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
@@ -217,7 +217,9 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 ## 本体の状態
 
-`GET /api/status` は、オーナーの cookie または iPhone の Bearer token で認証する。現在の眠りの状態、眠気と元の事実を `200` と [`AgentStatus`](sandbox-api.md#本体の状態) で返す。キャッシュはしない。
+`GET /api/status` は、オーナーの cookie または iPhone の Bearer token で認証する。現在の眠りの状態、眠気と元の事実、気分を `200` と [`AgentStatus`](sandbox-api.md#本体の状態) で返す。キャッシュはしない。
+
+`mood` は本体が決めたプレーンテキストで、未設定なら `null`。返事の `expression` とは別の欄である。
 
 ## 設定
 

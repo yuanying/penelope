@@ -13,6 +13,7 @@ import type {
   MemoryRepairRequest,
   ModelCatalog,
   ModelSelectionResponse,
+  MoodRequest,
   PollResponse,
   ReplyRequest,
   ReplyResponse,
@@ -119,6 +120,10 @@ export class Backend {
 
   async sleep(request: Without<SleepRequest>): Promise<SleepResponse> {
     return (await this.post("/v1/sleep", request)) as SleepResponse;
+  }
+
+  async setMood(request: Without<MoodRequest>): Promise<void> {
+    await this.post("/v1/mood", request);
   }
 
   async a2aReply(reply: Without<A2AReplyRequest>): Promise<A2AReplyResponse> {

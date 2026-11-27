@@ -9,7 +9,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
+import { A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, MOOD_MAX_LENGTH, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
 import { Type } from "typebox";
 
 import type { Backend } from "./backend.ts";
@@ -99,6 +99,20 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
     },
   });
 
+  const mood = defineTool({
+    name: "mood",
+    exposure: "model-only",
+    label: "Mood",
+    description: "Set your current mood. It stays until you change it, even when you sleep.",
+    parameters: Type.Object({
+      mood: Type.String({ minLength: 1, maxLength: MOOD_MAX_LENGTH, description: "One short line in your own words." }),
+    }),
+    async execute(_id, params) {
+      await backend.setMood(params);
+      return text("Mood set.");
+    },
+  });
+
   const replyToAgent = defineTool({
     name: "reply_to_agent",
     exposure: "model-only",
@@ -181,7 +195,7 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
     },
   });
 
-  return [reply, sleep, replyToAgent, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
+  return [reply, sleep, mood, replyToAgent, scheduleAdd, scheduleList, scheduleRemove, selfEvent] as ToolDefinition[];
 }
 
 export function subAgentTools(agents: SubAgents): ToolDefinition[] {

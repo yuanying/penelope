@@ -85,13 +85,15 @@ describe("the heartbeat", () => {
     assert.ok(event && !("pending" in event));
   });
 
-  it("delivers the sleepiness and facts sampled when the heartbeat was queued", (t) => {
-    const { clock, heartbeat, queue } = setup(t);
+  it("delivers the status sampled when the heartbeat was queued", (t) => {
+    const { clock, heartbeat, queue, sleepiness } = setup(t);
     clock.advance(6 * 60);
+    sleepiness.setMood("Quietly hopeful.");
     heartbeat.tick();
     clock.advance(10);
+    sleepiness.setMood("Ready for a break.");
     const [event] = queue.take({ after: 0 });
-    assert.deepEqual(event?.status, { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600 });
+    assert.deepEqual(event?.status, { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600, mood: "Quietly hopeful." });
   });
 
   it("writes since when it counted and how long it waited as the payload", (t) => {
