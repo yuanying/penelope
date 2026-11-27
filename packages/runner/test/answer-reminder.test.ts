@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { join } from "node:path";
 import { test } from "node:test";
 
 import type { TurnEndRequest } from "@penelope/contract";
@@ -106,11 +107,15 @@ test("a draft before a tool call does not count when the final assistant message
 });
 
 test("text first produced by the fold request does not trigger a reminder", async () => {
-  const { fake, start, calls } = await world();
-  await start((call) => call.lastText === foldAskInput() ? { text: "Summary for later" } : {});
+  const { fake, start, calls, config } = await world();
+  await start((call) => {
+    if (call.lastText === foldAskInput()) return { text: "Summary for later" };
+    if (call.lastRole === "toolResult") return {};
+    return { calls: [{ tool: "read", args: { path: join(config.home, "missing.txt") } }] };
+  });
   fake.push({ ...ui(1, "hello"), answer_via });
   await until(() => acked(fake).includes(1));
-  assert.deepEqual(calls.slice(1).map((call) => call.lastText), [foldAskInput()]);
+  assert.deepEqual(calls.slice(2).map((call) => call.lastText), [foldAskInput()]);
 });
 
 test("a notice can call the usual tools, and its failure is the turn's failure", async () => {

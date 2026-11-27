@@ -96,14 +96,11 @@ interface TurnOptions {
   night?: { seq: number; stage: NightTurnStage };
   afterCommit?: (turnId: string) => Promise<void>;
   images?: ImageContent[];
-  heartbeat?: boolean;
 }
 
 interface Turn {
   session: AgentSession;
   seqs: number[];
-  /** Whether every event of the turn so far is a heartbeat (ADR-0031). */
-  heartbeat: boolean;
   /** The steers and follow-ups handed to Pi during the turn, until Pi has them. */
   queued: Promise<unknown>[];
   answers: AnswerReminder | undefined;
@@ -117,8 +114,6 @@ const sleep = (ms: number, signal: AbortSignal) =>
       resolve();
     });
   });
-
-const isHeartbeat = (event: DeliveredEvent) => event.source === "heartbeat";
 
 const failure = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -302,7 +297,6 @@ export class Runner {
     // steer, so that the turn sees it with what led up to it. Batched events
     // alone follow the turn.
     turn.seqs.push(...events.map((event) => event.seq));
-    turn.heartbeat &&= events.every(isHeartbeat);
     const steer = events.some((event) => event.delivery === "now");
     turn.queued.push(
       this.input(events).then(([text, images]) => {
@@ -342,7 +336,6 @@ export class Runner {
       await this.turnOf(this.session!.session, text, {
         events,
         ...(images ? { images } : {}),
-        heartbeat: events.every(isHeartbeat),
       });
     }
   }
@@ -362,9 +355,8 @@ export class Runner {
    *
    * An ordinary turn is one of her day's session, made of events: events can
    * join it, and when it ends it is marked so that it is folded from then on
-   * (ADR-0015). One that ended without any text of hers is first asked, once,
-   * for what she wants to keep, unless it was a heartbeat's alone and called
-   * no tool, so that nothing happened in it (ADR-0031). The nightly turns are not ordinary.
+   * (ADR-0015). The request before folding is for turns that called a tool
+   * but wrote no text (ADR-0071). The nightly turns are not ordinary.
    */
   private async turnOf(session: AgentSession, input: string, options: TurnOptions = {}): Promise<Outcome & { turn_id: string }> {
     const { night, images } = options;
@@ -395,7 +387,7 @@ export class Runner {
         compactions++;
       }
     });
-    const turn: Turn = { session, seqs: options.events?.map((event) => event.seq) ?? [], heartbeat: options.heartbeat ?? false, queued: [], answers };
+    const turn: Turn = { session, seqs: options.events?.map((event) => event.seq) ?? [], queued: [], answers };
     this.turnId = recorder.turnId;
     this.folded = 0;
     recorder.start();
@@ -444,8 +436,7 @@ export class Runner {
     let outcome = this.outcome(session, thrown);
     if (answers && remindedAt !== undefined) this.log(answers.result(remindedAt, outcome.result));
     if (ordinary && !failed) {
-      const idle = turn.heartbeat && !called;
-      if (remindedAt === undefined && outcome.result === "done" && this.config.turnFold && !spoke && !idle && !this.stopping) {
+      if (remindedAt === undefined && outcome.result === "done" && this.config.turnFold && called && !spoke && !this.stopping) {
         asked = true;
         const asking = this.outcome(session, await this.ask(session, recorder.turnId));
         if (asking.result !== "done") {

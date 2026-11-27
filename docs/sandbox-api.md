@@ -231,7 +231,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 - body は `{agent, activities: [...]}`。runner が Pi の出来事を購読し、**ブロックが閉じるごとに**送る。トークンごとには送らない。
 - 1 件は `kind`・`at`（RFC 3339）・`turn_id` を持つ。
 - `turn_id` は runner がターンごとに付ける UUID である。runner の 1 ターンは、Pi の 1 回の実行（入力を渡してから、Pi がそれ以上自分で続けなくなるまで）で、その間に steer と follow-up で入った出来事も含む。
-- 地の文の無いまま終わったターンで、畳む前に runner が送る頼みと、その答え（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）も、同じ `turn_id` のターンに入る。ターンの終わりの知らせは、その答えの後に送る。
+- runner が[畳む前の頼み](events.md#畳む前の頼み)を送る場合、頼みとその答えは同じ `turn_id` のターンに入る。ターンの終わりの知らせは、その答えの後に送る。
 - `tool_result` の `output` は、結果の文字の部分を改行でつないだものである。画像などの文字でない部分は `[image/png]` のように種類だけを書く。16,000 文字を超えた分は送らず、`[N more characters]` と数だけを添える。
 - 送れなかった途中経過は送り直さない。記録と UI の写しだけのためである。
 
