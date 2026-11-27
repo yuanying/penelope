@@ -3,6 +3,7 @@
 
 import type { AnswerVia, Delivery, Source } from "./events.ts";
 import type { HeartbeatPending } from "./heartbeat.ts";
+import type { AgentStatus, ContextUsage } from "./status.ts";
 
 /** Which agent is calling. The main agent is `main`; a sub-agent's is the name its parent gives it. */
 export type AgentId = "main" | (string & {});
@@ -69,11 +70,11 @@ type DeliveredBase = {
 /**
  * An event as `GET /v1/events` hands it over. An inline source's event
  * carries its payload into the turn; any other carries only the summary and
- * where to read it. Only a heartbeat can also carry pending work.
+ * where to read it. Only a heartbeat can also carry pending work and status.
  */
 export type DeliveredEvent =
-  | (DeliveredBase & { inline: true; payload: unknown; pending?: never })
-  | (DeliveredBase & { inline: false; payload?: never; pending?: HeartbeatPending });
+  | (DeliveredBase & { inline: true; payload: unknown; pending?: never; status?: never })
+  | (DeliveredBase & { inline: false; payload?: never; pending?: HeartbeatPending; status?: AgentStatus });
 
 /** `GET /v1/events?agent=&after=&wait=` */
 export type PollResponse = { events: DeliveredEvent[] };
@@ -198,6 +199,7 @@ export type TurnEndRequest = FromAgent & {
   seqs?: number[];
   /** For a turn of the nightly switch: the `seq` of its control event, and which step it is. */
   night?: { seq: number; stage: NightTurnStage };
+  context?: ContextUsage;
 };
 
 /** When a schedule comes due: a cron expression, or one time (RFC 3339). */

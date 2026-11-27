@@ -4,7 +4,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
 
-import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type DeliveredEvent, isSubAgentName, type MemoryMove, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
+import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type Activity, type AgentId, type ContextUsage, type DeliveredEvent, isSubAgentName, type MemoryMove, type NightStages, type NightTurnReport, type ScheduleWhen } from "@penelope/contract";
 
 import { type Inbox, InboxRefusal } from "./a2a/inbox.ts";
 import type { SubAgents } from "./agents.ts";
@@ -20,6 +20,7 @@ import type { ModelSettings } from "./model-settings.ts";
 import type { Queue } from "./queue.ts";
 import type { ActivityRecord, TurnEnd } from "./record.ts";
 import { ScheduleError, type Schedules } from "./schedules.ts";
+import type { Sleepiness } from "./sleepiness.ts";
 import { iso } from "./time.ts";
 
 /** The longest a poll waits. */
@@ -44,6 +45,7 @@ export type SandboxOptions = {
   /** The activity record (ADR-0038). */
   record: ActivityRecord;
   modelSettings: ModelSettings;
+  sleepiness: Sleepiness;
   now: () => number;
   maxBytes?: number;
   /** The limit of a reply's body, which carries its images. */
@@ -84,6 +86,10 @@ export function sandboxHandler(options: SandboxOptions): Handler {
     }
 
     switch (route) {
+      case "GET /v1/status":
+        mainOnly(agentOf(url.searchParams.get("agent")), "reads the main session's status");
+        sendJson(response, 200, options.sleepiness.status(), { "cache-control": "no-store" });
+        return;
       case "GET /v1/model-settings": {
         mainOnly(agentOf(url.searchParams.get("agent")), "reads the saved model selection");
         sendJson(response, 200, { selection: options.modelSettings.selection() });
@@ -201,8 +207,9 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       case "POST /v1/turns/end": {
         const request = withAgent(await body());
         const end = turnEnd(request);
-        const { agent } = request;
+        const { agent, context } = request;
         const turn_id = end.turn_id;
+        if (agent === "main" && end.night === undefined) options.sleepiness.turnEnded(contextUsage(context));
         keep(() => record.turnEnded(agent, end));
         conversation.turnEnded(agent, turn_id);
         try {
@@ -295,6 +302,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         if (memory_reads !== undefined && stages === undefined) throw new HttpError(400, "memory_reads comes with the night's stages");
         const steps = stages === undefined ? undefined : nightStages(stages);
         const reads = memory_reads === undefined ? undefined : readSnapshot(memory_reads);
+        if (steps === undefined || steps.session.result === "done") options.sleepiness.rotated(seq);
         const head = steps === undefined ? undefined : await memoryView.head().catch(() => {
           log("memory: final night version could not be read");
           return undefined;
@@ -321,7 +329,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/status", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };
@@ -501,6 +509,15 @@ function nightStages(value: unknown): NightStages {
     },
     session: stage(stages.session, "session"),
   };
+}
+
+function contextUsage(value: unknown): ContextUsage | undefined {
+  if (value === undefined) return undefined;
+  const { tokens, context_window } = object(value);
+  if (typeof tokens !== "number" || !Number.isSafeInteger(tokens) || tokens < 0 || !positiveInteger(context_window)) {
+    throw new HttpError(400, "context needs nonnegative integer tokens and a positive integer context_window");
+  }
+  return { tokens, context_window };
 }
 
 function positiveInteger(value: unknown): value is number {

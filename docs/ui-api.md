@@ -50,6 +50,7 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 | `GET /api/summary/stream` | 配置の要約の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
+| `GET /api/status` | 現在の眠気とその元の事実 |
 | `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
@@ -213,6 +214,10 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - API・ログイン・ヘルスチェック・A2A の道以外では、backend が `PENELOPE_WEB_DIR` にある Web UI の build（`packages/web` の `dist/`）を配る。`/` は `index.html` である。無いファイルは `404`。
 - `/manifest.webmanifest` は backend がその場で作る。名前はエージェントの名前、アイコンはアバターの `neutral` の画像（無ければ build の `icon.svg`）である。ホーム画面に置いて開くため（PWA）。
 - `assets/` の下のファイルは中身で名前が決まるので、長く cache させる。ほかは毎回確かめさせる。
+
+## 本体の状態
+
+`GET /api/status` は、オーナーの cookie または iPhone の Bearer token で認証する。現在の眠気と元の事実を `200` と [`AgentStatus`](sandbox-api.md#本体の状態) で返す。キャッシュはしない。
 
 ## 設定
 

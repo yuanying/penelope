@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 
-import type { DeliveredEvent, JobEventRequest, ModelSelection, Schedule, SelfEventRequest } from "@penelope/contract";
+import type { AgentStatus, DeliveredEvent, JobEventRequest, ModelSelection, Schedule, SelfEventRequest } from "@penelope/contract";
 
 export const TOKEN = "real-token-example";
 
@@ -25,6 +25,7 @@ export class FakeBackend {
   readonly received: Received[] = [];
   readonly url: Promise<string>;
   modelSelection: ModelSelection | null = null;
+  status: AgentStatus | undefined;
   /** Seqs whose ack is dropped, as if the runner had stopped before it reached the backend. */
   readonly dropAcks = new Set<number>();
   private readonly events: DeliveredEvent[] = [];
@@ -146,6 +147,7 @@ export class FakeBackend {
       received.answered = events.map((event) => event.seq);
       return answer(200, { events });
     }
+    if (key === "GET /v1/status" && this.status) return answer(200, this.status);
     if (key === "PUT /v1/model-settings") return answer(200, { selection: this.modelSelection });
     if (key === "POST /v1/events/ack") {
       for (const seq of (body as { seqs: number[] }).seqs) if (!this.dropAcks.has(seq)) this.acked.add(seq);

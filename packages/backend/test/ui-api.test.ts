@@ -25,6 +25,7 @@ import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { cronOf, Schedules } from "../src/schedules.ts";
+import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
 import { uiHandler } from "../src/ui-api.ts";
@@ -129,6 +130,7 @@ async function setup(
       appTokens: new AppTokens(db, { now }),
       apnsRegistrations,
       modelSettings,
+      sleepiness: new Sleepiness(db, now),
       ownerId: settings?.ownerId,
       publicUrl,
       agent: () => agent,
@@ -322,6 +324,14 @@ describe("saving memory", () => {
     assert.equal(refused.status, 403);
     assert.deepEqual(refused.json(), { kind: "editing_disabled" });
   });
+});
+
+it("serves current sleepiness and its facts to the owner", async (t) => {
+  const { call, clock, signIn } = await setup(t);
+  clock.advance(12 * 60);
+  const answer = await call("/api/status", signIn());
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.json(), { sleepiness: 50, awake_seconds: 43_200 });
 });
 
 const modelChoice = { model: "example/org/chat", thinking: "low" } as const;
@@ -696,6 +706,7 @@ describe("the UI's API", () => {
       ["/api/history/read", { json: { through: "r-1" } }],
       ["/api/messages", { json: { text: "hi" } }],
       ["/api/agents", {}],
+      ["/api/status", {}],
       ["/api/schedules", {}],
       ["/api/schedules/s-1", { method: "DELETE" }],
       ["/api/record", {}],

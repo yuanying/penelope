@@ -7,6 +7,7 @@ import type { Inbox } from "./a2a/inbox.ts";
 import type { Conversation } from "./conversation.ts";
 import type { Queue } from "./queue.ts";
 import type { ActivityRecord } from "./record.ts";
+import type { Sleepiness } from "./sleepiness.ts";
 import { type AwakeHours, iso, tickMs } from "./time.ts";
 
 export class Heartbeat {
@@ -14,6 +15,7 @@ export class Heartbeat {
   private readonly conversation: Conversation;
   private readonly inbox: Inbox;
   private readonly record: ActivityRecord;
+  private readonly sleepiness: Sleepiness;
   private readonly now: () => number;
   private readonly quietMs: number;
   private readonly awake: AwakeHours;
@@ -25,12 +27,13 @@ export class Heartbeat {
   constructor(
     queue: Queue,
     conversation: Conversation,
-    options: { now: () => number; quietMs: number; awake: AwakeHours; inbox: Inbox; record: ActivityRecord; log?: (line: string) => void },
+    options: { now: () => number; quietMs: number; awake: AwakeHours; inbox: Inbox; record: ActivityRecord; sleepiness: Sleepiness; log?: (line: string) => void },
   ) {
     this.queue = queue;
     this.conversation = conversation;
     this.inbox = options.inbox;
     this.record = options.record;
+    this.sleepiness = options.sleepiness;
     this.now = options.now;
     this.quietMs = options.quietMs;
     this.awake = options.awake;
@@ -56,14 +59,15 @@ export class Heartbeat {
     const at = iso(now);
     const a2a_tasks = this.gather("a2a_tasks", () => this.inbox.heartbeatTasks(now));
     const failures = this.gather("failures", () => this.record.heartbeatFailures(iso(this.queue.lastHeartbeatAt() ?? now - this.quietMs)));
-    const payload: HeartbeatPayload = {
-      since: iso(from),
-      quiet_minutes: this.quietMs / 60_000,
-      ...(a2a_tasks === undefined && failures === undefined ? {} : {
-        pending: { ...(a2a_tasks === undefined ? {} : { a2a_tasks }), ...(failures === undefined ? {} : { failures }) },
-      }),
-    };
     try {
+      const payload: HeartbeatPayload = {
+        since: iso(from),
+        quiet_minutes: this.quietMs / 60_000,
+        status: this.sleepiness.status(now),
+        ...(a2a_tasks === undefined && failures === undefined ? {} : {
+          pending: { ...(a2a_tasks === undefined ? {} : { a2a_tasks }), ...(failures === undefined ? {} : { failures }) },
+        }),
+      };
       this.queue.accept(
         { source: "heartbeat", id: `heartbeat@${at}`, occurred_at: at, summary: `no turn for ${quietText(this.quietMs)}`, payload },
         { builtin: true },

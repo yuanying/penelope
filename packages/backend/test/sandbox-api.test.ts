@@ -21,6 +21,7 @@ import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { sandboxHandler } from "../src/sandbox-api.ts";
 import { cronOf, Schedules } from "../src/schedules.ts";
+import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours } from "../src/time.ts";
 import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
@@ -58,9 +59,10 @@ async function setup(
   const inbox = new Inbox(db, queue, { assets, now: Date.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
   const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
   const modelSettings = new ModelSettings(db, clock.now);
+  const sleepiness = new Sleepiness(db, clock.now);
   const logs: string[] = [];
   const server = await listenTcp(
-    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, now: Date.now, log: (line) => logs.push(line) }),
+    sandboxHandler({ token, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, now: Date.now, log: (line) => logs.push(line) }),
     "127.0.0.1", 0,
   );
   const { port } = server.address() as AddressInfo;
@@ -119,6 +121,41 @@ describe("the sandbox's API", () => {
     assert.deepEqual(modelSettings.read(), before);
     clock.advance(1);
     assert.deepEqual(modelSettings.read(), { models: [], default: null, selection: before.selection });
+  });
+
+  it("keeps the sleepiness peak but shows the smaller context after compaction or a model switch", async (t) => {
+    const { call } = await setup(t);
+    const end = (turn_id: string, tokens: number, context_window: number) =>
+      call("/v1/turns/end", { json: { agent: "main", turn_id, context: { tokens, context_window } } });
+    assert.equal((await end("full", 9_000, 10_000)).status, 204);
+    assert.equal((await end("smaller", 1_000, 20_000)).status, 204);
+    const status = await call("/v1/status?agent=main");
+    assert.equal(status.status, 200);
+    assert.deepEqual(status.json(), { sleepiness: 90, awake_seconds: 0, context: { tokens: 1_000, context_window: 20_000 } });
+  });
+
+  it("uses time awake when a runner does not report context", async (t) => {
+    const { call, clock } = await setup(t);
+    clock.advance(6 * 60);
+    assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "legacy" } })).status, 204);
+    const status = await call("/v1/status?agent=main");
+    assert.equal(status.status, 200);
+    assert.deepEqual(status.json(), { sleepiness: 25, awake_seconds: 21_600 });
+  });
+
+  it("rejects a context report that cannot describe a model window", async (t) => {
+    const { call } = await setup(t);
+    const end = await call("/v1/turns/end", { json: { agent: "main", turn_id: "invalid", context: { tokens: 0, context_window: 0 } } });
+    assert.equal(end.status, 400);
+  });
+
+  it("does not use night workers or sub-agents to measure the main context", async (t) => {
+    const { call } = await setup(t);
+    const context = { tokens: 9_000, context_window: 10_000 };
+    assert.equal((await call("/v1/turns/end", { json: { agent: "research", turn_id: "child", context } })).status, 204);
+    const night = { seq: 7, stage: "reflection" };
+    assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "night", night, context } })).status, 204);
+    assert.deepEqual((await call("/v1/status?agent=main")).json(), { sleepiness: 0, awake_seconds: 0 });
   });
 
   describe("taking events", () => {
@@ -537,6 +574,23 @@ describe("the sandbox's API", () => {
       assert.equal((await call("/v1/sessions/rotated", { json: { agent: "main", seq: 7, stages } })).status, 204);
       const [night] = record.day({ day: new Date(clock.now()).toISOString().slice(0, 10), kind: "night" }).rows;
       assert.deepEqual(night?.kind === "night" && [night.result, night.stages], ["failed", stages]);
+    });
+
+    it("resets sleepiness only once when a night opens a new session", async (t) => {
+      const { call, clock } = await setup(t);
+      const done = { result: "done" };
+      const stages = { reflection: done, verifier: done, curator: done, session: done };
+      const rotation = { agent: "main", seq: 7 };
+      const status = async () => (await call("/v1/status?agent=main")).json();
+      clock.advance(12 * 60);
+      assert.equal((await call("/v1/sessions/rotated", { json: { ...rotation, stages: { ...stages, session: { result: "failed" } } } })).status, 204);
+      assert.deepEqual(await status(), { sleepiness: 50, awake_seconds: 43_200 });
+
+      assert.equal((await call("/v1/sessions/rotated", { json: { ...rotation, stages } })).status, 204);
+      assert.deepEqual(await status(), { sleepiness: 0, awake_seconds: 0 });
+      clock.advance(6 * 60);
+      assert.equal((await call("/v1/sessions/rotated", { json: rotation })).status, 204);
+      assert.deepEqual(await status(), { sleepiness: 25, awake_seconds: 21_600 });
     });
 
     it("keeps the latest read snapshot when an older night or a legacy report arrives later", async (t) => {

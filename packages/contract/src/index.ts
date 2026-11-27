@@ -9,5 +9,6 @@ export * from "./record.ts";
 export * from "./settings.ts";
 export type * from "./events.ts";
 export type * from "./sandbox.ts";
+export type * from "./status.ts";
 export type * from "./turn.ts";
 export type * from "./ui.ts";

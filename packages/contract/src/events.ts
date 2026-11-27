@@ -1,6 +1,7 @@
 // The event envelope and what the intake answers (docs/events.md).
 
 import type { HeartbeatPending } from "./heartbeat.ts";
+import type { AgentStatus } from "./status.ts";
 
 /** The sources the backend has itself. Plugins in receivers add their own names. */
 export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "job" | "control" | "heartbeat";
@@ -73,7 +74,7 @@ export type CronPayload = { schedule_id: string; reason: string };
  * ended, or when the backend started if she has had none). A fraction only
  * when the tests set the quiet time in seconds.
  */
-export type HeartbeatPayload = { since: string; quiet_minutes: number; pending?: HeartbeatPending };
+export type HeartbeatPayload = { since: string; quiet_minutes: number; pending?: HeartbeatPending; status?: AgentStatus };
 
 /** The body of every 4xx and 5xx answer of the backend. */
 export type ErrorBody = { error: string };

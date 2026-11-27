@@ -7,6 +7,7 @@ import type {
   A2AReplyResponse,
   Activity,
   AgentId,
+  AgentStatus,
   DeliveredEvent,
   JobEventRequest,
   MemoryRepairRequest,
@@ -65,6 +66,11 @@ export class Backend {
     const query = new URLSearchParams({ agent: this.agent, after: String(after), wait: String(wait) });
     const response = (await this.request("GET", `/v1/events?${query}`, undefined, signal)) as PollResponse;
     return response.events;
+  }
+
+  async status(signal: AbortSignal): Promise<AgentStatus> {
+    const query = new URLSearchParams({ agent: this.agent });
+    return (await this.request("GET", `/v1/status?${query}`, undefined, signal)) as AgentStatus;
   }
 
   async readModelSelection(signal: AbortSignal): Promise<ModelSelectionResponse> {

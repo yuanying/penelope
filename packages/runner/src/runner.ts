@@ -13,9 +13,10 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import type { ImageContent } from "@earendil-works/pi-ai";
-import type { AgentSession, ModelRuntime, SettingsManager } from "@earendil-works/pi-coding-agent";
+import { type AgentSession, calculateContextTokens, type ModelRuntime, type SettingsManager } from "@earendil-works/pi-coding-agent";
 import type {
   Activity,
+  ContextUsage,
   ControlPayload,
   DeliveredEvent,
   MemoryReadsSnapshot,
@@ -28,7 +29,7 @@ import type {
 
 import { TurnRecorder } from "./activities.ts";
 import { ANSWER_REMINDER, AnswerReminder } from "./answer-reminder.ts";
-import type { Backend } from "./backend.ts";
+import { type Backend, BackendError } from "./backend.ts";
 import type { Config } from "./config.ts";
 import { type Connector, readConnectors } from "./connectors.ts";
 import { MemoryExtensionTrials } from "./extensions.ts";
@@ -376,7 +377,14 @@ export class Runner {
     if (options.events) answers?.input(input, options.events);
     let preparing: string | undefined;
     try {
-      input = withRunnerNotes(input, await main?.beforeTurn() ?? [], previousModelError);
+      const notices = await main?.beforeTurn() ?? [];
+      const status = ordinary && main
+        ? await this.backend.status(AbortSignal.timeout(5_000)).catch((error: unknown) => {
+          if (!(error instanceof BackendError && error.status === 404)) this.log(`status not read: ${failure(error)}`);
+          return undefined;
+        })
+        : undefined;
+      input = withRunnerNotes(input, notices, previousModelError, status);
     } catch (error) {
       preparing = `Could not reload extensions: ${failure(error)}`;
     }
@@ -384,6 +392,7 @@ export class Runner {
     let spoke = false;
     let called = false;
     let compactions = 0;
+    let context: ContextUsage | undefined;
     const unsubscribe = session.subscribe((event) => {
       recorder.handle(event);
       answers?.observe(event);
@@ -393,6 +402,16 @@ export class Runner {
         called = true;
       } else if (event.type === "compaction_end" && event.result && !event.aborted) {
         compactions++;
+        context = undefined;
+      } else if (ordinary && main && event.type === "message_end" && event.message.role === "assistant") {
+        const { stopReason, usage } = event.message;
+        const tokens = calculateContextTokens(usage);
+        const context_window = session.model?.contextWindow;
+        if (stopReason !== "aborted" && stopReason !== "error"
+          && Number.isSafeInteger(tokens) && tokens > 0
+          && context_window !== undefined && Number.isSafeInteger(context_window) && context_window > 0) {
+          context = { tokens, context_window };
+        }
       }
     });
     const turn: Turn = { session, seqs: options.events?.map((event) => event.seq) ?? [], heartbeat: options.heartbeat ?? false, queued: [], answers };
@@ -466,6 +485,7 @@ export class Runner {
         turn_id: recorder.turnId,
         ...outcome,
         ...(ordinary ? { seqs: turn.seqs } : { night }),
+        ...(context === undefined ? {} : { context }),
       }, afterCommit && (() => afterCommit(recorder.turnId)));
     } catch (error) {
       this.log(`turn end not sent: ${failure(error)}`);

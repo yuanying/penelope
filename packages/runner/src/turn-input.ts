@@ -12,7 +12,7 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Appended, DeliveredEvent, SourcesLine, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
+import type { AgentStatus, Appended, DeliveredEvent, SourcesLine, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 import { drawChanges, readContext, readPayload } from "@penelope/slack";
 
 import type { ExtensionNotice } from "./extensions.ts";
@@ -54,8 +54,12 @@ function single(event: DeliveredEvent, drawn?: string): TurnEvent {
   };
   const attachments = event.attachments?.length ? { attachments: event.attachments } : {};
   if (event.inline) return { ...head, text: drawn ?? text(event.payload), ...attachments };
-  const pending = event.source === "heartbeat" ? event.pending : undefined;
-  return { ...head, appended: event.appended, ...attachments, ...(pending === undefined ? {} : { pending }) };
+  const { pending, status } = event.source === "heartbeat" ? event : {};
+  return {
+    ...head, appended: event.appended, ...attachments,
+    ...(pending === undefined ? {} : { pending }),
+    ...(status === undefined ? {} : { status }),
+  };
 }
 
 /** The ranges of each file, in the order the files first come, with touching ranges merged. */
@@ -194,10 +198,11 @@ export function turnLines(events: DeliveredEvent[], slack?: SlackDrawing): TurnL
   ];
 }
 
-/** Runner diagnostics outside the event block, not part of any event. */
-export function withRunnerNotes(input: string, notices: readonly ExtensionNotice[], previousModelError?: string): string {
-  if (notices.length === 0 && previousModelError === undefined) return input;
+/** Runner notes outside the event block, not part of any event. */
+export function withRunnerNotes(input: string, notices: readonly ExtensionNotice[], previousModelError?: string, status?: AgentStatus): string {
+  if (notices.length === 0 && previousModelError === undefined && status === undefined) return input;
   const note = {
+    ...(status === undefined ? {} : { status }),
     ...(notices.length > 0 ? {
       extensions: notices.slice(-5).map(({ kind, path, reason }) => ({
         kind, path: path.slice(0, 240), reason: reason.split("\n")[0]!.slice(0, 240),

@@ -70,8 +70,8 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - 起きている時間に、本体の最後のターンの終わりから決めた時間がたつと、backend が `source` が `heartbeat` の出来事を 1 件入れる（[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)）。いつ入れるか、入れないかは [backend.md](backend.md) の「heartbeat」。
 - `id` は `heartbeat@<入れた時刻>`、`occurred_at` は入れた時刻、`stream` は無い。`delivery` はいつも `now` で、待っている `batch` の出来事を連れていく。
 - `summary` は `no turn for <N> minutes`（N が 1 なら `minute`）。N をテスト用に秒で決めて分で割り切れないときは `no turn for <秒> seconds`。
-- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N。テスト用の秒では端数になる）、backend が採った残っている仕事があれば `pending` を持つ（型は `HeartbeatPayload`）。`/sources` にはこの `payload` を書く。何をすべきかは書かない。
-- ターンには要約と場所に加えて、残っている仕事があれば `pending` だけを直接載せる（[ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md)）。`payload` 全体は載せず、`summary` に件数は足さない。
+- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N。テスト用の秒では端数になる）、列に入れた時点の `status`、残っている仕事があれば `pending` を持つ（型は `HeartbeatPayload`）。`/sources` にはこの `payload` を書く。何をすべきかは書かない。
+- ターンの行には、要約と場所に加え、`status` と、残っている仕事があれば `pending` を載せる（[ADR-0068](adr/0068-sleepiness-as-one-value-with-its-facts.md)、[ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md)）。`payload` 全体は載せず、`summary` に件数は足さない。
 - この出来事だけで始まり、ツールを 1 つも呼ばずに終わったターンでは、runner は畳む前の頼みを送らない。途中でほかの出来事が入ったターン、ほかの出来事と一緒に渡されたターンは、ほかのターンと同じく頼む（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）。
 
 ### A2A の出来事
@@ -167,10 +167,15 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `appended` | inline でない出来事だけ。中身を足した場所。`path` と `lines`（`[from, to]`、1 始まり・両端を含む） |
 | `attachments` | 添付があるときだけ。1 件は `path`・`mime_type`・`size`（sandbox 向けの口の添付と同じ） |
 | `pending` | `heartbeat` の出来事だけ。残っている仕事があるときに載せる |
+| `status` | `heartbeat` の出来事だけ。列に入れた時点の [本体の状態](sandbox-api.md#本体の状態) |
 
 - inline の出来事は中身（`text`）を持ち、`appended` を持たない。inline でない出来事は `appended` を持ち、`text` を持たない。中身は、エージェントが必要なときに sandbox の shell でそのファイルを読む。
 - inline の出来事に付いた画像（`mime_type` が `image/png`・`image/jpeg`・`image/gif`・`image/webp` のもの）は、`attachments` に加えて、画像としてもターンに載せる。runner が `/sources` から読み、Pi の画像の入力として渡す。1 つの入力に 4 枚まで、添付の `size` が runner の設定の大きさ（既定 5 MiB）を超えるものと読めないものは載せず、`attachments` だけにする。
 - inline でない出来事の画像は `attachments` だけである。エージェントが Pi の `read` で開く。
+
+### ターンの始まりの `status`
+
+本体の通常のターンの最初の入力では、`</events>` の後の `<runner_notes>` の JSON に `status` を載せる。runner がターン開始時に読んだ値であり、heartbeat を列に入れた時点の値と異なることがある。途中で出来事を渡すときは `<runner_notes>` に `status` を添えない。
 
 ### heartbeat の `pending`
 

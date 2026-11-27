@@ -28,6 +28,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | 口 | 中身 |
 | --- | --- |
 | `GET /v1/events?agent=&after=&wait=` | 出来事を取る（long-poll） |
+| `GET /v1/status?agent=main` | 現在の眠気とその元の事実を読む |
 | `PUT /v1/model-settings` | runner のモデル候補を知らせ、オーナーの設定を読む |
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
@@ -51,7 +52,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 一定時間は backend の設定で、既定は 5 分（[backend.md](backend.md) の `PENELOPE_REDELIVER_MINUTES`）。ターンがそれより長く続くと、そのターンに入れたまま ack していない出来事も、もう一度渡る。
 - `wait` の上限は 60 秒で、それより長い値は 60 秒として扱う。一度に返すのは 100 件まで。
 - 応答は `{events: [...]}`。1 件ごとに `seq`・`source`・`id`・`stream`・`occurred_at`・`received_at`・`summary`・`delivery`・足された場所（`appended`: `path` と `lines` の 1 始まり・両端を含む範囲）・添付（`attachments`）を持つ。inline の出来事だけが `inline: true` と `payload` を持つ。封筒に `answer_via` があれば、inline かどうかにかかわらず同じ値を返す。無ければ省く。
-- `heartbeat` は常に `inline: false` で、残っている仕事があれば `payload` に代えて `pending` だけを渡す。backend が列に入れた時点の `a2a_tasks` と `failures` を含み、runner は heartbeat の行に直接載せる。`jobs` と `subagents` は runner 側の欄で、この応答には含まれない（[events.md](events.md) の「heartbeat の `pending`」）。
+- `heartbeat` は常に `inline: false` で、`payload` の代わりに `status` と、残っている仕事があれば `pending` を渡す。どちらも列に入れた時点の値で、以前の版で入れられた出来事には `status` が無いことがある。runner はこれらを heartbeat の行に直接載せる。backend が採る `pending` の欄は `a2a_tasks` と `failures`。`jobs` と `subagents` は runner 側の欄で、この応答には含まれない（[events.md](events.md) の「heartbeat の `pending`」）。
 - `occurred_at` は全受信元について、同じ瞬間を backend の `PENELOPE_TIME_ZONE`（[backend.md](backend.md) の「設定」）で表した RFC 3339 で返す。UTC オフセット（UTC なら `+00:00`）は発生時点のものを使う。たとえば `Asia/Tokyo` では `2026-11-18T23:00:00Z` は `2026-11-19T08:00:00+09:00` になる。変換できない保存済みの値はそのまま返す。SQLite と `/sources` に保存した値や `received_at` は変えない。
 - `attachments` の 1 件は、`/sources` に置いた場所（`path`）、MIME（`mime_type`）、大きさ（`size`、byte）を持つ。添付が無ければ欄ごと省く。`/sources` の行の `attachments` は、場所だけの一覧のままである（[events.md](events.md)）。
 - `mime_type` は、PNG・JPEG・GIF・WebP なら中身の先頭の bytes から決める。ほかは送り手が付けた Content-Type で、それも無いか形が違えば `application/octet-stream`。送り手が画像の型を付けても、中身がその画像でなければ `application/octet-stream` にする。画像だと言われたものが画像であるようにするためである。
@@ -251,13 +252,15 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 ## ターンの終わり
 
-- body は `{agent, turn_id, result?, reason?, seqs?, night?}`（型は `TurnEndRequest`）。`turn_id` は前後に空白がない 1 行の文字列。`night` はコミットの印にもなり、それ以外の追加欄は活動の記録のためである（下の「ターンの結果ときっかけ」）。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
+- body は `{agent, turn_id, result?, reason?, seqs?, night?, context?}`（型は `TurnEndRequest`）。`turn_id` は前後に空白がない 1 行の文字列。`night` はコミットの印にもなる（下の「ターンの結果ときっかけ」）。`context` は [眠気の計算](backend.md#眠気) に使う。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
 - runner はこの要求の直前に、夜やサブエージェントのターンも含め、作業ツリーの共有権限をそろえる。変更か未修正があった場合はその件数だけを 1 行に残し、未修正があっても要求は送る（[Pod の仕様書](pod.md)、[ADR-0061](adr/0061-share-memory-worktree-access-before-turn-commits.md)）。
 - backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。backend のログには、Git の処理・分類した理由（権限拒否・インデックスへの追加失敗・インデックスのロックなど）と、その理由を示す診断の件数だけを残す。件数が不明なら `affected=unknown` とする。要求への応答は汎用のエラーのままで、ログにも応答にもパス・本文・Git の生の出力は載せない。本体の夜のターン（`night` あり）では backend がコミットの変更量も数える。数を取れなくても応答は変えず、runner に数は返さない。
 - UI の流れでは、エージェントを `waiting` にする。
 - runner は、ターンの `turn_end` の途中経過を送り終えてから、この口を呼ぶ。`turn_end` を送れなかったとき（途中経過は送り直さない）は、流れでは `waiting` になるが、記録から引く `state`（`GET /api/agents`）は次のターンの `turn_start` か `turn_end` まで `thinking` のままである。
 - サブエージェントのターンの終わりにも、runner は `agent` をサブエージェントの名前にして送り、backend は同じくコミットする。サブエージェントが `/memory` に書いたものを、本体の次のターンを待たずに残すためである。本体のターンの途中の変更も一緒にコミットされる（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントの途中経過とターンの終わり」）。
 - 途中経過の `turn_end` は UI と記録のため、この口はコミットのために、別に置く。
+- 本体の通常のターンに限り、`context: {tokens, context_window}` を報告する。`tokens` は畳み込みを適用して送ったコンテキストについて、モデルが最後に返した使用量（キャッシュ分を含む入力と出力の合計）。`context_window` はそのモデルの上限である。使用量が無いときや、使用量を得た後で compaction してまだ新しい使用量が無いときは、`context` を省く。
+- backend は本体の通常のターンで `tokens` が 0 以上、`context_window` が正の安全な整数であることを確かめる。形が違えば `400` を返す。欄が無ければコンテキストを不明として扱い、ターンの終了はそのまま受ける。夜やサブエージェントのターンではこの欄を使わない。
 
 ### 夜の移動に伴う記憶の参照の修正をコミット
 
@@ -350,6 +353,18 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 - 形は `{day: "2026-11-23", files: [{path: "guide.md", dates: ["2026-11-22", "2026-11-22"]}]}`。 `day` は収集時に使った UTC の日付、 `files` はスナップショット全体で、参照がなければ空配列。 `path` は記憶からの相対パス（参照の修正をコミットする口と同じパスの決まり）で重複させない。 `dates` は参照 1 回につき UTC 日付を 1 つとし、同じ日の繰り返しを残す。当日を含む 30 日分を残し、その期間に参照がないパスは最後の日だけを残す。本文・検索語・コマンド・ツール出力は送らない。
 - backend は `seq` と `stages` がある場合だけ受け付ける。 `day` と `dates` は実在する日付の `YYYY-MM-DD`、 `dates` は空でなく `day` より後の値を含めない。形が違えば `400` で報告全体を受け取らない。通常の sandbox API の body 上限に従う。
 - 正しい報告は従来どおり `204`。backend が保持するのは最大の `seq` のスナップショット 1 組だけ。同じ `seq` の再送も加算せず置き換える。 `memory_reads` を省いた報告や後から届いた古い `seq` の報告は既存のスナップショットを消さない。未送信の配置は UI では件数不明になる。記録の保存に失敗しても夜の切り替えは断らない。
+
+## 本体の状態
+
+`GET /v1/status?agent=main` は、現在の状態を `200` と `AgentStatus` で返す。sandbox の通常の認証が必要である。本体の通常のターンの開始時に読み、読めない場合は状態を添えずターンを続ける。
+
+| 欄 | 中身 |
+| --- | --- |
+| `sleepiness` | backend が計算した眠気。0〜100 の整数 |
+| `awake_seconds` | 本体のセッションの始まりからの秒数 |
+| `context` | 直近の本体の通常のターンのコンテキストを表す `{tokens, context_window}`。報告がなければ欄ごと省く |
+
+計算と起点の決め方は [backend.md の「眠気」](backend.md#眠気)。
 
 ## モデルの設定
 

@@ -47,6 +47,17 @@ test("only the heartbeat line includes pending work alongside its summary and so
   });
 });
 
+test("only the heartbeat line carries the event's status snapshot", () => {
+  const status = { sleepiness: 85, awake_seconds: 120, context: { tokens: 8_500, context_window: 10_000 } };
+  const [other, heartbeat] = lines(formatEvents([
+    { ...mention, status },
+    { ...mention, seq: 14, id: "heartbeat", source: "heartbeat", status },
+  ]));
+  assert.ok(other && !("status" in other));
+  assert.ok(heartbeat && "status" in heartbeat);
+  assert.deepEqual(heartbeat.status, status);
+});
+
 function batch(seq: number, stream: string, path: string, line: number): DeliveredEvent {
   return {
     seq,

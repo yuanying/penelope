@@ -14,6 +14,7 @@ import { Heartbeat } from "../src/heartbeat.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { cronOf } from "../src/schedules.ts";
+import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
 import { AwakeHours, iso } from "../src/time.ts";
 import { FakeClock, tempDir } from "./support.ts";
@@ -45,7 +46,8 @@ function setup(
     now: clock.now,
     limits: { maxOpenTasks: 3, deadlineMs: 120 * 60_000 },
   });
-  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, awake: awakeHours, log: () => {}, inbox, record });
+  const sleepiness = new Sleepiness(db, clock.now);
+  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, awake: awakeHours, log: () => {}, inbox, record, sleepiness });
   let turns = 0;
   /** The runner's blocks of one turn: its start, or its end. */
   const turn = (kind: "turn_start" | "turn_end") => {
@@ -84,6 +86,15 @@ describe("the heartbeat", () => {
     assert.ok(event && !("pending" in event));
   });
 
+  it("delivers the sleepiness and facts sampled when the heartbeat was queued", (t) => {
+    const { clock, heartbeat, queue } = setup(t);
+    clock.advance(6 * 60);
+    heartbeat.tick();
+    clock.advance(10);
+    const [event] = queue.take({ after: 0 });
+    assert.deepEqual(event?.status, { sleepiness: 25, awake_seconds: 21_600 });
+  });
+
   it("writes since when it counted and how long it waited as the payload", (t) => {
     const { clock, heartbeat, turn, queue } = setup(t);
     turn("turn_start");
@@ -93,7 +104,8 @@ describe("the heartbeat", () => {
     const { appended } = queue.take({ after: 0 })[0]!;
     // The payload is not handed over (heartbeat is not inline); it is in /sources.
     const line = JSON.parse(readFileSync(appended.path, "utf8").split("\n")[appended.lines[0] - 1]!);
-    assert.deepEqual(line.payload, { since: "2026-11-16T09:00:00.000Z", quiet_minutes: QUIET_MINUTES });
+    assert.equal(line.payload.since, "2026-11-16T09:00:00.000Z");
+    assert.equal(line.payload.quiet_minutes, QUIET_MINUTES);
   });
 
   it("includes only unexpired open A2A tasks and points to the sender's latest event", (t) => {
@@ -219,7 +231,8 @@ describe("the heartbeat", () => {
     const { summary, appended } = queue.take({ after: 0 })[0]!;
     assert.equal(summary, "no turn for 5 seconds");
     const line = JSON.parse(readFileSync(appended.path, "utf8").split("\n")[appended.lines[0] - 1]!);
-    assert.deepEqual(line.payload, { since: "2026-11-16T09:00:00.000Z", quiet_minutes: 5 / 60 });
+    assert.equal(line.payload.since, "2026-11-16T09:00:00.000Z");
+    assert.equal(line.payload.quiet_minutes, 5 / 60);
   });
 
   it("is not queued while a turn runs", (t) => {

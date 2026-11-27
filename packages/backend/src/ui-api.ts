@@ -30,6 +30,7 @@ import { webPushSubscriptionOf } from "./push/web-push.ts";
 import type { Queue } from "./queue.ts";
 import { type ActivityRecord, RecordQueryError } from "./record.ts";
 import type { Schedules } from "./schedules.ts";
+import type { Sleepiness } from "./sleepiness.ts";
 import type { Attachment } from "./sources.ts";
 import { iso } from "./time.ts";
 import { AGENT_ICONS_PATH } from "./web.ts";
@@ -65,6 +66,7 @@ export type UiOptions = {
   appTokens: AppTokens;
   apnsRegistrations: ApnsRegistrations;
   modelSettings: ModelSettings;
+  sleepiness: Sleepiness;
   /** The owner's GitHub user ID. Without one, no one gets in. */
   ownerId: number | undefined;
   /** Where the owner reaches the backend. Cookies are Secure when it is https. */
@@ -316,6 +318,9 @@ export function uiHandler(options: UiOptions): Handler {
         else stream(feed, request, response, stillSignedIn);
         return;
       }
+      case "GET /api/status":
+        sendJson(response, 200, options.sleepiness.status(), { "cache-control": "no-store" });
+        return;
       case "GET /api/agents":
         sendJson(response, 200, { agents: agents.list() } satisfies SubAgentsResponse);
         return;

@@ -4,6 +4,7 @@
 import type { AnswerVia, Delivery, Source } from "./events.ts";
 import type { HeartbeatPending } from "./heartbeat.ts";
 import type { AgentId, Appended, DeliveredAttachment } from "./sandbox.ts";
+import type { AgentStatus } from "./status.ts";
 
 type TurnLineBase = {
   /** The agent the event is for. Left out, it is `main`, the only agent for now. */
@@ -28,7 +29,7 @@ type TurnEventBase = TurnLineBase & {
 /**
  * One event. An inline event carries its content as `text`; any other
  * carries where its content was appended under /sources. Only a heartbeat
- * can also carry pending work.
+ * can also carry pending work and status.
  */
 export type TurnEvent =
   | (TurnEventBase & {
@@ -36,8 +37,9 @@ export type TurnEvent =
       text: string;
       appended?: never;
       pending?: never;
+      status?: never;
     })
-  | (TurnEventBase & { appended: Appended; text?: never; pending?: HeartbeatPending });
+  | (TurnEventBase & { appended: Appended; text?: never; pending?: HeartbeatPending; status?: AgentStatus });
 
 /** The batched events of one source and stream, handed over together, as one line. */
 export type TurnBatch = TurnLineBase & {

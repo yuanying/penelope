@@ -251,8 +251,8 @@ function delivered(row: Row, occurred_at: string): DeliveredEvent {
     ...(row.attachments === null ? {} : { attachments: JSON.parse(row.attachments) as DeliveredAttachment[] }),
   };
   if (row.source === "heartbeat") {
-    const pending = (JSON.parse(row.payload) as HeartbeatPayload | null)?.pending;
-    return { ...base, inline: false, ...(pending === undefined ? {} : { pending }) };
+    const { pending, status } = (JSON.parse(row.payload) as HeartbeatPayload | null) ?? {};
+    return { ...base, inline: false, ...(pending === undefined ? {} : { pending }), ...(status === undefined ? {} : { status }) };
   }
   return row.inline === 1 ? { ...base, inline: true, payload: JSON.parse(row.payload) } : { ...base, inline: false };
 }

@@ -369,6 +369,16 @@ export const MIGRATIONS: readonly string[] = [
     UNIQUE (environment, token)
   );
   `,
+  `
+  CREATE TABLE sleepiness (
+    singleton      INTEGER PRIMARY KEY CHECK (singleton = 1),
+    awake_since_ms INTEGER NOT NULL,
+    rotation_seq   INTEGER,
+    peak           INTEGER NOT NULL,
+    tokens         INTEGER,
+    context_window INTEGER
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

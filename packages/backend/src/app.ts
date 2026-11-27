@@ -35,6 +35,7 @@ import { Queue } from "./queue.ts";
 import { ActivityRecord } from "./record.ts";
 import { sandboxHandler } from "./sandbox-api.ts";
 import { cronOf, Scheduler, Schedules } from "./schedules.ts";
+import { Sleepiness } from "./sleepiness.ts";
 import { Sources } from "./sources.ts";
 import { AwakeHours } from "./time.ts";
 import { uiHandler } from "./ui-api.ts";
@@ -64,6 +65,7 @@ export async function startBackend(
   const warmMemory = () => { void memoryView.warmLastChanges().catch(() => log("memory: last changes could not be prepared")); };
   memory.afterCommit(warmMemory);
   const modelSettings = new ModelSettings(db, now);
+  const sleepiness = new Sleepiness(db, now);
   const awake = new AwakeHours(config.awakeHours, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
     now,
@@ -117,7 +119,7 @@ export async function startBackend(
     intake = await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
     sandbox = await opening(
       listenUnix(
-        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, now, log }),
+        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, now, log }),
         config.sandboxSocket,
         log,
       ),
@@ -139,6 +141,7 @@ export async function startBackend(
           appTokens,
           apnsRegistrations,
           modelSettings,
+          sleepiness,
           ownerId: config.github?.ownerId,
           publicUrl: config.publicUrl,
           agent: () => avatar.settings(),
@@ -161,7 +164,7 @@ export async function startBackend(
   const stopScheduler = scheduler.start();
   const stopRecord = record.start();
   const stopHeartbeat =
-    config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, inbox, record, log }).start();
+    config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, inbox, record, sleepiness, log }).start();
   const stopNotifier = channels.length === 0 ? () => {} : notifier.start();
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
