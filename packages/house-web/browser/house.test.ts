@@ -139,6 +139,19 @@ describe("the house's screen in a browser", () => {
     assert.equal(await focused(page), "いまはどの部屋にもいません");
   });
 
+  it("opens the conversation of a room entered from looking into it on a phone, with the focus on its name", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    await page.getByRole("button", { name: "ミャオの部屋を覗く" }).click();
+
+    await page.getByRole("button", { name: "ここに入る" }).click();
+
+    await field(page, "ミャオの部屋").waitFor();
+    await page.waitForFunction(() => document.activeElement?.tagName === "H2");
+    assert.equal(await focused(page), "ミャオの部屋");
+    assert.equal(await page.evaluate(() => window.location.hash), "#/talk");
+  });
+
   it("keeps the focus inside the sheet of the room's residents on a phone, and gives it back on closing", async (t) => {
     const house = await evening(t);
     const page = await open(t, house, PHONE);

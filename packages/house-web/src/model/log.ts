@@ -27,10 +27,16 @@ function joined(held: readonly HousePersonEvent[], more: readonly HousePersonEve
   return fresh.length === 0 ? held : [...held, ...fresh].sort((a, b) => a.seq - b.seq);
 }
 
-/** An event the stream brought. */
+/**
+ * An event the stream brought. While no reading is due, the stream has been
+ * unbroken since the last one, so nothing is missing up to this event either.
+ * `seq` numbers the whole house's record, so one room's events do not follow
+ * each other by one: only the stream being unbroken says that none is missing.
+ */
 export function withEvent(log: RoomLog, event: HousePersonEvent): RoomLog {
   const events = joined(log.events, [event]);
-  return events === log.events ? log : { ...log, events };
+  if (events === log.events) return log;
+  return { ...log, events, whole: log.due === undefined ? Math.max(log.whole ?? event.seq, event.seq) : log.whole };
 }
 
 /** A page read with the log's cursor. */
@@ -38,26 +44,30 @@ export function withOlder(log: RoomLog, page: readonly HousePersonEvent[], befor
   return { ...log, events: joined(log.events, page), before, pagedBelow: log.pagedBelow ?? log.events[0]?.seq };
 }
 
+/** A page of the reading that is due: shown at once, though a gap may still stand under it. */
+export function withPage(log: RoomLog, page: readonly HousePersonEvent[]): RoomLog {
+  const events = joined(log.events, page);
+  return events === log.events ? log : { ...log, events };
+}
+
 /**
- * How far down a reading of the record has to go before it can be joined:
- * to where nothing was missing at the last reading, or, before the first
- * reading, to the oldest event held. A reading that stops above that would
- * leave a gap under what it read.
+ * How far down a reading of the record has to go before nothing is missing:
+ * to where nothing was missing before it, or, before the first reading, to
+ * the oldest event held. A reading that stops above that leaves a gap under
+ * what it read.
  */
 export function reachOf(log: RoomLog): number | undefined {
   return log.whole ?? log.events[0]?.seq;
 }
 
-/** The record read from its newest event down to `reachOf(log)` or to its start, with the cursor of the page after it. */
-export function caughtUp(log: RoomLog, fetched: readonly HousePersonEvent[], before: string | undefined): RoomLog {
-  const events = joined(log.events, fetched);
+/** The reading that was due went down to `reachOf(log)` or to the start of the record; `before` is the cursor after its last page. */
+export function caughtUp(log: RoomLog, before: string | undefined): RoomLog {
   return {
     ...log,
-    events,
     // A reading that stopped at what was whole leaves the older cursor as it was. One that went to the start, or
     // the first one, sets it.
     before: log.whole !== undefined && before !== undefined ? log.before : before,
-    whole: events.at(-1)?.seq,
+    whole: log.events.at(-1)?.seq,
     read: true,
     due: undefined,
   };

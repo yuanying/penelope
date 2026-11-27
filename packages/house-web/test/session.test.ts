@@ -153,6 +153,42 @@ describe("the line to the house", () => {
     assert.deepEqual(livingLog(session), ["one", "two", "three"]);
   });
 
+  // What one unbroken stream brought has no gap in it: a new connection has nothing to read under it.
+  it("reads no further back than what the stream brought without a break", async () => {
+    const house = new FakeHouse();
+    house.happen(speech(LIVING, IVY, "before"), { heard: false });
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+    for (let line = 1; line <= 52; line += 1) house.happen(speech(LIVING, IVY, String(line)));
+
+    house.drop();
+    house.happen(speech(LIVING, IVY, "missed"), { heard: false });
+    house.pagesAsked.length = 0;
+    house.olderPagesFail = true;
+    house.ready();
+    await settle();
+
+    assert.equal(livingLog(session).at(-1), "missed");
+    assert.deepEqual(house.pagesAsked, [undefined]);
+  });
+
+  it("shows the pages of the record it read while an older one cannot be read", async () => {
+    const house = new FakeHouse();
+    house.happen(speech(LIVING, IVY, "before"), { heard: false });
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+
+    house.drop();
+    for (let line = 1; line <= 60; line += 1) house.happen(speech(LIVING, IVY, String(line)), { heard: false });
+    house.olderPagesFail = true;
+    house.ready();
+    await settle();
+
+    assert.equal(livingLog(session).at(-1), "60");
+  });
+
   // An answer about a room that was closed and looked into again is about another showing of it.
   it("drops the record's late answer for a room that was closed and looked into again", async () => {
     const house = new FakeHouse();

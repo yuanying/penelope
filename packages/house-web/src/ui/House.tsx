@@ -1,6 +1,6 @@
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState, useSyncExternalStore } from "react";
 
 import type { HousePersonView } from "@penelope/contract";
 
@@ -8,7 +8,7 @@ import { myRoom, type Session, type Snapshot, unread } from "../model/session.ts
 import { Plan } from "./Plan.tsx";
 import { residentsOf } from "./residents.tsx";
 import { LineNotice, MyRoom, PeekRoom } from "./Room.tsx";
-import { useRoute } from "./route.ts";
+import { hashOf, type Route, useRoute } from "./route.ts";
 import { NOTHING_WRITTEN, type Writing } from "./Speak.tsx";
 import { words } from "./words.ts";
 
@@ -24,7 +24,16 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const phone = useMediaQuery(PHONE);
   const wide = useMediaQuery(WIDE);
   const touch = useMediaQuery(TOUCH) || phone;
-  const [route, go] = useRoute();
+  const [route, setRoute] = useRoute();
+  /** The address the screen last set itself. Any other address the browser reports is the person's doing. */
+  const ownAddress = useRef(window.location.hash);
+  const go = useCallback(
+    (to: Route, replace = false) => {
+      ownAddress.current = hashOf(to);
+      setRoute(to, replace);
+    },
+    [setRoute],
+  );
   const [writings, setWritings] = useState<ReadonlyMap<string, Writing>>(new Map());
   const writers = useRef(new Map<string, (change: (writing: Writing) => Writing) => void>());
   /** The way to change what is written for one room: the same function for the same room, whoever calls it later. */
@@ -71,6 +80,14 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const wanted = useRef<FocusTarget | undefined>(undefined);
   /** Counts what the person did to change what the screen shows. What an earlier act brings later does not move the screen. */
   const acts = useRef(0);
+  // The browser's own back and forward buttons are such acts too, and all the screen hears of them is the address.
+  useEffect(() => {
+    const moved = () => {
+      if (window.location.hash !== ownAddress.current) acts.current += 1;
+    };
+    window.addEventListener("hashchange", moved);
+    return () => window.removeEventListener("hashchange", moved);
+  }, []);
   useEffect(() => {
     const target = wanted.current;
     if (target === undefined) return;
@@ -85,26 +102,33 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     wanted.current = undefined;
     element.focus();
   });
+  // The focus is given after a render. Asking for it has to bring one about: what was asked for may be on the
+  // screen already, and then nothing else would.
+  const [, rendered] = useReducer((count: number) => count + 1, 0);
+  const want = (target: FocusTarget) => {
+    wanted.current = target;
+    rendered();
+  };
   const open = (target: FocusTarget) => {
     opener.current = document.activeElement;
-    wanted.current = target;
+    want(target);
   };
 
   const peek = (room: string) => {
     acts.current += 1;
     if (peeked === undefined) open("peek");
-    else wanted.current = "peek";
+    else want("peek");
     go({ at: "peek", room });
   };
   const toPlan = () => {
     acts.current += 1;
-    wanted.current = "opener";
+    want("opener");
     go({ at: "plan" });
   };
   const openTalk = () => {
     acts.current += 1;
     if (phone) open("room");
-    else wanted.current = "field";
+    else want("field");
     go({ at: "talk" });
   };
   const enter = async (room: string) => {
@@ -112,14 +136,14 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     // The person is in the room either way. The screen follows only if they did nothing else with it meanwhile.
     if (!(await session.enter(room)) || act !== acts.current) return;
     // Focusing the field on a phone would raise the keyboard over the room just entered.
-    wanted.current = phone ? "room" : "field";
+    want(phone ? "room" : "field");
     go({ at: "talk" }, route.at === "peek");
   };
   const leave = async () => {
     const act = ++acts.current;
     await session.leave();
     if (act !== acts.current) return;
-    wanted.current = phone ? "plan" : "room";
+    want(phone ? "plan" : "room");
     if (phone) go({ at: "plan" });
   };
   const older = useCallback((room: string) => session.older(room), [session]);

@@ -5,7 +5,7 @@
 import type { HouseActor, HousePersonEvent, HousePersonView, HouseStreamReady } from "@penelope/contract";
 
 import { type Api, Refused, Unauthorized } from "./api.ts";
-import { caughtUp, reachOf, type RoomLog, withEvent, withOlder } from "./log.ts";
+import { caughtUp, reachOf, type RoomLog, withEvent, withOlder, withPage } from "./log.ts";
 
 /**
  * The line to the house. Only an open line has a connection, so nothing can
@@ -320,26 +320,26 @@ export class Session {
     void this.readUntilDone(room, due);
   }
 
+  /** Reads page by page, from the newest down. A page that cannot be read is asked for again: what was read stays. */
   private async readUntilDone(room: string, due: number): Promise<void> {
-    for (let tries = 0; ; tries += 1) {
-      const log = this.snapshot.logs.get(room);
-      if (log?.due !== due || this.snapshot.line.kind !== "open") return;
-      const fetched: HousePersonEvent[] = [];
-      let before: string | undefined;
+    const first = this.snapshot.logs.get(room)?.read === false;
+    let before: string | undefined;
+    let lowest: number | undefined;
+    for (let tries = 0; ; ) {
+      if (this.snapshot.logs.get(room)?.due !== due || this.snapshot.line.kind !== "open") return;
       try {
-        for (;;) {
-          const page = await this.api.history(room, before);
-          fetched.push(...page.events);
-          before = page.before;
-          // How far to go is asked after each page: the stream may have brought an older event meanwhile.
-          const now = this.snapshot.logs.get(room);
-          if (now?.due !== due) return;
-          const reach = reachOf(now);
-          const oldest = fetched.at(-1)?.seq;
-          if (before === undefined || reach === undefined || oldest === undefined || oldest <= reach) break;
-        }
-        this.updateLog(room, (now) => (now.due === due ? caughtUp(now, fetched, before) : now));
-        if (!log.read && room === myRoom(this.snapshot)) this.see();
+        const page = await this.api.history(room, before);
+        tries = 0;
+        before = page.before;
+        lowest = page.events.at(-1)?.seq ?? lowest;
+        this.updateLog(room, (log) => (log.due === due ? withPage(log, page.events) : log));
+        // How far to go is asked after each page: the stream may have brought an older event meanwhile.
+        const log = this.snapshot.logs.get(room);
+        if (log?.due !== due) return;
+        const reach = reachOf(log);
+        if (before !== undefined && reach !== undefined && lowest !== undefined && lowest > reach) continue;
+        this.updateLog(room, (now) => caughtUp(now, before));
+        if (first && room === myRoom(this.snapshot)) this.see();
         return;
       } catch (error) {
         if (error instanceof Unauthorized) {
@@ -347,7 +347,7 @@ export class Session {
           return;
         }
       }
-      await this.wait(backoff(tries));
+      await this.wait(backoff(tries++));
     }
   }
 

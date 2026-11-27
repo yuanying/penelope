@@ -80,6 +80,10 @@ export class FakeHouse {
   notDelivered: HouseSpeechResult["not_delivered"] = [];
   /** How many of the next requests of a kind the house answers with 503, after doing nothing. */
   readonly failures: Partial<Record<Kind, number>> = {};
+  /** While set, the house answers a request for a page before another with 503. */
+  olderPagesFail = false;
+  /** The cursors the pages of records were asked for with; none for a newest page. */
+  readonly pagesAsked: Array<string | undefined> = [];
   /** The `error` the house refuses the next request of a kind with, as a 409, after doing nothing. */
   readonly refusals: Partial<Record<Kind, string>> = {};
   /** Every request but the reads, as `METHOD path`. */
@@ -190,6 +194,11 @@ export class FakeHouse {
     if (stalled !== undefined) {
       this.stalled.delete(kind!);
       await stalled;
+    }
+    if (kind === "history") {
+      const before = url.searchParams.get("before") ?? undefined;
+      this.pagesAsked.push(before);
+      if (before !== undefined && this.olderPagesFail) return Response.json({ error: "unavailable" }, { status: 503 });
     }
     const refusal = kind === undefined ? undefined : this.refusals[kind];
     if (refusal !== undefined) delete this.refusals[kind!];

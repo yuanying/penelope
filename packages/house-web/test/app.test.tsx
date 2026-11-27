@@ -158,6 +158,29 @@ describe("the house's screen", () => {
     assert.equal(window.location.hash, "#/peek/bath");
   });
 
+  it("stays where the browser's back button took the person while entering a room was on its way", async () => {
+    const house = new FakeHouse();
+    house.house = house.withLeeIn(undefined);
+    await open(house);
+    fireEvent.click(screen.getByRole("button", { name: "Livingを覗く" }));
+    await act(async () => {
+      house.ready();
+    });
+    const answer = house.hold("enter");
+    fireEvent.click(await screen.findByRole("button", { name: "ここに入る" }));
+
+    await act(async () => {
+      window.history.replaceState(null, "", "#/");
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+    await act(async () => {
+      answer.give();
+    });
+    await screen.findByLabelText("Livingで話す");
+
+    assert.equal(window.location.hash, "#/");
+  });
+
   // The decision of the review of 2026-11-27: what is written is the room's it was written in.
   it("leaves what was written in a room there when the person moves to another", async () => {
     const house = await open();
