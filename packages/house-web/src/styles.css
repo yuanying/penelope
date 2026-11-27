@@ -556,6 +556,9 @@ time,
   text-align: left;
   cursor: pointer;
 }
+button.plan-dock:hover {
+  background: color-mix(in srgb, var(--color-background-surface) 92%, var(--color-text-primary));
+}
 .plan-dock:focus-visible {
   outline: 2px solid var(--color-text-info);
   outline-offset: 2px;
@@ -644,6 +647,9 @@ time,
   border-radius: var(--radius-element);
   background: none;
   cursor: pointer;
+}
+.room-people:hover {
+  background: var(--color-neutral);
 }
 .room-people:focus-visible {
   outline: 2px solid var(--color-text-info);
