@@ -156,6 +156,7 @@ export class FakeBackend {
       return answer(204);
     }
     if (key === "POST /v1/sleep" && this.sleepResponse) return answer(200, this.sleepResponse);
+    if (key === "POST /v1/mood") return answer(204);
     if (key === "POST /v1/replies") {
       if (this.refuseReplies !== undefined) return answer(400, { error: this.refuseReplies });
       return answer(201, { id: `r-${++this.replies}` });

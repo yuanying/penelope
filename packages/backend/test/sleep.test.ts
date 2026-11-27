@@ -58,6 +58,7 @@ test("startup wakes an overdue persisted sleep exactly once", (t) => {
   const dir = tempDir(t);
   const clock = new FakeClock("2026-11-16T09:00:00Z");
   const first = setup(dir, clock);
+  first.sleepiness.setMood("Quietly hopeful.");
   first.sleep.request(clock.now() + minute);
   const [control] = first.queue.take({ after: 0 });
   first.sleep.completed(control!.seq);
@@ -67,7 +68,9 @@ test("startup wakes an overdue persisted sleep exactly once", (t) => {
   clock.advance(10);
   const second = setup(dir, clock);
   second.sleep.start()();
-  assert.deepEqual(second.sleepiness.status(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0 });
+  const { mood, ...sleepStatus } = second.sleepiness.status();
+  assert.equal(mood, "Quietly hopeful.", "waking after a restart preserves the mood");
+  assert.deepEqual(sleepStatus, { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0 });
   const events = second.queue.take({ after: 0 });
   assert.deepEqual(events.map(({ source }) => source), ["wake"]);
   second.queue.ack(events.map(({ seq }) => seq));

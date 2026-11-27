@@ -129,6 +129,8 @@ export type JobEventRequest = FromAgent & { id: string; summary: string; payload
 export type SleepRequest = FromAgent & { wake_at: string };
 export type SleepResponse = { wake_at: string; duration_seconds: number; clamped: boolean };
 
+export type MoodRequest = FromAgent & { mood: string };
+
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {
   text: string;

@@ -245,6 +245,14 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - 起きている間に記録した最高値より小さければ、最高値を使う。起きた時点で最高値と直近のコンテキストを消す。切り替えが起床より遅れたときは、切り替えの完了時にも最高値と古いセッションのコンテキストを消す。起きた時刻は変えない。
 - runner と UI は、同じ計算結果を元の事実と一緒に `AgentStatus` として受け取る。heartbeat と `wake` には列に入れた時点の結果を保存する。
 
+## 気分
+
+[ADR-0070](adr/0070-a-mood-she-sets-that-lasts.md) の気分は、`mood` ツールが保存した最後の文である。眠り、セッションの切り替え、backend の再起動をまたいで続く。返事の表情や眠気、眠りの状態には影響しない。
+
+runner と UI は `AgentStatus.mood` で現在の文を読む。heartbeat と `wake` には列に入れた時点の文が残る。metrics には出さない。
+
+スキーマ 19 は既存の `sleepiness` の 1 行に、空を許す `mood` 列を足す。既存の状態は変えない。スキーマを戻す移行はなく、旧版の backend は移行後のデータベースを開けない。
+
 ## heartbeat
 
 [ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) と [ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md) の、backend が何もない時間に入れる出来事の細部を決める。形は [events.md](events.md) の「heartbeat の出来事」。

@@ -139,7 +139,7 @@ describe("the sandbox's API", () => {
     assert.equal((await end("smaller", 1_000, 20_000)).status, 204);
     const status = await call("/v1/status?agent=main");
     assert.equal(status.status, 200);
-    assert.deepEqual(status.json(), { sleep: { state: "awake" }, sleepiness: 90, awake_seconds: 0, context: { tokens: 1_000, context_window: 20_000 } });
+    assert.deepEqual(status.json(), { sleep: { state: "awake" }, sleepiness: 90, awake_seconds: 0, context: { tokens: 1_000, context_window: 20_000 }, mood: null });
   });
 
   it("uses time awake when a runner does not report context", async (t) => {
@@ -148,7 +148,7 @@ describe("the sandbox's API", () => {
     assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "legacy" } })).status, 204);
     const status = await call("/v1/status?agent=main");
     assert.equal(status.status, 200);
-    assert.deepEqual(status.json(), { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600 });
+    assert.deepEqual(status.json(), { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600, mood: null });
   });
 
   it("rejects a context report that cannot describe a model window", async (t) => {
@@ -163,7 +163,37 @@ describe("the sandbox's API", () => {
     assert.equal((await call("/v1/turns/end", { json: { agent: "research", turn_id: "child", context } })).status, 204);
     const night = { seq: 7, stage: "reflection" };
     assert.equal((await call("/v1/turns/end", { json: { agent: "main", turn_id: "night", night, context } })).status, 204);
-    assert.deepEqual((await call("/v1/status?agent=main")).json(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0 });
+    assert.deepEqual((await call("/v1/status?agent=main")).json(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0, mood: null });
+  });
+
+  describe("mood", () => {
+    it("replaces the current mood with the latest sentence from the main session", async (t) => {
+      const { call } = await setup(t);
+      const set = (mood: string) => call("/v1/mood", { json: { agent: "main", mood } });
+      const read = async () => (await call("/v1/status?agent=main")).json().mood;
+
+      assert.equal(await read(), null);
+      assert.equal((await set("Calm and curious.")).status, 204);
+      assert.equal(await read(), "Calm and curious.");
+      assert.equal((await set("  すこし嬉しい。🌱  ")).status, 204);
+      assert.equal(await read(), "すこし嬉しい。🌱");
+    });
+
+    it("rejects text that is not a short, nonempty line without changing the saved mood", async (t) => {
+      const { call } = await setup(t);
+      const set = (mood: unknown) => call("/v1/mood", { json: { agent: "main", mood } });
+      const mood = "🌱".repeat(160);
+      assert.equal((await set(mood)).status, 204);
+      for (const invalid of [null, 1, "  ", "first\nsecond", "a\0b", mood + "🌱"]) {
+        assert.equal((await set(invalid)).status, 400, JSON.stringify(invalid));
+      }
+      assert.equal((await call("/v1/status?agent=main")).json().mood, mood);
+    });
+
+    it("does not let a sub-agent set the main agent's mood", async (t) => {
+      const { call } = await setup(t);
+      assert.equal((await call("/v1/mood", { json: { agent: "research", mood: "Curious." } })).status, 400);
+    });
   });
 
   describe("sleep", () => {
@@ -263,7 +293,7 @@ describe("the sandbox's API", () => {
       const context = { tokens: 500, context_window: 10000 };
       await call("/v1/turns/end", { json: { agent: "main", turn_id: "new-session", context } });
       assert.deepEqual((await call("/v1/status?agent=main")).json(), {
-        sleep: { state: "awake" }, sleepiness: 5, awake_seconds: 600, context,
+        sleep: { state: "awake" }, sleepiness: 5, awake_seconds: 600, context, mood: null,
       });
     });
 
@@ -705,12 +735,12 @@ describe("the sandbox's API", () => {
       } });
       await call("/v1/events/ack", { json: { agent: "main", seqs: [control.seq] } });
       clock.advance(1);
-      assert.deepEqual(await status(), { sleep: { state: "asleep", wake_at: wake_at.replace("Z", "+00:00") }, sleepiness: 25, awake_seconds: 21_600 });
+      assert.deepEqual(await status(), { sleep: { state: "asleep", wake_at: wake_at.replace("Z", "+00:00") }, sleepiness: 25, awake_seconds: 21_600, mood: null });
 
       clock.set(wake_at);
-      assert.deepEqual(await status(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0 });
+      assert.deepEqual(await status(), { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0, mood: null });
       clock.advance(60);
-      assert.deepEqual(await status(), { sleep: { state: "awake" }, sleepiness: 4, awake_seconds: 3_600 });
+      assert.deepEqual(await status(), { sleep: { state: "awake" }, sleepiness: 4, awake_seconds: 3_600, mood: null });
     });
 
     it("keeps the latest read snapshot when an older night or a legacy report arrives later", async (t) => {

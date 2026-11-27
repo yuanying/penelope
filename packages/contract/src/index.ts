@@ -10,6 +10,6 @@ export * from "./settings.ts";
 export * from "./events.ts";
 export type * from "./house.ts";
 export type * from "./sandbox.ts";
-export type * from "./status.ts";
+export * from "./status.ts";
 export type * from "./turn.ts";
 export type * from "./ui.ts";

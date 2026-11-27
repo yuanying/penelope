@@ -110,6 +110,7 @@ async function setup(
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
   const subscriptions = new PushSubscriptions(db, { now });
   const apnsRegistrations = new ApnsRegistrations(db, { now, ownerId: settings?.ownerId });
+  const sleepiness = new Sleepiness(db, now, "UTC");
   const memoryDir = path.join(dir, "memory");
   const memory = new Memory(memoryDir, { name: "Backend", email: "backend@example.com" });
   const push = pushKey === undefined ? undefined : { publicKey: pushKey, subscriptions };
@@ -129,7 +130,7 @@ async function setup(
       appTokens: new AppTokens(db, { now }),
       apnsRegistrations,
       modelSettings,
-      sleepiness: new Sleepiness(db, now, "UTC"),
+      sleepiness,
       ownerId: settings?.ownerId,
       publicUrl,
       agent: () => agent,
@@ -151,7 +152,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, apnsRegistrations, memoryDir, memory };
+  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, apnsRegistrations, memoryDir, memory, sleepiness };
 }
 
 it("requires an owner session even on the committed memory image endpoint", async (t) => {
@@ -325,12 +326,13 @@ describe("saving memory", () => {
   });
 });
 
-it("serves current sleepiness and its facts to the owner", async (t) => {
-  const { call, clock, signIn } = await setup(t);
+it("serves current status to the owner", async (t) => {
+  const { call, clock, signIn, sleepiness } = await setup(t);
   clock.advance(12 * 60);
+  sleepiness.setMood("Taking it slow.");
   const answer = await call("/api/status", signIn());
   assert.equal(answer.status, 200);
-  assert.deepEqual(answer.json(), { sleep: { state: "awake" }, sleepiness: 50, awake_seconds: 43_200 });
+  assert.deepEqual(answer.json(), { sleep: { state: "awake" }, sleepiness: 50, awake_seconds: 43_200, mood: "Taking it slow." });
 });
 
 const modelChoice = { model: "example/org/chat", thinking: "low" } as const;

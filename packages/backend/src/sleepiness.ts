@@ -8,6 +8,7 @@ import { deliveryTimeIn, iso } from "./time.ts";
 const DAY_SECONDS = 86_400;
 
 type State = {
+  mood: string | null;
   awake_since_ms: number;
   peak: number;
   tokens: number | null;
@@ -41,7 +42,11 @@ export class Sleepiness {
     if (status.sleepiness > state.peak) {
       this.db.prepare("UPDATE sleepiness SET peak = ? WHERE singleton = 1").run(status.sleepiness);
     }
-    return status;
+    return { ...status, mood: state.mood };
+  }
+
+  setMood(mood: string): void {
+    this.db.prepare("UPDATE sleepiness SET mood = ? WHERE singleton = 1").run(mood);
   }
 
   turnEnded(context: ContextUsage | undefined): void {
@@ -65,11 +70,11 @@ export class Sleepiness {
   }
 
   private state(): State {
-    return this.db.prepare("SELECT awake_since_ms, peak, tokens, context_window FROM sleepiness WHERE singleton = 1").get() as State;
+    return this.db.prepare("SELECT awake_since_ms, peak, tokens, context_window, mood FROM sleepiness WHERE singleton = 1").get() as State;
   }
 }
 
-function measure(peak: number, awakeMs: number, context: ContextUsage | undefined, sleep: AgentStatus["sleep"]): AgentStatus {
+function measure(peak: number, awakeMs: number, context: ContextUsage | undefined, sleep: AgentStatus["sleep"]): Omit<AgentStatus, "mood"> {
   const awake_seconds = Math.max(0, Math.floor(awakeMs / 1000));
   const timePercent = 100 * awake_seconds / DAY_SECONDS;
   const contextPercent = context === undefined ? 0 : 100 * context.tokens / context.context_window;
