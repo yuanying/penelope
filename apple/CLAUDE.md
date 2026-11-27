@@ -9,7 +9,7 @@
 画面の寸法・文言・色は [デザインの手引き](../docs/design/README.md) の 18 章（1 人の画面は 4・5・16 章）にある。
 
 画面は、みんな（一覧）・1 人の画面・メニュー・シート・エージェントを足す・アプリの設定である。
-いまあるのは、みんなの骨組みだけである。足すときは下の規約に従い、「ファイルの置きどころ」の表を一緒に直す。
+いまあるのは、みんな・エージェントを足す・アプリの設定と、1 人の画面の仮のもの（名前と「Web で開く」だけ）である。足すときは下の規約に従い、「ファイルの置きどころ」の表を一緒に直す。
 
 ## 1. Root からなる階層構造
 
@@ -72,8 +72,11 @@ CI が Linux で `swift test` を回すので、破るとそこで落ちる。OS
 | `PenelopeCore/Sources/PenelopeCore/App/` | `AppEvent`・`AppEffect`・`AppState`・`AppMediator`（裁定）・`AppProps`（Props の型と導出） |
 | `PenelopeCore/Tests/PenelopeCoreTests/` | Mediator・Props の導出・木の伝播のテスト |
 | `PenelopePhone/PenelopeApp.swift` | アプリの入口と、Root を持つ `AppDelegate` |
+| `PenelopeCore/Sources/PenelopeCore/Wire/` | backend とやりとりする形: 要約（`AgentSummary`）・`GET /api/agent` の答え・SSE の読み方・ログインの URL と body。読み書きだけで、通信はしない |
 | `PenelopePhone/Components/` | Root（`RootComponent`）と各画面のコンポーネント、受け渡しの箱（`ScreenModel`） |
-| `PenelopePhone/Views/` | SwiftUI の Passive View |
+| `PenelopePhone/World/` | Root が Effect を実行する先（`AppWorld`）: 保存（UserDefaults）・Keychain・ログイン（`ASWebAuthenticationSession`、PKCE）・HTTPS と SSE。DEBUG の偽の世界（`DemoWorld`） |
+| `PenelopePhone/Views/` | SwiftUI の Passive View。色（`Palette`、手引き 9 章） |
+| `PenelopePhone-Info.plist` | 生成する Info.plist に足すもの（URL scheme `penelope`）。フォルダの外に置くのは、資源として写されないため |
 | `Penelope.xcodeproj` | アプリのターゲット `PenelopePhone`。`PenelopePhone/` はフォルダごと入るので、ファイルを足してもプロジェクトは変わらない |
 
 名前の付け方は、画面のコンポーネントが `<名前>Component`、その View が `<名前>View`、その描画パラメータが `<名前>Props` である。
@@ -103,3 +106,6 @@ make apple-build   # iPhone のアプリを simulator 向けに署名なしで b
   この構造を選んだ理由のひとつである。
 - テストは先に書く。期待する入出力を書き、失敗を見てから実装する。実装に合わせてテストを書き換えない。
 - 実機に入れるときは、Xcode で各自のチームを選ぶ。選んだチームをコミットしない。
+- backend なしで画面を見るには、DEBUG の build を起動引数 `-PenelopeDemo <場面>` で起動する（`empty`・`list`・`add`・`add-error`・`settings`）。
+  偽の世界（`DemoWorld`）が本物の Mediator の上で動き、何も保存も送信もしない。例:
+  `xcrun simctl launch booted io.github.yuanying.penelope.phone -PenelopeDemo list`

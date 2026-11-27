@@ -1,3 +1,4 @@
+import PenelopeCore
 import SwiftUI
 
 @main
@@ -16,17 +17,38 @@ struct PenelopeApp: App {
 @MainActor
 final class AppDelegate: NSObject, UIApplicationDelegate {
     let root: RootComponent = {
-        let root = RootComponent()
+        let root = AppDelegate.makeRoot()
         root.launch()
         return root
     }()
-}
 
-/// Draws whichever screen the drawing parameters say is up.
-struct ScreenView: View {
-    let model: ScreenModel
+    private static func makeRoot() -> RootComponent {
+        #if DEBUG
+            if let scene = DemoWorld.requested {
+                let demo = DemoWorld(scene: scene)
+                return RootComponent(world: demo, script: demo.script)
+            }
+        #endif
+        return RootComponent(world: LiveWorld())
+    }
 
-    var body: some View {
-        EveryoneView(props: model.props.everyone, sinks: model.sinks.everyone)
+    func application(
+        _ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+    ) -> Bool {
+        let center = NotificationCenter.default
+        center.addObserver(
+            self, selector: #selector(becameActive), name: UIApplication.didBecomeActiveNotification, object: nil)
+        center.addObserver(
+            self, selector: #selector(movedToBackground), name: UIApplication.didEnterBackgroundNotification,
+            object: nil)
+        return true
+    }
+
+    @objc private func becameActive() {
+        root.becameActive()
+    }
+
+    @objc private func movedToBackground() {
+        root.movedToBackground()
     }
 }

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The rest of the Info.plist is generated from the build settings (INFOPLIST_KEY_…). This file holds only what
+	     has no build setting. It is outside PenelopePhone/ so that the folder does not copy it as a resource. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<!-- A backend sends the one-time code of the sign-in back on penelope://auth (docs/ui-api.md). -->
+			<key>CFBundleURLName</key>
+			<string>io.github.yuanying.penelope.phone.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>penelope</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>
