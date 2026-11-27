@@ -1,14 +1,16 @@
+import { createHash } from "node:crypto";
 import { readFile, realpath, stat } from "node:fs/promises";
-import type { ServerResponse } from "node:http";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, resolve, sep } from "node:path";
 
 const MIME = new Map(Object.entries({
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
-  ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
-  ".webp": "image/webp", ".ico": "image/x-icon", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json",
+  ".json": "application/json", ".map": "application/json", ".txt": "text/plain; charset=utf-8",
+  ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".webp": "image/webp", ".ico": "image/x-icon",
+  ".woff": "font/woff", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json",
 }));
 
-export async function serveWeb(dir: string, path: string, head: boolean, response: ServerResponse): Promise<boolean> {
+export async function serveWeb(dir: string, path: string, request: IncomingMessage, response: ServerResponse): Promise<boolean> {
   const name = path === "/" ? "/index.html" : path;
   if (!/^(?:\/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)+$/.test(name)) return false;
   const contentType = MIME.get(extname(name));
@@ -18,12 +20,18 @@ export async function serveWeb(dir: string, path: string, head: boolean, respons
     const file = await realpath(resolve(root, `.${name}`));
     if (!file.startsWith(root + sep) || !(await stat(file)).isFile()) return false;
     const content = await readFile(file);
-    response.writeHead(200, {
-      "content-type": contentType,
-      "content-length": content.length,
-      "cache-control": "no-cache",
+    const etag = `"${createHash("sha256").update(content).digest("base64url")}"`;
+    const headers = {
+      etag,
+      "cache-control": name.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache",
       "x-content-type-options": "nosniff",
-    }).end(head ? undefined : content);
+    };
+    if (request.headers["if-none-match"] === etag) {
+      response.writeHead(304, headers).end();
+      return true;
+    }
+    response.writeHead(200, { ...headers, "content-type": contentType, "content-length": content.length })
+      .end(request.method === "HEAD" ? undefined : content);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "ENOTDIR") return false;

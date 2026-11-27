@@ -34,6 +34,7 @@ async function open(t: TestContext, database = ":memory:", people = [{ login: "L
     ],
     agents: [{ id: "fern", name: "Fern", service_account: "example/fern", avatar_url: "https://agent.example.com/avatar.png", chat_url: "https://agent.example.com/" }],
     people,
+    web_dir: new URL("./web/", import.meta.url).pathname,
     auth: {
       gated_assertion: { issuer: "https://gate.example.com", jwks_url: "https://gate.example.com/jwks", public_url: "https://house.example.com" },
       github: { client_id: "test-app", client_secret_file: new URL("./oauth-secret.txt", import.meta.url).pathname, public_url: origin },
@@ -111,6 +112,21 @@ test("the house serves the public page as HTML", async (t) => {
   const page = await house.request("/");
   assert.equal(page.status, 200);
   assert.match(page.headers.get("content-type")!, /^text\/html\b/);
+});
+
+test("a page that has not changed is not sent again", async (t) => {
+  const house = await open(t);
+  const etag = (await house.request("/")).headers.get("etag")!;
+  const again = await house.request("/", { "if-none-match": etag });
+  assert.equal(again.status, 304);
+  assert.equal(await again.text(), "");
+});
+
+// The build names what is under assets/ by its content; the page that names them must be asked for again.
+test("only the files named by their content are kept for good", async (t) => {
+  const house = await open(t);
+  assert.match((await house.request("/assets/app-0000.js")).headers.get("cache-control")!, /\bimmutable\b/);
+  assert.equal((await house.request("/")).headers.get("cache-control"), "no-cache");
 });
 
 test("the floor is private even though the app shell is public", async (t) => {

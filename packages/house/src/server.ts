@@ -79,7 +79,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
       const query = new URLSearchParams(raw.length > path.length ? raw.slice(path.length + 1) : "");
       return handlePerson(request, response, path, query);
     }
-    if (!path.startsWith("/v1/") && (method === "GET" || method === "HEAD") && await serveWeb(config.webDir, path, method === "HEAD", response)) return;
+    if (!path.startsWith("/v1/") && (method === "GET" || method === "HEAD") && await serveWeb(config.webDir, path, request, response)) return;
 
     const room = ROOM.exec(path);
     const view = path === "/v1/agent/house" && method === "GET";
