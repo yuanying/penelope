@@ -1,4 +1,4 @@
-// What the backend's three HTTP servers share: reading a body within a
+// What the backend's HTTP servers share: reading a body within a
 // limit, answering JSON, and listening on a Unix socket or a TCP port.
 import { chmodSync, rmSync } from "node:fs";
 import http from "node:http";

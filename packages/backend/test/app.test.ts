@@ -57,11 +57,36 @@ describe("the backend", () => {
       encoding: "utf8",
     });
     assert.equal(log, "Turn t-1\n");
+    assert.equal(backend.metricsPort, undefined);
     // The UI's port answers, and without a login it lets no one in.
     const ui = { port: backend.port };
     assert.equal((await ask(ui, "/healthz")).status, 200);
     assert.equal((await ask(ui, "/api/history")).status, 401);
   });
+});
+
+it("serves metrics on their own port without exposing either API there", async (t) => {
+  const dir = tempDir(t);
+  const config = loadConfig({
+    PENELOPE_DATABASE: path.join(dir, "backend.sqlite"),
+    PENELOPE_SOURCES_DIR: path.join(dir, "sources"),
+    PENELOPE_MEMORY_DIR: path.join(dir, "memory"),
+    PENELOPE_INTAKE_SOCKET: path.join(dir, "intake.sock"),
+    PENELOPE_SANDBOX_SOCKET: path.join(dir, "sandbox.sock"),
+    PENELOPE_LISTEN: "127.0.0.1:0",
+    PENELOPE_METRICS_LISTEN: "127.0.0.1:0",
+  }, () => assert.fail("no files to read"));
+  const backend = await startBackend(config, { log: () => {} });
+  t.after(() => backend.close());
+
+  assert.ok(backend.metricsPort);
+  const metrics = { port: backend.metricsPort };
+  const scrape = await ask(metrics, "/metrics");
+  assert.equal(scrape.status, 200);
+  assert.match(scrape.headers["content-type"] ?? "", /^text\/plain; version=0\.0\.4\b/);
+  assert.equal((await ask(metrics, "/healthz")).status, 404);
+  assert.equal((await ask(metrics, "/v1/status")).status, 404);
+  assert.equal((await ask({ port: backend.port }, "/metrics")).status, 404);
 });
 
 describe("the backend's avatar", () => {

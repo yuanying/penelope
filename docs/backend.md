@@ -22,6 +22,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_INTAKE_SOCKET` | `/run/penelope/intake/backend.sock` | 取り込み口の Unix socket |
 | `PENELOPE_SANDBOX_SOCKET` | `/run/penelope/sandbox/backend.sock` | sandbox 向けの口の Unix socket |
 | `PENELOPE_LISTEN` | `0.0.0.0:8080` | UI 向けの API の TCP の待ち受け（`host:port`、IPv6 は `[::]:8080`） |
+| `PENELOPE_METRICS_LISTEN` | なし | metrics 専用の TCP の待ち受け（`host:port`）。設定しなければ開かない |
 | `PENELOPE_PUBLIC_URL` | なし | オーナーが backend に届く URL（例: `https://penelope.example.com`）。OAuth の callback はこの下の `/auth/github/callback` |
 | `PENELOPE_SANDBOX_TOKEN_FILE` | なし | sandbox 向けの口の本物の token。無ければ、sandbox 向けの口はすべて `401` |
 | `PENELOPE_GITHUB_CLIENT_ID` | なし | OAuth App の client ID |
@@ -76,6 +77,22 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - APNs への送信は 1 回だけ。`410`、または `400` の `BadDeviceToken`・`DeviceTokenNotForTopic` では、その送信に使った登録を消す。送信後に登録し直されたものは消さない。ほかの失敗でも返事は履歴に残る。ログには登録の番号と結果だけを残し、会話の内容・端末の token・鍵は出さない。
 - `PENELOPE_AVATAR` が名前の形（小文字・数字・`.`・`_`・`-`）でなければ起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。眠りの間は `now` も渡さず、起きたときに `wake` とともに待っている `batch` を渡す（[events.md](events.md) の「いつ渡すか」）。
+
+## metrics
+
+[ADR-0072](adr/0072-number-only-metrics-and-backups-after-sleep.md) に従い、`PENELOPE_METRICS_LISTEN` の `GET /metrics` にだけ Prometheus text 形式（0.0.4）で応答する。認証はしない。UI 向けの待ち受けにはこのパスを置かず、metrics の待ち受けを Ingress に載せない。
+
+すべて gauge である。値は数で、ラベルは下の固定値だけである。気分の文、会話、記憶、出来事の中身は出さない。
+
+| 名前 | 値 |
+| --- | --- |
+| `penelope_sleep_last_completed_timestamp_seconds` | 最後に眠りの 4 段が済んだ Unix 時刻（秒、小数あり）。新しいセッションが始まれば、途中の段が失敗しても数える。永続の眠りの記録から引く。まだ完了がなければ `0` |
+| `penelope_sleepiness` | 眠気（0〜100） |
+| `penelope_awake_seconds` | 直近に起きてからの秒数。眠りの間は眠りを求めた時点の値 |
+| `penelope_context_tokens`、`penelope_context_window_tokens` | 最後に報告された本体のコンテキストのトークン数と上限。値がなければ両方を省く |
+| `penelope_sleep_state{state="…"}` | `awake`、`falling_asleep`、`asleep`。現在の状態だけ `1`、残りは `0` |
+| `penelope_sleep_wake_timestamp_seconds` | 予定の起床 Unix 時刻（秒、小数あり）。起きているときは `0` |
+| `penelope_sleep_requests_7d{requested_by="…"}` | 直近 7 日間に受けた新しい眠りの求めの数。エージェントの `agent` と安全網の `safety_net` を分ける。完了前の求めも数えるが、起きる時刻の置き直しは数えない |
 
 ## アバター
 

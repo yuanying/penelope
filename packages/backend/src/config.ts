@@ -25,6 +25,7 @@ export type Config = {
   intakeSocket: string;
   sandboxSocket: string;
   listen: { host: string; port: number };
+  metricsListen: { host: string; port: number } | undefined;
   publicUrl: string | undefined;
   sandboxToken: string | undefined;
   github: GitHubSettings | undefined;
@@ -175,6 +176,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
   }
   const avatarsDir = get("PENELOPE_AVATARS_DIR");
   const databasePath = get("PENELOPE_DATABASE") ?? "/var/lib/penelope/backend.sqlite";
+  const metricsListen = get("PENELOPE_METRICS_LISTEN");
 
   return {
     databasePath,
@@ -184,7 +186,8 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
     memoryDir: get("PENELOPE_MEMORY_DIR") ?? "/memory",
     intakeSocket: get("PENELOPE_INTAKE_SOCKET") ?? "/run/penelope/intake/backend.sock",
     sandboxSocket: get("PENELOPE_SANDBOX_SOCKET") ?? "/run/penelope/sandbox/backend.sock",
-    listen: listenOf(get("PENELOPE_LISTEN") ?? "0.0.0.0:8080"),
+    listen: listenOf(get("PENELOPE_LISTEN") ?? "0.0.0.0:8080", "PENELOPE_LISTEN"),
+    metricsListen: metricsListen === undefined ? undefined : listenOf(metricsListen, "PENELOPE_METRICS_LISTEN"),
     publicUrl,
     sandboxToken: secret("PENELOPE_SANDBOX_TOKEN_FILE"),
     github,
@@ -347,9 +350,9 @@ function a2aOf(get: (name: string) => string | undefined, readFile: (file: strin
 }
 
 /** `host:port`, the host in brackets when it is IPv6. */
-function listenOf(value: string): { host: string; port: number } {
+function listenOf(value: string, name: string): { host: string; port: number } {
   const match = /^(?:\[([^\]]+)\]|([^:]+)):(\d{1,5})$/.exec(value);
   const port = Number(match?.[3]);
-  if (!match || port > 65535) throw new ConfigError("PENELOPE_LISTEN must be host:port");
+  if (!match || port > 65535) throw new ConfigError(`${name} must be host:port`);
   return { host: match[1] ?? match[2]!, port };
 }

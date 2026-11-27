@@ -45,6 +45,7 @@ describe("the configuration", () => {
       intakeSocket: "/run/penelope/intake/backend.sock",
       sandboxSocket: "/run/penelope/sandbox/backend.sock",
       listen: { host: "0.0.0.0", port: 8080 },
+      metricsListen: undefined,
       publicUrl: undefined,
       sandboxToken: undefined,
       github: undefined,

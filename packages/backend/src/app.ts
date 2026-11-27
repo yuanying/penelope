@@ -1,6 +1,4 @@
-// The backend put together: one SQLite file, /sources and /memory, and three
-// servers: the intake and the sandbox's API on Unix sockets, the UI's API on
-// TCP (docs/pod.md).
+// The backend put together: one SQLite file, /sources and /memory, and the HTTP servers (docs/pod.md).
 import { mkdirSync } from "node:fs";
 import type http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -26,6 +24,7 @@ import { type GitHubEndpoints, GitHubLogin } from "./login/github.ts";
 import { LoginSessions } from "./login/sessions.ts";
 import { MemoryView } from "./memory-view.ts";
 import { Memory } from "./memory.ts";
+import { metricsHandler } from "./metrics.ts";
 import { ModelSettings } from "./model-settings.ts";
 import { ApnsChannel, ApnsClient } from "./push/apns.ts";
 import { ApnsRegistrations } from "./push/apns-registrations.ts";
@@ -41,7 +40,7 @@ import { Sources } from "./sources.ts";
 import { uiHandler } from "./ui-api.ts";
 import { webHandler } from "./web.ts";
 
-export type Backend = { port: number; close: () => Promise<void> };
+export type Backend = { port: number; metricsPort: number | undefined; close: () => Promise<void> };
 
 export async function startBackend(
   config: Config,
@@ -115,12 +114,11 @@ export async function startBackend(
     opened.push(server);
     return server;
   };
-  let intake: http.Server;
-  let sandbox: http.Server;
   let ui: http.Server;
+  let metricsPort: number | undefined;
   try {
-    intake = await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
-    sandbox = await opening(
+    await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
+    await opening(
       listenUnix(
         sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, sleep, now, log }),
         config.sandboxSocket,
@@ -158,8 +156,14 @@ export async function startBackend(
         log,
       ),
     );
+    if (config.metricsListen !== undefined) {
+      const { host, port } = config.metricsListen;
+      const metrics = await opening(listenTcp(metricsHandler(db, sleepiness, now), host, port, log));
+      metricsPort = (metrics.address() as AddressInfo).port;
+      log(`backend: metrics on ${host}:${metricsPort}`);
+    }
   } catch (error) {
-    await Promise.all(opened.map((server) => close(server)));
+    await Promise.all(opened.map(close));
     db.close();
     throw error;
   }
@@ -179,6 +183,7 @@ export async function startBackend(
 
   return {
     port,
+    metricsPort,
     close: async () => {
       stopSleep();
       stopScheduler();
@@ -186,7 +191,7 @@ export async function startBackend(
       stopHeartbeat();
       stopNotifier();
       apns?.close();
-      await Promise.all([close(intake), close(sandbox), close(ui)]);
+      await Promise.all(opened.map(close));
       db.close();
     },
   };

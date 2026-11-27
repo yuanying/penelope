@@ -128,12 +128,13 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 
 | コンテナ | Unix socket だけで待ち受ける口 | TCP で待ち受ける口 |
 | --- | --- | --- |
-| backend | 取り込み口、sandbox 向けの口 | Pod の外から呼ばれる口（UI 向けの API と A2A の受け口） |
+| backend | 取り込み口、sandbox 向けの口 | Pod の外から呼ばれる口（UI 向けの API と A2A の受け口）。設定があるときだけ別のポートで metrics |
 | Sentinel | 管理口 | 向け直しの受け口（直に届いた通信は断る） |
 | receivers | なし | Pod の外から呼ばれる口（webhook の受け口。[receivers.md](receivers.md) の「HTTP の口」） |
 | sandbox | — | sandbox の自由（loopback は止めない） |
 
 - TCP で待ち受ける Pod の外から呼ばれる口は、Pod の外から届くのと同じ確かめ（ログインのセッション、ServiceAccount の token、webhook の署名）を通す。sandbox からも loopback で届くが、扱いは外から届くのと同じである。
+- metrics は `PENELOPE_METRICS_LISTEN` で開く。[ADR-0072](adr/0072-number-only-metrics-and-backups-after-sleep.md) に従い、metrics は認証せず、Ingress には載せない。Pod の metrics ポートに届くものは、sandbox の loopback を含め、[数だけ](backend.md#metrics)を読める。
 
 未決:
 

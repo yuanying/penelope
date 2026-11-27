@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import { mkdirSync, rmdirSync } from "node:fs";
+import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
 import { MIGRATIONS, openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
+import { close, listenTcp } from "../src/http.ts";
+import { metricsHandler } from "../src/metrics.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { Sleep } from "../src/sleep.ts";
 import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
-import { FakeClock, tempDir } from "./support.ts";
+import { ask, FakeClock, tempDir } from "./support.ts";
 
 const minute = 60_000;
 
@@ -153,6 +156,86 @@ test("weekly review counts seven local dates from the last successful review's s
   clock.advance(1); // Nov 24 locally, even though less than 7×24 hours have passed.
   sleep.request(clock.now() + minute);
   assert.deepEqual(queue.take({ after: ordinary.seq })[0]?.payload, { kind: "nightly", review_date: "2026-11-24" });
+});
+
+async function scrapeAt(t: TestContext, db: DatabaseSync, sleepiness: Sleepiness, clock: FakeClock) {
+  const server = await listenTcp(metricsHandler(db, sleepiness, clock.now), "127.0.0.1", 0);
+  t.after(() => close(server));
+  return async () => (await ask({ port: (server.address() as AddressInfo).port }, "/metrics")).text.split("\n");
+}
+
+test("the scrape keeps the last completed sleep across a restart and pruning", async (t) => {
+  const dir = tempDir(t);
+  const clock = new FakeClock("2026-11-16T09:00:00.500Z");
+  const first = setup(dir, clock);
+  first.sleep.request(clock.now() + 2 * minute);
+  const [control] = first.queue.take({ after: 0 });
+  clock.advance(1);
+  first.sleep.completed(control!.seq);
+  const completed = clock.now() / 1_000;
+  clock.advance(1);
+  first.sleep.request(clock.now() + minute);
+  clock.advance(1);
+  first.sleep.tick();
+  first.db.close();
+
+  clock.advance(366 * 24 * 60);
+  const { db, record, sleepiness } = setup(dir, clock);
+  t.after(() => db.close());
+  await record.prune();
+  const scrape = await scrapeAt(t, db, sleepiness, clock);
+  assert.ok((await scrape()).includes(`penelope_sleep_last_completed_timestamp_seconds ${completed}`));
+});
+
+test("the scrape shows the measured sleepiness with the figures behind it", async (t) => {
+  const clock = new FakeClock("2026-11-16T09:00:00Z");
+  const { db, sleepiness } = setup(tempDir(t), clock);
+  t.after(() => db.close());
+  clock.advance(10);
+  sleepiness.turnEnded({ tokens: 840, context_window: 2000 });
+  const scrape = await scrapeAt(t, db, sleepiness, clock);
+  const lines = await scrape();
+  assert.ok(lines.includes("penelope_sleepiness 42"));
+  assert.ok(lines.includes("penelope_awake_seconds 600"));
+  assert.ok(lines.includes("penelope_context_tokens 840"));
+  assert.ok(lines.includes("penelope_context_window_tokens 2000"));
+});
+
+test("the scrape distinguishes a safety net sleep from an agent request", async (t) => {
+  const clock = new FakeClock("2026-11-16T09:00:00Z");
+  const { db, sleep, sleepiness } = setup(tempDir(t), clock);
+  t.after(() => db.close());
+  sleep.request(clock.now() + minute);
+  clock.advance(1);
+  sleep.tick();
+  clock.advance(22 * 60);
+  sleep.tick();
+  const scrape = await scrapeAt(t, db, sleepiness, clock);
+  const lines = await scrape();
+  assert.ok(lines.includes('penelope_sleep_requests_7d{requested_by="agent"} 1'));
+  assert.ok(lines.includes('penelope_sleep_requests_7d{requested_by="safety_net"} 1'));
+});
+
+test("the scrape distinguishes falling asleep, asleep, and awake", async (t) => {
+  const clock = new FakeClock("2026-11-16T09:00:00Z");
+  const { db, queue, sleep, sleepiness } = setup(tempDir(t), clock);
+  t.after(() => db.close());
+  const scrape = await scrapeAt(t, db, sleepiness, clock);
+  const wake = clock.now() + minute;
+  const activeState = (lines: string[]) => lines.filter((line) => line.startsWith("penelope_sleep_state{") && line.endsWith(" 1"));
+
+  sleep.request(wake);
+  const [control] = queue.take({ after: 0 });
+  assert.deepEqual(activeState(await scrape()), ['penelope_sleep_state{state="falling_asleep"} 1']);
+
+  sleep.completed(control!.seq);
+  const sleeping = await scrape();
+  assert.deepEqual(activeState(sleeping), ['penelope_sleep_state{state="asleep"} 1']);
+  assert.ok(sleeping.includes(`penelope_sleep_wake_timestamp_seconds ${wake / 1_000}`));
+
+  clock.advance(1);
+  sleep.tick();
+  assert.deepEqual(activeState(await scrape()), ['penelope_sleep_state{state="awake"} 1']);
 });
 
 test("the next sleep retries a failed weekly review", (t) => {

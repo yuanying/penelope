@@ -465,6 +465,9 @@ export class ActivityRecord {
       [`DELETE FROM sleeps WHERE control_seq IN (
         SELECT control_seq FROM sleeps WHERE requested_ms < ? AND woken_ms IS NOT NULL
           AND control_seq < (SELECT max(control_seq) FROM sleeps WHERE woken_ms IS NOT NULL)
+          AND control_seq IS NOT (
+            SELECT control_seq FROM sleeps WHERE completed_ms IS NOT NULL ORDER BY completed_ms DESC, control_seq DESC LIMIT 1
+          )
         LIMIT ?)`, Date.parse(summary)],
       ["DELETE FROM record_jobs WHERE rowid IN (SELECT rowid FROM record_jobs WHERE ended_at < ? LIMIT ?)", summary],
       ["DELETE FROM sub_agents WHERE rowid IN (SELECT rowid FROM sub_agents WHERE closed = 1 AND updated_at < ? LIMIT ?)", summary],
