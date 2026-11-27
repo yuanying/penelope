@@ -84,6 +84,8 @@ COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelop
 COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 COPY --from=ts-build /src/packages/avatar/package.json ./node_modules/@penelope/avatar/
 COPY --from=ts-build /src/packages/avatar/dist ./node_modules/@penelope/avatar/dist
+COPY --from=ts-build /src/packages/service-account-auth/package.json ./node_modules/@penelope/service-account-auth/
+COPY --from=ts-build /src/packages/service-account-auth/dist ./node_modules/@penelope/service-account-auth/dist
 COPY --from=ts-build /src/packages/backend/dist ./dist
 COPY --from=ts-build /src/packages/web/dist ./web
 COPY assets/avatars ./avatars

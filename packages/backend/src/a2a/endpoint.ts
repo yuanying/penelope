@@ -10,11 +10,12 @@ import { AgentCard, Role, TaskState, type Message, type Part, type Task } from "
 import { ContentTypeNotSupportedError, PushNotificationNotSupportedError, RequestMalformedError, TaskNotFoundError, UnsupportedOperationError } from "@a2a-js/sdk/errors";
 import { JsonRpcTransportHandler, ServerCallContext, validateVersion, type A2ARequestHandler, type User } from "@a2a-js/sdk/server";
 import { A2A_BODY_MAX_BYTES, A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, type A2ATaskState, REPLY_IMAGE_TYPES } from "@penelope/contract";
+import type { SenderCheck } from "@penelope/service-account-auth";
 
 import { type Handler, HttpError, readBody, sendError, sendJson } from "../http.ts";
 import { type Attachment, imageTypeOf } from "../sources.ts";
 import { InboxRefusal, type Inbox, type TaskMessage, type TaskView } from "./inbox.ts";
-import { whoIs, type SenderCheck, type Senders } from "./senders.ts";
+import { whoIs, type Senders } from "./senders.ts";
 
 export const A2A_PATH = "/a2a";
 const CARD_PATH = "/.well-known/agent-card.json";

@@ -6,11 +6,11 @@ import type http from "node:http";
 import type { AddressInfo } from "node:net";
 import path from "node:path";
 
+import { GatedAssertion, TokenReview, type SenderCheck } from "@penelope/service-account-auth";
+
 import { a2aHandler } from "./a2a/endpoint.ts";
-import { GatedAssertion } from "./a2a/gated.ts";
 import { Inbox } from "./a2a/inbox.ts";
-import { type SenderCheck, Senders } from "./a2a/senders.ts";
-import { TokenReview } from "./a2a/tokenreview.ts";
+import { Senders } from "./a2a/senders.ts";
 import { SubAgents } from "./agents.ts";
 import { Assets } from "./assets.ts";
 import { AgentAvatar, seedAvatar } from "./avatar.ts";
@@ -188,7 +188,7 @@ export async function startBackend(
 /** The A2A way in of the settings: the checks they chose, onto one allow-list. */
 function a2aOf(settings: NonNullable<Config["a2a"]>, name: string, inbox: Inbox, now: () => number, log: (line: string) => void) {
   const checks: SenderCheck[] = [];
-  if (settings.gated) checks.push(new GatedAssertion({ ...settings.gated, now, log }));
+  if (settings.gated) checks.push(new GatedAssertion({ ...settings.gated, now, log: (line) => log(`a2a: ${line}`) }));
   if (settings.tokenReview) checks.push(new TokenReview(settings.tokenReview.kubernetes, settings.tokenReview.audiences));
   return a2aHandler({
     inbox,

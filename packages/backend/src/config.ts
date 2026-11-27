@@ -5,13 +5,12 @@ import { createPrivateKey } from "node:crypto";
 import path from "node:path";
 
 import type { Delivery } from "@penelope/contract";
+import { audienceOf, type KubernetesSettings } from "@penelope/service-account-auth";
 
 import { cronOf } from "./schedules.ts";
 import { AwakeHours } from "./time.ts";
 import { CALLBACK_PATH, type GitHubSettings } from "./login/github.ts";
-import { audienceOf } from "./a2a/gated.ts";
 import { Senders } from "./a2a/senders.ts";
-import type { KubernetesSettings } from "./a2a/tokenreview.ts";
 import type { ApnsSettings } from "./push/apns.ts";
 import { vapidKeyOf } from "./push/web-push.ts";
 
