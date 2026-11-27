@@ -1,7 +1,7 @@
 # 0055. 残っている仕事は heartbeat の出来事にだけ載せる
 
 - Date: 2026-11-22
-- Status: Accepted
+- Status: Accepted（一部を [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え）
 
 ## Context
 
@@ -15,6 +15,7 @@ heartbeat は、本体が起きている時間に、一定時間ターンがな�
 
 - 残っている仕事は仕組みが集める。エージェントが自分で一覧を見に行くための道具は新設しない。裏の仕事とサブエージェントの既存の道具は変えない。
 - 本体のターンの `<events>` で、heartbeat の JSON の行にだけ残っている仕事を構造化して直接載せる。`summary` と `appended` は残し、出来事の中身全体を inline にするのではなく、残っている仕事だけを例外とする。モデルが `/sources` を開かなくても気づけるようにするためである。他の出来事の行とシステムプロンプトには載せない。
+  - 2026-11-27 追記: 載せる先を heartbeat の行だけとする点は [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え。エージェントが起きたことを知らせる出来事の行にも、同じ残っている仕事を載せる。
 - 残っている仕事は事実として渡す。片付けの指示は書かず、何をするかはエージェントに任せる。heartbeat の発生条件、配送、畳む前の頼みの扱いは変えない。
 
 ### 2. 載せるのは 4 種類に絞る
@@ -60,6 +61,7 @@ heartbeat は、本体が起きている時間に、一定時間ターンがな�
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（Decision 項 1「本体への heartbeat の行に直接載せる」の、載せる先を heartbeat の行だけとする点）
 - Supersedes（一部）: [ADR-0031 起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)（Decision 項 2「何をするかはエージェントに任せる」の、無活動の事実だけを持つ点）
 - Supersedes（一部）: [ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md)（Decision 項 2「ターンには要約と場所だけを渡す」に heartbeat の残っている仕事だけの例外を加える。通常の inline の設定と `/sources` の追記は変えない）
 - Supersedes（一部）: [ADR-0022 サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする](0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)（Decision 項 4「サブエージェントの寿命は、本体が閉じるまで」の、ターン入力には一覧を差し込まない点。寿命と既存の一覧の道具は変えない）

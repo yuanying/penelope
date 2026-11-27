@@ -1,7 +1,7 @@
 # 0044. 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする
 
 - Date: 2026-11-20
-- Status: Accepted（一部を [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) と [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) で置き換え）
+- Status: Accepted（一部を [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) と [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) で置き換え。夜の時刻を backend が持つ点は [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え）
 
 ## Context
 
@@ -26,7 +26,7 @@
 | 整理係 | 人格を持たない係。照合係とは別の新しいセッションの 1 ターン | 重複、リンク、`INDEX.md`、`archive/` を整理し、毎回読む層を小さく保つ |
 | 新しいセッション | runner | 更新された記憶で翌日のセッションを始める |
 
-本体のセッションは引き続き 1 本とする。backend が夜の時刻と切り替えの出来事を持ち、runner が各段を回す。途中の段が失敗しても段ごとに結果を記録して先へ進み、新しいセッションの開始を必ず試みる。開始自体に失敗したときの出来事の扱いは変えない。
+本体のセッションは引き続き 1 本とする。backend が夜の時刻と切り替えの出来事を持ち、runner が各段を回す（2026-11-27 追記: 夜の時刻を backend が持つ点は [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え。切り替えは、エージェントが眠りを求めたときに始まる）。途中の段が失敗しても段ごとに結果を記録して先へ進み、新しいセッションの開始を必ず試みる。開始自体に失敗したときの出来事の扱いは変えない。
 
 活動の記録には照合係の段の結果も載せる。段が完了したかと、記憶が実際に変わったかは別である。サブエージェントの寿命や、畳み込みと日中の compaction は変えない。
 
@@ -78,6 +78,7 @@
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（Decision 項 1「夜の切り替えを 4 段にする」の、backend が夜の時刻を持つ点。4 段の構成と段ごとの失敗の扱いは維持。棚卸しの夜の選び方は、backend の仕様書に委ねていたものを同 ADR が決める）
 - Supersedes（一部）: [ADR-0007](0007-one-session-switched-nightly-with-a-one-turn-curator.md) の Decision 項 1（3 段は残す）、項 2（整理係は 1 つのセッションの 1 ターン）、項 3（文脈があふれたら compaction、足りなければ分け直す）のうち、夜の段取りと、照合・整理をまとめて 1 ターンで行う決定。本体 1 セッション、backend と runner の分担、日中の compaction は維持する。
 - Related: [ADR-0006](0006-memory-kept-compatible-without-checks-committed-outside.md) の Decision 項 2（検査をやめる）、項 3（コミットは sandbox の外で backend がする）、項 4（プロンプトに入れるときだけ長さを見る）を維持する。
 - Related: [ADR-0015](0015-fold-ended-turns-before-they-are-sent.md) の Decision 項 1（終わったターンを、送る直前に畳む）で、セッションの記録自体は畳まない。

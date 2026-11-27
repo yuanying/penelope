@@ -1,7 +1,7 @@
 # 0015. 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない
 
 - Date: 2026-11-14
-- Status: Accepted（Decision「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンに ADR-0031 で 1 つ足した）
+- Status: Accepted（Decision「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンに ADR-0031 で 1 つ足した。その一覧を [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md) で一部置き換え）
 
 ## Context
 
@@ -55,6 +55,7 @@ Pi には、モデルに送る直前にメッセージの列を差し替える `
 - 頼みは、そのターンの一部とする。頼みの間に届いた出来事は、次のターンで扱う。
 - 夜の振り返りのターン（直後にセッションが替わる）、整理係のターン、失敗したターンには頼まない。畳み込みが切られているときも頼まない。
   - 2026-11-16 追記: ADR-0031 で、heartbeat の出来事だけで始まり、ツールを 1 つも呼ばずに終わったターンにも頼まないことにした。
+  - 2026-11-27 追記: [ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で、受信元を問わず、ツールを 1 つも呼ばず地の文も無く終わったターンには頼まないことにした。
 
 ### ターンごとに、畳み込みの働きを runner のログに残す
 
@@ -90,6 +91,7 @@ Pi には、モデルに送る直前にメッセージの列を差し替える `
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md)（Decision 項 3「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンの一覧）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（本体のセッションと日中の compaction）
 - Related: [ADR-0044 夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md)（照合には畳まれていない記録を用いる。畳み込みの適用範囲は変えない）

@@ -10,15 +10,15 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0004 | [本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする](0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md) | Accepted（一部を ADR-0021 で置き換え） |
 | 0005 | [承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md) | Accepted |
 | 0006 | [記憶は `/memory` の形を保ち、検査をやめ、コミットだけを sandbox の外で行う](0006-memory-kept-compatible-without-checks-committed-outside.md) | Accepted（一部を ADR-0049 で置き換え。ADR-0058 で保守を追加） |
-| 0007 | [セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md) | Accepted（一部を ADR-0044 で置き換え） |
-| 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted（一部を ADR-0045 と ADR-0049 で置き換え） |
+| 0007 | [セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える](0007-one-session-switched-nightly-with-a-one-turn-curator.md) | Accepted（一部を ADR-0044 と [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
+| 0008 | [プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md) | Accepted（一部を ADR-0045・ADR-0049・[ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
 | 0009 | [最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md) | Accepted（一部を ADR-0016 で置き換え） |
 | 0010 | [人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる](0010-github-oauth-for-people-tokenreview-for-a2a.md) | Accepted（一部を ADR-0018 で置き換え） |
 | 0011 | [sandbox の image は開発の一式を持ち、汎用のユーザーの HOME で作業する](0011-a-full-dev-image-and-a-generic-user-home.md) | Accepted |
 | 0012 | [なつみベースのペネロペからは、並べて立ち上げてから切り替え、戻せる形を保つ](0012-move-penelope-side-by-side-and-keep-a-way-back.md) | Accepted |
-| 0013 | [出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え） |
+| 0013 | [出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) と [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
 | 0014 | [sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける](0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md) | Accepted |
-| 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 で置き換え） |
+| 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 と [ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で置き換え） |
 | 0016 | [最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる](0016-show-the-avatar-and-expression-from-the-first-web-ui.md) | Accepted |
 | 0017 | [ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする](0017-turn-input-as-json-lines-in-events.md) | Accepted |
 | 0018 | [A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) | Accepted（一部を ADR-0047 で置き換え） |
@@ -34,18 +34,18 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0028 | [Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す](0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) | Accepted |
 | 0029 | [Slack の出来事はターンに inline で載せ、前のターンからの変化をチャンネルとスレッドの形で描く](0029-slack-events-inline-drawn-as-channels-and-threads.md) | Accepted |
 | 0030 | [裏の仕事は runner が道具で起こし、終わったら出力の末尾を持つ出来事を本体に入れる](0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md) | Accepted |
-| 0031 | [起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え） |
+| 0031 | [起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md)・[ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md)・[ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で置き換え） |
 | 0032 | [返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md) | Accepted |
 | 0033 | [Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す](0033-slack-posts-through-slackctl-with-the-token-stand-in.md) | Accepted |
 | 0034 | [オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md) | Accepted |
 | 0035 | [道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる](0035-tool-usage-and-shared-skills-as-image-skills.md) | Accepted（一部を ADR-0042 で置き換え） |
 | 0036 | [アバターは記憶の中で育て、最初の 1 回だけ backend が選んだアバターを写す](0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md) | Accepted |
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
-| 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted（一部を ADR-0044 で置き換え） |
+| 0038 | [活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md) | Accepted（一部を ADR-0044 と [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
 | 0039 | [Pi 拡張はオーナーの置き場と記憶から本人のセッションだけに読み込む](0039-load-owner-and-memory-extensions-in-the-main-session.md) | Accepted |
 | 0042 | [配置が一覧に載せる image の skill を選ぶ](0042-select-image-skills-per-deployment.md) | Accepted |
 | 0043 | [モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md) | Accepted（一部を ADR-0044 で置き換え） |
-| 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted（一部を ADR-0050 と ADR-0051 で置き換え） |
+| 0044 | [夜は記憶を原本と照合してから整理し、週に一度は棚卸しする](0044-check-memory-against-records-before-nightly-organization.md) | Accepted（一部を ADR-0050・ADR-0051・[ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted（一部を ADR-0059 で置き換え） |
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
 | 0047 | [A2A のメッセージで画像を受け、Task の成果として返す](0047-exchange-images-over-a2a.md) | Accepted |
@@ -56,7 +56,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0052 | [夜の係が移動した記憶への参照は runner が直す](0052-repair-memory-references-after-nightly-moves.md) | Accepted |
 | 0053 | [目的に沿った問いで記憶を評価する CLI を持つ](0053-evaluate-memory-with-purpose-questions.md) | Accepted |
 | 0054 | [同じ出どころの鍵に限り、複数の登録でサロゲートを共有できる](0054-share-surrogates-only-for-the-same-key-source.md) | Accepted |
-| 0055 | [残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) | Accepted |
+| 0055 | [残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md) | Accepted（一部を [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
 | 0056 | [記憶の画面はコミット済みの版を読み、活動の記録と行き来できるようにする](0056-read-committed-memory.md) | Accepted（一部を ADR-0057・ADR-0058 で置き換え） |
 | 0057 | [オーナーによる記憶の編集と復元は、backend が 1 ファイルずつ確定する](0057-edit-existing-memory-in-the-backend.md) | Accepted |
 | 0058 | [記憶の差分統計は必要な変更だけを計算し、Git の保守は backend が行う](0058-read-memory-history-on-demand.md) | Accepted |
@@ -69,3 +69,11 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0065 | [iPhone へは各 backend が本文を暗号化して APNs で知らせる](0065-encrypted-reply-notifications-over-apns.md) | Accepted |
 | 0066 | [一覧は配置ごとの要約の流れを読み、未読は backend が持つ](0066-agent-summary-stream-and-shared-unread.md) | Accepted |
 | 0067 | [iPhone アプリは CI で署名し、TestFlight の内部テストだけに配る](0067-distribute-iphone-builds-through-internal-testflight.md) | Accepted |
+| 0068 | [眠気は backend が 1 つの値にし、元の事実と並べてターンの始まりと heartbeat に渡す](0068-sleepiness-as-one-value-with-its-facts.md) | Accepted |
+| 0069 | [エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md) | Accepted |
+| 0070 | [気分は `mood` で自分で決め、次に変えるまで続く](0070-a-mood-she-sets-that-lasts.md) | Accepted |
+| 0071 | [ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md) | Accepted |
+| 0072 | [backend は数だけの metrics を別の待ち受けに出し、backup は眠りが済んだ時刻と比べて始める](0072-number-only-metrics-and-backups-after-sleep.md) | Accepted |
+| 0073 | [receivers のプラグインは本体の status を読み、heartbeat に載せる様子を預けられる](0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md) | Accepted |
+| 0074 | [家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) | Accepted |
+| 0075 | [家では住人が 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md) | Accepted |

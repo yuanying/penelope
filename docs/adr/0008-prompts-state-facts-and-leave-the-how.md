@@ -1,7 +1,7 @@
 # 0008. プロンプトは事実と環境だけを伝え、やり方は任せる
 
 - Date: 2026-11-14
-- Status: Accepted（一部を [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) と [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) で置き換え）
+- Status: Accepted（一部を [ADR-0045 夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) と [ADR-0049 配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md)、[ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え）
 
 ## Context
 
@@ -21,6 +21,7 @@ penelope では、エージェントは Pi の基本のツールで何でもで�
   - どこにいるか（sandbox の中であること、外向きは Sentinel を通ること、内部の CA）
   - 出来事がどう届き、どう返すか
   - `/memory` の骨組み
+  - 2026-11-27 追記: [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で、この一覧に「自分の様子（眠り、眠気、気分）がどう働くか」を足した。
 - 書き方の規則、手順、出来事ごとの扱いはプロンプトに書かない。要るものは、オーナーが `always.md` か skill に書く。
 - 守らなければならない線は、文ではなく仕組み（Sentinel、書けないファイル）で守る。
 - プロンプトは英語で書く。オーナーと話す言葉は `personality.md` に任せる。
@@ -47,6 +48,7 @@ penelope では、エージェントは Pi の基本のツールで何でもで�
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（Decision の、システムプロンプトに書くものの一覧に「自分の様子（眠り、眠気、気分）がどう働くか」を足す）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する

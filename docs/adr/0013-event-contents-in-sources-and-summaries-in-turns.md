@@ -1,7 +1,7 @@
 # 0013. 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
 
 - Date: 2026-11-14
-- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え）
+- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) と [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え）
 
 ## Context
 
@@ -47,6 +47,7 @@ natsumi では、Slack・外のエージェントの返事・監視の警報を 
 ### 渡す時は受信元の側が出来事ごとに決める
 
 - 出来事は、すぐ渡す（`now`）か、まとめて後で渡す（`batch`）かを持つ。`now` は、ターンの最中なら割り込み、待っていればすぐにターンにし、起きている時間の外でも渡す。`batch` は、最初の 1 件から決めた時間だけ待ってまとめて渡し、起きている時間の外に来たものは朝まで渡さない。
+  - 2026-11-27 追記: 起きている時間に結び付いた点は [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え。起きている時間の設定はやめ、エージェントが起きていない間（寝つく間と寝ている間）は、`now` も `batch` も渡さずに溜め、起きたときに渡す。
 - どちらにするかを決めるのは、受信元の側だけである。receivers のプラグインは自分の設定に従って出来事ごとに決め、backend はそれを上書きしない。backend の中の受信元（オーナーのメッセージ・予約・A2A・自分宛ての出来事）は backend の設定で決める。
 - 待ちは決めた時間とし、乱数で引かない。
 
@@ -91,6 +92,7 @@ natsumi では、Slack・外のエージェントの返事・監視の警報を 
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（Decision 項 3「渡す時は受信元の側が出来事ごとに決める」の、`now` は起きている時間の外でも渡し、`batch` は起きている時間の外では朝まで渡さない点。`delivery` を受信元の側が決めることは変えない）
 - Superseded by（一部）: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)（Decision 項 2「ターンには要約と場所だけを渡す」に、heartbeat の残っている仕事だけの例外を加える）
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（切り替えの出来事と担当）

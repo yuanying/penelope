@@ -1,7 +1,7 @@
 # 0031. 起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる
 
 - Date: 2026-11-16
-- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) で置き換え）
+- Status: Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md)・[ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md)・[ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で置き換え）
 
 ## Context
 
@@ -26,6 +26,7 @@
 - heartbeat の出来事は backend の中の受信元とし、`delivery` は `now` とする。待っている `batch` の出来事は、ほかの `now` の出来事と同じく一緒に渡る（ADR-0013 の Decision 項 3（渡す時は受信元の側が出来事ごとに決める））。
 - heartbeat のターンが終わると、そこからまた数える。何もない時間が続けば、決めた時間ごとに heartbeat が入る。
 - 起きている時間の外、夜の切り替えの間、ターンの最中には入れない。
+  - 2026-11-27 追記: 起きている時間の設定で決める点は [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え。heartbeat を入れるのは、エージェントが起きている間である。
 - 決めた時間は、配置の backend の設定で決める。設定が無ければ heartbeat は無い。
 
 ### 2. 何をするかはエージェントに任せる
@@ -41,6 +42,7 @@
 - heartbeat の出来事だけで始まったターンが、ツールを 1 つも呼ばずに終わったときは、地の文が無くても畳む前の頼みを送らない。ADR-0015 の Decision 項 3 の「頼まない」ターンに、これを足す。
 - 理由は、そのターンでは何も起きていないので、畳んでも失うものが無いためである。何もない時間が続く日に、heartbeat のたびにモデルの呼び出しが 2 回になるのを避ける。
 - heartbeat のターンでも、ツールを呼んだときは、ほかのターンと同じく ADR-0015 に従う。
+- 2026-11-27 追記: heartbeat だけで始まったターンに限る点は [ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で置き換え。受信元を問わず、ツールを 1 つも呼ばず地の文も無く終わったターンには頼まない。
 
 ### 本 ADR で決定しないこと
 
@@ -65,6 +67,8 @@
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（Decision 項 1「backend が、何もない時間が続いたら heartbeat の出来事を入れる」の、起きている時間の設定で入れるかを決める点）
+- Superseded by（一部）: [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md)（Decision 項 3「ツールを使わずに終わった heartbeat のターンには、畳む前に頼まない」の、heartbeat だけで始まったターンに限る点）
 - Superseded by（一部）: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)（Decision 項 2「何をするかはエージェントに任せる」の、無活動の事実だけを持つ点）
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（backend の中の受信元）
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（夜の時刻は backend が持つ）
