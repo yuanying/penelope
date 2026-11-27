@@ -11,7 +11,7 @@ import type { AddressInfo } from "node:net";
 import type { Event } from "@penelope/contract";
 
 import type { Activation, Config } from "./config.ts";
-import { type IntakeAnswer, type IntakeFile, sendEvent } from "./intake.ts";
+import { type IntakeAnswer, type IntakeFile, readStatus, sendEvent, writeHeartbeatNote } from "./intake.ts";
 import type { ConnectionEvent, ConnectionHandle, WebhookHandler } from "./plugin.ts";
 
 /** The body of one webhook request: 1 MiB at most. */
@@ -123,6 +123,9 @@ export async function startReceivers(config: Config, options: Options = {}): Pro
       ? [
           activation.connection.start({
             deliver: (events) => deliver(activation, events),
+            readStatus: () => readStatus(config.intake, config.intakeTimeoutMs),
+            setHeartbeatNote: (note) => note === undefined ? Promise.resolve(false) : writeHeartbeatNote(config.intake, config.intakeTimeoutMs, activation.source, note),
+            clearHeartbeatNote: () => writeHeartbeatNote(config.intake, config.intakeTimeoutMs, activation.source, undefined),
             log: (line) => log(`receivers: connection=${activation.name} ${line}`),
             now,
           }),

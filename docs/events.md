@@ -72,15 +72,15 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - 本体が起きており、最後のターンの終わりから決めた時間がたつと、backend が `source` が `heartbeat` の出来事を 1 件入れる（[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)）。いつ入れるか、入れないかは [backend.md](backend.md) の「heartbeat」。
 - `id` は `heartbeat@<入れた時刻>`、`occurred_at` は入れた時刻、`stream` は無い。`delivery` はいつも `now` で、待っている `batch` の出来事を連れていく。
 - `summary` は `no turn for <N> minutes`（N が 1 なら `minute`）。N をテスト用に秒で決めて分で割り切れないときは `no turn for <秒> seconds`。
-- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N。テスト用の秒では端数になる）、列に入れた時点の `status`、残っている仕事があれば `pending` を持つ（型は `HeartbeatPayload`）。`/sources` にはこの `payload` を書く。何をすべきかは書かない。
-- ターンの行には、要約と場所に加え、`status` と、残っている仕事があれば `pending` を載せる（[ADR-0068](adr/0068-sleepiness-as-one-value-with-its-facts.md)、[ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md)）。`payload` 全体は載せず、`summary` に件数は足さない。
+- `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N。テスト用の秒では端数になる）、列に入れた時点の `status`、残っている仕事があれば `pending`、プラグインから預かった様子があれば `plugin_notes` を持つ（型は `HeartbeatPayload`）。`/sources` にはこの `payload` を書く。何をすべきかは書かない。
+- ターンの行には、要約と場所に加え、`status`、`pending`、`plugin_notes` を載せる（[ADR-0068](adr/0068-sleepiness-as-one-value-with-its-facts.md)、[ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md)、[ADR-0073](adr/0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md)）。`payload` 全体は載せず、`summary` に件数は足さない。
 - heartbeat だけで始まったターンも、ほかの出来事を含むターンも、同じ[畳む前の頼みの条件](#畳む前の頼み)に従う。
 
 ### 起きたときの出来事
 
 - 起きる時刻に、backend は `source` が `wake` の出来事を 1 件入れる。heartbeat が無効な配置でも入る。待っている出来事が 1 回の poll に収まらない場合も、最初の応答に `wake` を入れ、残りは後の応答で渡す。
 - `id` は `wake@<眠りの制御イベントの seq>`、`occurred_at` は実際に起きた時刻、`summary` は `woke up`。 `stream` は無く、`delivery` は `now`。
-- `payload` は `sleep_seq`（制御イベントの `seq`）、`wake_at`（予定の時刻）、`status` と、残っている仕事があれば `pending` を持つ（`WakePayload`）。ターンの行には、heartbeat と同じく `status` と `pending` だけを要約と場所に添える。
+- `payload` は `sleep_seq`（制御イベントの `seq`）、`wake_at`（予定の時刻）、`status` と、あれば `pending`、`plugin_notes` を持つ（`WakePayload`）。ターンの行には、heartbeat と同じく `status`、`pending`、`plugin_notes` を要約と場所に添える。
 
 ### A2A の出来事
 
@@ -116,6 +116,21 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 | `400` | 形が違う。body は `{error}`。送り直しても通らない |
 | `413` | body が上限より大きい。送り直しても通らない |
 | `5xx` | 受けていない。同じ `id` で送り直す。`/sources` に書けなかったときは `503` |
+
+### receivers のプラグイン用の口
+
+[ADR-0073](adr/0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md) の 2 つの口は取り込み口と同じ Unix socket にある。共有 token は使わず、この 2 つの口は取り込み口の socket 上だけで受ける。
+
+| 要求 | 応答と中身 |
+| --- | --- |
+| `GET /v1/status` | `200`。その時点の [本体の状態](sandbox-api.md#本体の状態)（`AgentStatus`）。変化を知るには読み直す |
+| `PUT /v1/heartbeat-notes/<source>` | body は預ける値の JSON。`204` で、その受信元の最新の 1 件として保存する。再送すると有効期限も更新する |
+| `DELETE /v1/heartbeat-notes/<source>` | `204`。その受信元の様子を取り下げる。預かっていなくても同じ応答 |
+
+- `<source>` は出来事の `source` と同じ制限に従う。backend の中の受信元と、不正な名前や JSON は `400` で断る。
+- JSON の上限は 1 件につき UTF-8 で 4 KiB。受け取った body と、`JSON.stringify` で書き直した JSON のどちらかが上限を超えれば `413` で断る。
+- 同時に最大 16 の受信元から預かる。枠が埋まっていれば新しい受信元の `PUT` を `503` で断る。失敗した要求では以前の値と期限を変えない。
+- 成功した最後の `PUT` から 15 秒たったものは載せない。預かりはメモリだけに持ち、backend の再起動で空になる。入れられなかった様子は省き、heartbeat や `wake` の配送は続ける。
 
 ## `/sources`
 
@@ -176,10 +191,13 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `attachments` | 添付があるときだけ。1 件は `path`・`mime_type`・`size`（sandbox 向けの口の添付と同じ） |
 | `pending` | `heartbeat` と `wake` だけ。残っている仕事があるときに載せる |
 | `status` | `heartbeat` と `wake` だけ。列に入れた時点の [本体の状態](sandbox-api.md#本体の状態) |
+| `plugin_notes` | `heartbeat` と `wake` だけ。列に入れた時点で預かっていた新しい様子。キーは受信元の `source`、値はその受信元が預けた JSON。空なら欄ごと省く |
 
 - inline の出来事は中身（`text`）を持ち、`appended` を持たない。inline でない出来事は `appended` を持ち、`text` を持たない。中身は、エージェントが必要なときに sandbox の shell でそのファイルを読む。
 - inline の出来事に付いた画像（`mime_type` が `image/png`・`image/jpeg`・`image/gif`・`image/webp` のもの）は、`attachments` に加えて、画像としてもターンに載せる。runner が `/sources` から読み、Pi の画像の入力として渡す。1 つの入力に 4 枚まで、添付の `size` が runner の設定の大きさ（既定 5 MiB）を超えるものと読めないものは載せず、`attachments` だけにする。
 - inline でない出来事の画像は `attachments` だけである。エージェントが Pi の `read` で開く。
+
+`plugin_notes` は外から来た中身であり、本体が採る `status` や `pending` とは混ぜない。列に入れた後でプラグインが更新や取り下げをしても、入れた出来事の内容は変わらない。
 
 ### ターンの始まりの `status`
 

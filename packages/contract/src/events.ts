@@ -79,7 +79,11 @@ export function isPresenceSource(source: string): source is "heartbeat" | "wake"
   return source === "heartbeat" || source === "wake";
 }
 
-export type PresenceNotes = { pending?: HeartbeatPending; status?: AgentStatus };
+export type PresenceNotes = {
+  pending?: HeartbeatPending;
+  status?: AgentStatus;
+  plugin_notes?: Record<string, unknown>;
+};
 export type HeartbeatPayload = PresenceNotes & { since: string; quiet_minutes: number };
 export type WakePayload = PresenceNotes & { sleep_seq: number; wake_at: string };
 

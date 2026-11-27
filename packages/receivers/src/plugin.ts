@@ -6,7 +6,7 @@
 // receivers, which send it to the intake.
 import type { IncomingHttpHeaders } from "node:http";
 
-import type { Event } from "@penelope/contract";
+import type { AgentStatus, Event } from "@penelope/contract";
 
 import type { IntakeFile } from "./intake.ts";
 
@@ -56,6 +56,9 @@ export type ConnectionIO = {
    * received them, so that the service sends them again (ADR-0028).
    */
   deliver: (events: readonly ConnectionEvent[]) => Promise<boolean>;
+  readStatus: () => Promise<AgentStatus | undefined>;
+  setHeartbeatNote: (note: unknown) => Promise<boolean>;
+  clearHeartbeatNote: () => Promise<boolean>;
   /** Writes a line to the log. Never a message's content nor a key. */
   log: (line: string) => void;
   now: () => Date;

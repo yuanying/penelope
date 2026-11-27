@@ -1,10 +1,11 @@
 // The intake (docs/events.md): `POST /v1/events` on a Unix socket that only
 // the backend and receivers mount. The backend's own sources do not come
 // this way; they call the queue directly.
-import type { BuiltinSource } from "@penelope/contract";
+import { type AgentStatus, type BuiltinSource, EVENT_PATH_SEGMENT } from "@penelope/contract";
 
 import { parseEnvelope } from "./envelope.ts";
-import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty } from "./http.ts";
+import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendJson } from "./http.ts";
+import type { PluginNotes } from "./plugin-notes.ts";
 import type { Queue } from "./queue.ts";
 import type { Attachment } from "./sources.ts";
 
@@ -13,12 +14,41 @@ export const BUILTIN_SOURCES: ReadonlySet<BuiltinSource> = new Set(["ui", "cron"
 /** The envelope with its files: 64 MiB in all by default. */
 export const DEFAULT_INTAKE_BYTES = 64 * 1024 * 1024;
 
+const NOTE_PREFIX = "/v1/heartbeat-notes/";
+const MAX_NOTE_BYTES = 4 * 1024;
+
+type PluginPorts = { now: () => number; readStatus: () => AgentStatus; notes: PluginNotes };
+
 export function intakeHandler(
   queue: Queue,
-  { maxBytes = DEFAULT_INTAKE_BYTES, log = console.error }: { maxBytes?: number; log?: (line: string) => void } = {},
+  { maxBytes = DEFAULT_INTAKE_BYTES, log = console.error, plugins }: { maxBytes?: number; log?: (line: string) => void; plugins?: PluginPorts } = {},
 ): Handler {
   return async (request, response) => {
     const url = new URL(request.url ?? "/", "http://intake");
+    if (plugins && url.pathname === "/v1/status") {
+      if (request.method !== "GET") throw new HttpError(405, "only GET");
+      sendJson(response, 200, plugins.readStatus());
+      return;
+    }
+    if (plugins && url.pathname.startsWith(NOTE_PREFIX)) {
+      const source = url.pathname.slice(NOTE_PREFIX.length);
+      if (!EVENT_PATH_SEGMENT.test(source) || BUILTIN_SOURCES.has(source as BuiltinSource)) {
+        throw new HttpError(400, "not a receiver source");
+      }
+      if (request.method === "DELETE") {
+        plugins.notes.delete(source);
+      } else if (request.method === "PUT") {
+        const note = await readJson(request, MAX_NOTE_BYTES);
+        if (Buffer.byteLength(JSON.stringify(note)) > MAX_NOTE_BYTES) {
+          throw new HttpError(413, `the note is over ${MAX_NOTE_BYTES} bytes as JSON`);
+        }
+        if (!plugins.notes.set(source, note, plugins.now())) throw new HttpError(503, "too many sources have a note");
+      } else {
+        throw new HttpError(405, "only PUT and DELETE");
+      }
+      sendEmpty(response, 204);
+      return;
+    }
     if (url.pathname !== "/v1/events") throw new HttpError(404, "no such path");
     if (request.method !== "POST") throw new HttpError(405, "only POST");
 

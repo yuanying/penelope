@@ -1,10 +1,8 @@
 // What the events of a turn become in its input: one JSON object a line,
 // inside `<events>` and `</events>` (docs/events.md, "ターンに入る形").
 
-import type { AnswerVia, Delivery, Source } from "./events.ts";
-import type { HeartbeatPending } from "./heartbeat.ts";
+import type { AnswerVia, Delivery, PresenceNotes, Source } from "./events.ts";
 import type { AgentId, Appended, DeliveredAttachment } from "./sandbox.ts";
-import type { AgentStatus } from "./status.ts";
 
 type TurnLineBase = {
   /** The agent the event is for. Left out, it is `main`, the only agent for now. */
@@ -29,7 +27,7 @@ type TurnEventBase = TurnLineBase & {
 /**
  * One event. An inline event carries its content as `text`; any other
  * carries where its content was appended under /sources. A heartbeat or wake event
- * can also carry pending work and status.
+ * can also carry pending work, status, and plugin notes.
  */
 export type TurnEvent =
   | (TurnEventBase & {
@@ -38,8 +36,9 @@ export type TurnEvent =
       appended?: never;
       pending?: never;
       status?: never;
+      plugin_notes?: never;
     })
-  | (TurnEventBase & { appended: Appended; text?: never; pending?: HeartbeatPending; status?: AgentStatus });
+  | (TurnEventBase & { appended: Appended; text?: never } & PresenceNotes);
 
 /** The batched events of one source and stream, handed over together, as one line. */
 export type TurnBatch = TurnLineBase & {

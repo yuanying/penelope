@@ -9,7 +9,7 @@ import { PLUGINS } from "./plugins/index.ts";
 export const DEFAULT_CONFIG_FILE = "/etc/penelope/receivers/config.json";
 
 /** The backend's own sources, which the intake refuses from the receivers. */
-const BUILTIN_SOURCES: readonly BuiltinSource[] = ["ui", "cron", "a2a", "self", "control", "heartbeat", "wake"];
+const BUILTIN_SOURCES: readonly BuiltinSource[] = ["ui", "cron", "a2a", "self", "job", "control", "heartbeat", "wake"];
 
 /** A path segment under /sources, as the intake takes `source` (docs/events.md). */
 const SEGMENT = /^[a-z0-9_-][a-z0-9._-]{0,127}$/;

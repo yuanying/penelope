@@ -58,6 +58,20 @@ test("only the heartbeat line carries the event's status snapshot", () => {
   assert.deepEqual(heartbeat.status, status);
 });
 
+test("plugin notes appear in their own field on heartbeat and wake lines only", () => {
+  const plugin_notes = { "room-view": { visitors: ["Lee"] } };
+  const [other, heartbeat, wake] = lines(formatEvents([
+    { ...mention, plugin_notes },
+    { ...mention, seq: 14, id: "heartbeat", source: "heartbeat", plugin_notes },
+    { ...mention, seq: 15, id: "wake", source: "wake", plugin_notes },
+  ]));
+  assert.ok(other && !("plugin_notes" in other));
+  for (const line of [heartbeat, wake]) {
+    assert.ok(line && line.kind === undefined);
+    assert.deepEqual(line.plugin_notes, plugin_notes);
+  }
+});
+
 function batch(seq: number, stream: string, path: string, line: number): DeliveredEvent {
   return {
     seq,

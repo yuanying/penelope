@@ -5,7 +5,8 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 [ADR-0023](adr/0023-receivers-plugins-in-the-repository-and-alertmanager-first.md)・
 [ADR-0024](adr/0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md)・
 [ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md)・
-[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md) にある。ここにはその形を書く。
+[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)・
+[ADR-0073](adr/0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md) にある。ここにはその形を書く。
 出来事の封筒と取り込み口は [events.md](events.md)、コンテナの UID・volume・待ち受けは [pod.md](pod.md) にある。
 
 具体的なホスト名・token の値・配置ごとの名前は、配置のリポジトリの設定にだけ書く。ここの例はすべて架空である。
@@ -28,7 +29,7 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 | --- | --- | --- |
 | `listen` | `0.0.0.0:8081` | HTTP の口の TCP の待ち受け（`host:port`、IPv6 は `[::]:8081`）。backend の `PENELOPE_LISTEN`（既定 `8080`）と同じ Pod で重ならないポートにする。ポートが `0` なら空いているものを使う（テストのため） |
 | `intake` | `/run/penelope/intake/backend.sock` | 取り込み口の Unix socket。backend の `PENELOPE_INTAKE_SOCKET` と同じ場所 |
-| `intake_timeout_seconds` | `10` | 取り込み口への 1 件の要求を待つ秒数。0 より大きい整数 |
+| `intake_timeout_seconds` | `10` | 取り込み口または同じ socket 上のプラグイン用の口への 1 件の要求を待つ秒数。0 より大きい整数 |
 | `plugins` | `[]` | プラグインの有効化の一覧（下の「プラグインの有効化」）。空なら、出来事を作らずに health だけを答える |
 
 - 知らない欄が書かれていれば、起動しない（書き損じを黙って無視しない）。プラグインの `settings` の中も同じである。
@@ -42,7 +43,7 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 | --- | --- | --- |
 | `name` | ○ | 有効化の名前。webhook のプラグインなら URL の `/v1/webhooks/<name>` になる。接続の種類ではログの `connection=<name>` になる。英小文字・数字・`-` で、1〜32 文字、`-` で始まらない。一覧の中で一意 |
 | `plugin` | ○ | プラグインの名前（下の「プラグインの一覧」）。知らない名前なら起動しない |
-| `source` | | 取り込み口に送る出来事の `source`。省けば `plugin` の名前。[events.md](events.md) の `source` の文字の制限を満たし、backend の中の受信元の名前（`ui`・`cron`・`a2a`・`self`・`control`・`heartbeat`）でないもの。一覧の中で一意 |
+| `source` | | 取り込み口に送る出来事の `source`。省けば `plugin` の名前。[events.md](events.md) の `source` の文字の制限を満たし、backend の中の受信元の名前（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake`）でないもの。一覧の中で一意 |
 | `settings` | | プラグインごとの設定（各プラグインの節）。省けば `{}` |
 
 - 1 つの配置に同じ送り手の種類が 2 つあるときは、同じ `plugin` を 2 つ有効にし、`name` と `source` を変える。`source` が重なる設定は起動しない。`id` は `source` の中だけで一意なので、送り手をまたいで ID が重なると、片方が重複として落ちるためである。
@@ -135,10 +136,13 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 
 自分から外のサービスへ接続を張って出来事を受けるもの（[ADR-0028](adr/0028-slack-received-over-socket-mode-by-a-receivers-plugin.md) の Decision 項 1）。HTTP のサーバーの下に道を持たない。
 
-- `settings` を確かめた後、本体が起動のときに 1 度だけ始める。そのとき本体は次の 3 つを渡す。
+- `settings` を確かめた後、本体が起動のときに 1 度だけ始める。そのとき本体は次のものを渡す。
   - 送り出し: 出来事の一覧を受け、1 件ずつ順に取り込み口へ送り、すべてが `202` で受けられたら真、最初に受けられなかったところで止めて偽を返す。出来事は webhook と同じ欄を持ち、加えて取り込み口へ添付として送るファイル（名前・MIME の種類・バイト列）を持てる。ファイルがあれば、取り込み口へは `multipart/form-data` で送る（[events.md](events.md) の「取り込み口」）。
   - ログ: プラグインの書く 1 行。本体が `receivers: connection=<name> ` を前に付けて標準エラーに書く。
   - 時計。
+  - `readStatus()`: backend の今の `AgentStatus` を読む。読めなければ `undefined` を返す。接続時に読み、変化が必要ならプラグイン側で読み直す。
+  - `setHeartbeatNote(note)` と `clearHeartbeatNote()`: JSON の様子を預けるか、取り下げる。成功なら真、失敗なら偽を返す。受信元の名前は本体が有効化の `source` から付ける。
+- 様子を載せ続ける間は 15 秒未満の間隔で預け直す。外のサービスとの接続が切れるなど、最新の様子を出せなくなったら取り下げる。同じ有効化で預け直すときや取り下げるときは、前の要求が終わるのを待つ。1 件の大きさ、期限、再起動時の扱いは [events.md](events.md#receivers-のプラグイン用の口) にある。
 - プラグインは、送り出しが真を返してから、外のサービスに受けたことを伝える。偽なら伝えず、外のサービスの送り直しに任せる（ADR-0023 の Decision 項 4）。
 - 接続が切れても、プラグインが自分でつなぎ直す。本体は止めない。
 - 本体が止めるとき、プラグインは新しい出来事を受けるのをやめ、手元の出来事を送り終えてから接続を閉じる。

@@ -54,11 +54,12 @@ function single(event: DeliveredEvent, drawn?: string): TurnEvent {
   };
   const attachments = event.attachments?.length ? { attachments: event.attachments } : {};
   if (event.inline) return { ...head, text: drawn ?? text(event.payload), ...attachments };
-  const { pending, status } = isPresenceSource(event.source) ? event : {};
+  const { pending, status, plugin_notes } = isPresenceSource(event.source) ? event : {};
   return {
     ...head, appended: event.appended, ...attachments,
     ...(pending === undefined ? {} : { pending }),
     ...(status === undefined ? {} : { status }),
+    ...(plugin_notes === undefined ? {} : { plugin_notes }),
   };
 }
 

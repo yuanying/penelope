@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, beforeEach, test } from "node:test";
 
-import type { Event } from "@penelope/contract";
+import type { AgentStatus, Event } from "@penelope/contract";
 
 import type { Config } from "../src/config.ts";
 import type { ConnectionIO } from "../src/plugin.ts";
@@ -18,6 +18,8 @@ const dir = mkdtempSync(join(tmpdir(), "receivers-connection-"));
 const socket = join(dir, "backend.sock");
 const received: { type: string; event: Event }[] = [];
 let status = 202;
+let agentStatus: AgentStatus = { mood: null, sleep: { state: "awake" }, sleepiness: 8, awake_seconds: 120 };
+const notes = new Map<string, unknown>();
 let intake: http.Server;
 
 before(async () => {
@@ -27,6 +29,18 @@ before(async () => {
     request.on("end", async () => {
       const type = request.headers["content-type"] ?? "";
       const body = Buffer.concat(parts);
+      if (request.method === "GET" && request.url === "/v1/status") {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify(agentStatus));
+        return;
+      }
+      if (request.url?.startsWith("/v1/heartbeat-notes/")) {
+        if (request.method === "PUT") notes.set(request.url, JSON.parse(body.toString("utf8")));
+        else if (request.method === "DELETE") notes.delete(request.url);
+        else return void response.writeHead(405).end();
+        response.writeHead(204).end();
+        return;
+      }
       const event = type.startsWith("multipart/")
         ? (JSON.parse((await new Response(new Uint8Array(body), { headers: { "content-type": type } }).formData()).get("event") as string) as Event)
         : (JSON.parse(body.toString("utf8")) as Event);
@@ -44,6 +58,7 @@ after(async () => {
 });
 
 beforeEach(() => {
+  notes.clear();
   received.length = 0;
   status = 202;
 });
@@ -104,6 +119,30 @@ test("each event it hands over goes to the intake with the activation's source, 
     await receivers.close();
   }
   assert.equal(state.stopped, true);
+});
+
+test("a connection plugin can read the latest status again after it changes", async (t) => {
+  const { config, state } = activation();
+  const receivers = await startReceivers(config);
+  t.after(() => receivers.close());
+
+  const before: AgentStatus = { mood: null, sleep: { state: "awake" }, sleepiness: 8, awake_seconds: 120 };
+  agentStatus = before;
+  assert.deepEqual(await state.io!.readStatus(), before);
+  const after: AgentStatus = { ...before, mood: "Ready to sleep", sleep: { state: "asleep", wake_at: EVENT.occurred_at } };
+  agentStatus = after;
+  assert.deepEqual(await state.io!.readStatus(), after);
+});
+
+test("a connection plugin sets and clears its note under its configured source", async (t) => {
+  const { config, state } = activation();
+  const receivers = await startReceivers(config);
+  t.after(() => receivers.close());
+
+  assert.equal(await state.io!.setHeartbeatNote({ reports: 2 }), true);
+  assert.deepEqual(notes.get("/v1/heartbeat-notes/slack-work"), { reports: 2 });
+  assert.equal(await state.io!.clearHeartbeatNote(), true);
+  assert.equal(notes.has("/v1/heartbeat-notes/slack-work"), false);
 });
 
 test("it is told when the intake did not take one, and the rest are not sent", async () => {

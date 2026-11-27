@@ -26,6 +26,7 @@ import { MemoryView } from "./memory-view.ts";
 import { Memory } from "./memory.ts";
 import { metricsHandler } from "./metrics.ts";
 import { ModelSettings } from "./model-settings.ts";
+import { PluginNotes } from "./plugin-notes.ts";
 import { ApnsChannel, ApnsClient } from "./push/apns.ts";
 import { ApnsRegistrations } from "./push/apns-registrations.ts";
 import { noticeChannel, Notifier, PushSubscriptions } from "./push/notifier.ts";
@@ -89,7 +90,8 @@ export async function startBackend(
   const sessions = new LoginSessions(db, { now });
   const appTokens = new AppTokens(db, { now });
   const inbox = new Inbox(db, queue, { assets, now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
-  const heartbeat = new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, inbox, record, sleepiness, log });
+  const pluginNotes = new PluginNotes();
+  const heartbeat = new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, inbox, record, sleepiness, pluginNotes, log });
   const sleep = new Sleep(db, queue, sleepiness, {
     now, timeZone: config.timeZone, limits: config.sleep, notes: (at, since) => heartbeat.notes(at, since), log,
   });
@@ -117,7 +119,9 @@ export async function startBackend(
   let ui: http.Server;
   let metricsPort: number | undefined;
   try {
-    await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
+    await opening(listenUnix(intakeHandler(queue, {
+      log, plugins: { now, readStatus: () => sleepiness.status(), notes: pluginNotes },
+    }), config.intakeSocket, log));
     await opening(
       listenUnix(
         sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, sleep, now, log }),

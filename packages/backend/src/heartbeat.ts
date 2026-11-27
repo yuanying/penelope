@@ -1,7 +1,8 @@
-import type { HeartbeatPayload, HeartbeatPending, PresenceNotes } from "@penelope/contract";
+import type { HeartbeatPayload, PresenceNotes } from "@penelope/contract";
 
 import type { Inbox } from "./a2a/inbox.ts";
 import type { Conversation } from "./conversation.ts";
+import type { PluginNotes } from "./plugin-notes.ts";
 import type { Queue } from "./queue.ts";
 import type { ActivityRecord } from "./record.ts";
 import type { Sleepiness } from "./sleepiness.ts";
@@ -13,6 +14,7 @@ export class Heartbeat {
   private readonly inbox: Inbox;
   private readonly record: ActivityRecord;
   private readonly sleepiness: Sleepiness;
+  private readonly pluginNotes: PluginNotes | undefined;
   private readonly now: () => number;
   private readonly quietMs: number | undefined;
   private readonly log: (line: string) => void;
@@ -23,13 +25,14 @@ export class Heartbeat {
   constructor(
     queue: Queue,
     conversation: Conversation,
-    options: { now: () => number; quietMs?: number | undefined; inbox: Inbox; record: ActivityRecord; sleepiness: Sleepiness; log?: (line: string) => void },
+    options: { now: () => number; quietMs?: number | undefined; inbox: Inbox; record: ActivityRecord; sleepiness: Sleepiness; pluginNotes?: PluginNotes; log?: (line: string) => void },
   ) {
     this.queue = queue;
     this.conversation = conversation;
     this.inbox = options.inbox;
     this.record = options.record;
     this.sleepiness = options.sleepiness;
+    this.pluginNotes = options.pluginNotes;
     this.now = options.now;
     this.quietMs = options.quietMs;
     this.log = options.log ?? console.error;
@@ -67,15 +70,17 @@ export class Heartbeat {
   notes(now: number, since: number): PresenceNotes {
     const a2a_tasks = this.gather("a2a_tasks", () => this.inbox.heartbeatTasks(now));
     const failures = this.gather("failures", () => this.record.heartbeatFailures(iso(this.queue.lastPresenceAt() ?? since)));
+    const plugin_notes = this.gather("plugin_notes", () => this.pluginNotes?.snapshot(now));
     return {
       status: this.sleepiness.status(now),
+      ...(plugin_notes === undefined ? {} : { plugin_notes }),
       ...(a2a_tasks === undefined && failures === undefined ? {} : {
         pending: { ...(a2a_tasks === undefined ? {} : { a2a_tasks }), ...(failures === undefined ? {} : { failures }) },
       }),
     };
   }
 
-  private gather<K extends keyof HeartbeatPending>(kind: K, read: () => HeartbeatPending[K]): HeartbeatPending[K] | undefined {
+  private gather<T>(kind: string, read: () => T): T | undefined {
     try {
       return read();
     } catch (error) {

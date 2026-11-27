@@ -1,8 +1,7 @@
 // The backend's API for the sandbox: the runner and the tools, through the
 // Sentinel (docs/sandbox-api.md).
 
-import type { AnswerVia, Delivery, Source } from "./events.ts";
-import type { HeartbeatPending } from "./heartbeat.ts";
+import type { AnswerVia, Delivery, PresenceNotes, Source } from "./events.ts";
 import type { AgentStatus, ContextUsage } from "./status.ts";
 
 /** Which agent is calling. The main agent is `main`; a sub-agent's is the name its parent gives it. */
@@ -70,11 +69,11 @@ type DeliveredBase = {
 /**
  * An event as `GET /v1/events` hands it over. An inline source's event
  * carries its payload into the turn; any other carries only the summary and
- * where to read it. Heartbeat and wake events can also carry pending work and status.
+ * where to read it. Heartbeat and wake events can also carry pending work, status, and plugin notes.
  */
 export type DeliveredEvent =
-  | (DeliveredBase & { inline: true; payload: unknown; pending?: never; status?: never })
-  | (DeliveredBase & { inline: false; payload?: never; pending?: HeartbeatPending; status?: AgentStatus });
+  | (DeliveredBase & { inline: true; payload: unknown; pending?: never; status?: never; plugin_notes?: never })
+  | (DeliveredBase & { inline: false; payload?: never } & PresenceNotes);
 
 /** `GET /v1/events?agent=&after=&wait=` */
 export type PollResponse = { events: DeliveredEvent[] };

@@ -6,7 +6,7 @@
 import { randomBytes } from "node:crypto";
 import http from "node:http";
 
-import type { Event } from "@penelope/contract";
+import type { AgentStatus, Event } from "@penelope/contract";
 
 export type IntakeAnswer = { taken: true } | { taken: false; why: string };
 
@@ -71,4 +71,55 @@ export function sendEvent(socketPath: string, event: Event, timeoutMs: number, f
     request.on("error", (error) => settle({ taken: false, why: error.message }));
     request.end(body);
   });
+}
+
+export async function readStatus(socketPath: string, timeoutMs: number): Promise<AgentStatus | undefined> {
+  const text = await pluginRequest(socketPath, timeoutMs, "/v1/status", "GET", 200);
+  if (text === undefined) return undefined;
+  try {
+    return JSON.parse(text) as AgentStatus;
+  } catch {
+    return undefined;
+  }
+}
+
+export async function writeHeartbeatNote(socketPath: string, timeoutMs: number, source: string, note: unknown): Promise<boolean> {
+  let body: string | undefined;
+  if (note !== undefined) {
+    try {
+      body = JSON.stringify(note);
+    } catch {
+      return false;
+    }
+    if (body === undefined) return false;
+  }
+  const path = `/v1/heartbeat-notes/${encodeURIComponent(source)}`;
+  return (await pluginRequest(socketPath, timeoutMs, path, body === undefined ? "DELETE" : "PUT", 204, body)) !== undefined;
+}
+
+async function pluginRequest(
+  socketPath: string, timeoutMs: number, path: string, method: string, expected: number, body?: string,
+): Promise<string | undefined> {
+  try {
+    const headers = body === undefined ? undefined : { "content-type": "application/json", "content-length": Buffer.byteLength(body) };
+    const response = await new Promise<http.IncomingMessage>((resolve, reject) => {
+      const request = http.request({ socketPath, path, method, headers, signal: AbortSignal.timeout(timeoutMs) }, resolve);
+      request.on("error", reject);
+      request.end(body);
+    });
+    if (response.statusCode !== expected) {
+      response.destroy();
+      return undefined;
+    }
+    const parts: Buffer[] = [];
+    let bytes = 0;
+    for await (const part of response as AsyncIterable<Buffer>) {
+      bytes += part.length;
+      if (bytes > 4 * 1024) return undefined;
+      parts.push(part);
+    }
+    return Buffer.concat(parts).toString("utf8");
+  } catch {
+    return undefined;
+  }
 }

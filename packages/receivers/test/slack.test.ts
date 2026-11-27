@@ -150,6 +150,9 @@ test("connects with the app token, fills in with the bot token, and acknowledges
         delivered.push([...events]);
         return take;
       },
+      readStatus: async () => undefined,
+      setHeartbeatNote: async () => false,
+      clearHeartbeatNote: async () => false,
       log: (line) => lines.push(line),
       now: () => new Date("2026-11-16T10:00:00.000Z"),
     });

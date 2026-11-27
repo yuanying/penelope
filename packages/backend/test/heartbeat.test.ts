@@ -11,6 +11,7 @@ import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
 import { Heartbeat } from "../src/heartbeat.ts";
+import { PluginNotes } from "../src/plugin-notes.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { Sleep } from "../src/sleep.ts";
@@ -46,7 +47,8 @@ function setup(
     limits: { maxOpenTasks: 3, deadlineMs: 120 * 60_000 },
   });
   const sleepiness = new Sleepiness(db, clock.now, "UTC");
-  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, log: () => {}, inbox, record, sleepiness });
+  const pluginNotes = new PluginNotes();
+  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, log: () => {}, inbox, record, sleepiness, pluginNotes });
   let turns = 0;
   /** The runner's blocks of one turn: its start, or its end. */
   const turn = (kind: "turn_start" | "turn_end") => {
@@ -60,7 +62,7 @@ function setup(
     queue.ack(events.map((event) => event.seq));
     return events;
   };
-  return { db, clock, queue, conversation, heartbeat, inbox, record, sleepiness, turn, takeAll };
+  return { db, clock, queue, conversation, heartbeat, inbox, record, sleepiness, pluginNotes, turn, takeAll };
 }
 
 describe("the heartbeat", () => {
@@ -94,6 +96,35 @@ describe("the heartbeat", () => {
     sleepiness.setMood("Ready for a break.");
     const [event] = queue.take({ after: 0 });
     assert.deepEqual(event?.status, { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600, mood: "Quietly hopeful." });
+  });
+
+  it("delivers only the latest note per source sampled when the heartbeat was queued", (t) => {
+    const { clock, heartbeat, queue, pluginNotes } = setup(t);
+    clock.advance(QUIET_MINUTES - 0.25);
+    pluginNotes.set("room-view", { visitors: [] }, clock.now());
+    clock.advance(0.2);
+    pluginNotes.set("room-view", { visitors: ["Lee"] }, clock.now());
+    clock.advance(0.05);
+    pluginNotes.set("builds", ["passing"], clock.now());
+    heartbeat.tick();
+    pluginNotes.delete("room-view");
+
+    assert.deepEqual(queue.take({ after: 0 })[0]?.plugin_notes, {
+      "room-view": { visitors: ["Lee"] },
+      builds: ["passing"],
+    });
+  });
+
+  it("still delivers a heartbeat without notes when a plugin stops refreshing", (t) => {
+    const { clock, heartbeat, queue, pluginNotes } = setup(t);
+    clock.advance(QUIET_MINUTES - 0.25);
+    pluginNotes.set("room-view", { visitors: ["Lee"] }, clock.now());
+    clock.advance(0.25);
+    heartbeat.tick();
+
+    const [event] = queue.take({ after: 0 });
+    assert.equal(event?.source, "heartbeat");
+    assert.ok(!("plugin_notes" in event!));
   });
 
   it("writes since when it counted and how long it waited as the payload", (t) => {
