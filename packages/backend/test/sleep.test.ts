@@ -130,27 +130,27 @@ test("the safety net uses elapsed awake time after a backend restart without ano
   assert.deepEqual(queue.take({ after: 0 }).map(({ source }) => source), ["control"]);
 });
 
-test("a successful review delays the next weekly review until seven days after completion", (t) => {
-  const clock = new FakeClock("2026-11-16T15:00:00Z");
+test("weekly review counts seven local dates from the last successful review's sleep request", (t) => {
+  const clock = new FakeClock("2026-11-17T14:55:00Z"); // Nov 17, 23:55 in Tokyo
   const { db, queue, sleep, record } = setup(tempDir(t), clock);
   t.after(() => db.close());
   sleep.request(clock.now() + 60 * minute);
   const [first] = queue.take({ after: 0 });
   assert.deepEqual(first?.payload, { kind: "nightly", review_date: "2026-11-17" });
   const done = { result: "done" as const };
-  clock.advance(2);
+  clock.advance(10); // The report arrives after local midnight.
   record.nightReported({ seq: first!.seq, stages: {
     reflection: done, verifier: done, curator: { ...done, review: { content: done, structure: done } }, session: done,
   } });
-  queue.ack([first!.seq]);
+  sleep.completed(first!.seq);
 
-  clock.set("2026-11-23T15:01:00Z");
+  clock.set("2026-11-23T14:59:00Z"); // Still Nov 23 locally.
   sleep.request(clock.now() + minute);
   const ordinary = queue.take({ after: first!.seq })[0]!;
   assert.deepEqual(ordinary.payload, { kind: "nightly" });
-  queue.ack([ordinary.seq]);
+  sleep.completed(ordinary.seq);
 
-  clock.advance(1);
+  clock.advance(1); // Nov 24 locally, even though less than 7×24 hours have passed.
   sleep.request(clock.now() + minute);
   assert.deepEqual(queue.take({ after: ordinary.seq })[0]?.payload, { kind: "nightly", review_date: "2026-11-24" });
 });

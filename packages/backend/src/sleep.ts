@@ -8,7 +8,7 @@ import type { Queue } from "./queue.ts";
 import type { Sleepiness } from "./sleepiness.ts";
 import { dayIn, deliveryTimeIn, iso } from "./time.ts";
 
-const REVIEW_MS = 7 * 86_400_000;
+const REVIEW_DAYS = 7;
 const CHECK_MS = 15_000;
 
 type SleepRow = {
@@ -79,14 +79,16 @@ export class Sleep {
       this.db.prepare("UPDATE sleeps SET wake_ms = ? WHERE control_seq = ?").run(wakeMs, current.controlSeq);
     } else {
       const payload: ControlPayload = { kind: "nightly" };
-      const review = this.db.prepare(`
-        SELECT at FROM session_rotations
-        WHERE json_extract(stages, '$.curator.result') = 'done'
-          AND json_type(stages, '$.curator.review') = 'object'
-        ORDER BY at DESC LIMIT 1
-      `).get() as { at: string } | undefined;
-      if (review === undefined || now - Date.parse(review.at) >= REVIEW_MS) {
-        payload.review_date = dayIn(now, this.options.timeZone);
+      const day = dayIn(now, this.options.timeZone);
+      const { previous } = this.db.prepare(`
+        SELECT MAX(json_extract(e.payload, '$.review_date')) AS previous
+        FROM session_rotations r JOIN events e ON e.seq = r.seq
+        WHERE e.source = 'control' AND json_extract(r.stages, '$.curator.result') = 'done'
+          AND json_type(r.stages, '$.curator.review') = 'object'
+      `).get() as { previous: string | null };
+      // Compare date labels in UTC, so local midnight and DST do not change the day count.
+      if (previous === null || (Date.parse(day) - Date.parse(previous)) / 86_400_000 >= REVIEW_DAYS) {
+        payload.review_date = day;
       }
       transaction(this.db, () => {
         const { seq } = this.queue.accept({
