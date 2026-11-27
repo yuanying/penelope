@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: penelope
+spec:
+  template:
+    spec:
+      containers:
+      - name: receivers
+        volumeMounts:
+        - name: house-token
+          mountPath: /run/secrets/penelope-house
+          readOnly: true
+      - name: sentinel
+        volumeMounts:
+        - name: house-token
+          mountPath: /run/secrets/penelope-house
+          readOnly: true
+      volumes:
+      - name: house-token
+        projected:
+          defaultMode: 0444
+          sources:
+          - serviceAccountToken:
+              audience: https://auth.example.com
+              expirationSeconds: 3600
+              path: token

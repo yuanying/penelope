@@ -1,6 +1,6 @@
 # receivers の仕様
 
-receivers の設定、HTTP の口、プラグインの内側の契約、Alertmanager・GitHub・Slack のプラグインが出来事を作る形を決める。
+receivers の設定、HTTP の口、プラグインの内側の契約、Alertmanager・GitHub・Slack・家のプラグインが出来事を作る形を決める。
 方針は [ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md) と
 [ADR-0023](adr/0023-receivers-plugins-in-the-repository-and-alertmanager-first.md)・
 [ADR-0024](adr/0024-github-webhooks-pass-review-requests-and-dismissals-without-state.md)・
@@ -19,7 +19,7 @@ receivers の設定、HTTP の口、プラグインの内側の契約、Alertman
 - 設定は 1 つの JSON のファイル。場所は環境変数 `PENELOPE_RECEIVERS_CONFIG` で渡す。既定は `/etc/penelope/receivers/config.json`。
 - 鍵の値は設定のファイルに書かず、値を書いたファイルの場所を書く（`_file` で終わる欄）。
 - 設定が読めない、または使えない値があれば、起動せずに終わる（終了コード 2）。標準エラーに、どの欄がなぜ使えないかを 1 行書く。
-- 設定と鍵のファイルは起動のときに 1 度だけ読む。変えたら再起動する。
+- 設定と鍵のファイルは起動のときに読む。変えたら再起動する。ただし家のプラグインは自動更新される token のファイルを要求ごとに読み直す。
 - 起動したら、標準エラーに待ち受けのアドレスと、有効化ごとの名前・プラグイン・`source` を、webhook と接続の種類に分けて 1 行書く（`receivers: listening on 0.0.0.0:8081; webhooks: fraction (alertmanager, source alertmanager); connections: slack (slack, source slack)`）。
 - SIGTERM で、新しい要求を受けるのをやめ、処理中の要求（取り込み口へ送っているものを含む）を終えてから終わる。終える要求の応答には `Connection: close` を付け、つなぎ置きの接続を残さない。接続の種類のプラグインは、手元の出来事を取り込み口へ送り終えてから接続を閉じる。
 
@@ -79,6 +79,7 @@ GitHub の webhook も受けるなら、前の形から引き継いだ URL `/v1/
 | `alertmanager` | webhook | 下の「Alertmanager のプラグイン」 |
 | `github` | webhook | 下の「GitHub のプラグイン」 |
 | `slack` | 接続 | 下の「Slack のプラグイン」 |
+| `house` | 接続 | 下の「家のプラグイン」 |
 
 ## HTTP の口
 
@@ -149,6 +150,25 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 - 取り込み口が受けなかった出来事は、本体が webhook と同じ形の 1 行を書く: `receivers: connection=<name> intake did not take <source>/<id>: <理由>`。
 
 封筒の欄の型は `packages/contract` の `src/events.ts` の `Event` に従う。返事を想定する出来事には、プラグインが使う口を `answer_via` に指定できる（[events.md](events.md#answer_via)）。外から届く本文や `payload` の同名の欄を封筒に写さない。
+
+## 家のプラグイン
+
+`plugin` は `house`、種類は接続。家の `POST /v1/agent/sync` を呼ぶ。[家の仕様](house.md#status-の写しと受領確認)が API と出来事の形を定める。家のプラグインを有効にしない配置では、接続も status の転送も行わない。
+
+| `settings` の欄 | 既定 | 中身 |
+| --- | --- | --- |
+| `url` | なし（必須） | 家の HTTPS オリジン。パス・クエリ・認証情報は含めない |
+| `token_file` | なし（必須） | gated 用の audience を持つ ServiceAccount token のファイル。起動時に確かめ、`sync` ごとに読み直して `Authorization: Bearer` に入れる |
+| `owner_id` | なし | 家でのオーナーの住人 ID。省くと、誰もオーナーとして表示しない |
+
+- `source` の既定は `house`。有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` に含める。
+- 同じ家で同じ住人になる有効化は 1 つだけにする。receivers から家へは Sentinel を経由せず、HTTPS で接続する。redirect は追わない。
+- 各 `sync` の前に `readStatus()` で今の値を読む。家へ転送するのは `mood`・`sleep`・`sleepiness`。読めなければ古い値を送り直さない。
+- 成功した応答の `house` を `setHeartbeatNote()` で預ける。backend が受けなければ（JSON で 4 KiB を超える場合など）、様子を取り下げる。出来事の配送は続ける。
+- `pending` を記録順に 1 件ずつ送り、取り込み口が `202` を返した ID を次の `sync` で ack する。最初に取り込みが失敗したところで止める。`sync` が失敗したら同じ ack を再送する。receivers の再起動でまだ ack していない出来事は家から再送され、backend が `source` と `id` で重複を落とす。
+- 成功時は 1 サイクルの処理が済んで 2 秒後に次の `sync` を始める。家への 1 要求の期限は 5 秒。`sync` できない間は様子を取り下げ、2 秒から最大 30 秒まで待ちを倍にして再接続を試みる。停止時も様子を取り下げる。
+
+設定例は [Kubernetes の見本](../deploy/kubernetes/README.md#家を有効にする)にある。
 
 ## Alertmanager のプラグイン
 

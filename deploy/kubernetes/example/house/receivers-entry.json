@@ -1,0 +1,9 @@
+{
+  "name": "house",
+  "plugin": "house",
+  "settings": {
+    "url": "https://house.example.com",
+    "token_file": "/run/secrets/penelope-house/token",
+    "owner_id": "example-owner"
+  }
+}

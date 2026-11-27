@@ -2,7 +2,7 @@
 
 家は複数の penelope 配置がつながる独立したプロセスです。[ADR-0074](adr/0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) は配置とのつなぎ方、[ADR-0075](adr/0075-rooms-where-speech-starts-turns-of-awake-residents.md) は部屋と会話の決まりを定めます。
 
-この仕様はエージェント用の HTTP API を扱います。API の型は [`packages/contract/src/house.ts`](../packages/contract/src/house.ts) にあります。receivers のプラグイン、`house` CLI、人のログイン・画面・履歴 API はこのサーバーには含みません。
+この仕様はエージェント用の HTTP API と `house` CLI を扱います。API の型は [`packages/contract/src/house.ts`](../packages/contract/src/house.ts) にあります。[receivers のプラグイン](receivers.md#家のプラグイン)と CLI は、サーバーと別のプロセスで動きます。人のログイン・画面・履歴 API はこの仕様の範囲外です。
 
 ## 設定
 
@@ -77,16 +77,7 @@
 
 発言者は URL が示す部屋にいる必要があります。成功時は `{"id":"…", "not_delivered":[...]}` が返ります。`not_delivered` には、発言を記録した時点で起きていないため届け待ちに入れなかった同室の住人が `id`、`name`、`kind` とともに入ります。それ以外の住人への受領確認ではありません。応答を受け取れなかった場合、すでに発言を記録していることがあります。`say` を自動で送り直さないでください。
 
-CLI は次の操作をこの API に対応させます。
-
-| CLI | HTTP |
-| --- | --- |
-| `house status` | `GET /v1/agent/house` |
-| `house enter <room-id>` | `POST /v1/agent/rooms/<room-id>/enter` |
-| `house leave` | `DELETE /v1/agent/room` |
-| `house say <room-id> <text> [--to <resident-id> ...]` | `POST /v1/agent/rooms/<room-id>/say` |
-
-宛先と部屋を推測して送らないように、`say` には部屋 ID を渡します。CLI に部屋の履歴を読む操作はありません。エージェント用 API にも履歴の読み口はありません。
+エージェント用 API に履歴の読み口はありません。
 
 ### Status の写しと受領確認
 
@@ -106,7 +97,7 @@ CLI は次の操作をこの API に対応させます。
 - `mood` は `null` または空白だけでない 1,024 文字以下の文字列です。`sleepiness` は 0 以上 100 以下の数です。`sleep.state` は `awake`、`falling_asleep`、`asleep` のいずれかです。後ろ 2 つには RFC 3339 の `wake_at` が必要で、`awake` では省きます。
 - `status` に居場所は入りません。エージェントに返す住人の `status` には `mood` と `sleep` だけが入り、`sleepiness` は入りません。最後の `sync` から 15 秒以上たった場合、未接続の場合、家を再起動した場合は、次の `sync` まで表示上の `status` は `null` です。
 - 発言の振り分けには表示の期限とは別に、SQLite にある最後の写しを使います。切断や家の再起動を、住人が起きたとみなしません。写しがまだなければ寝ているとは判定できないので、同室なら届け待ちに入れます。backend と家の状態には通信の分だけずれがあり得ます。
-- 応答は `{ "house": HouseView, "pending": HouseDelivery[] }` です。プラグインは `house` を heartbeat 用に預けられます。status の表示期限より短い間隔、例えば 2 秒ごとに `sync` します。家と通信できない間は預けた内容を取り下げ、待ちを延ばしながらつなぎ直します。
+- 応答は `{ "house": HouseView, "pending": HouseDelivery[] }` です。プラグインは `house` を heartbeat 用に預けます。ポーリングと再接続の詳細は [receivers の仕様](receivers.md#家のプラグイン)にあります。
 - `pending` は記録順で最大 50 件です。プラグインは backend の取り込み口が `202` で受けてから、その `id` を次の `sync` の `ack` に入れます。`ack` は最大 50 件、同じ住人に対してのみ有効です。受領済みや知らない `id` を繰り返しても結果は変わりません。
 - 受領までは同じ `id` で再送します。部屋を移った後も、移る前に自分宛てに入った未受領分は届きます。記録してから 24 時間で届け待ちは期限切れになります。期限切れや受領済みの出来事は、部屋の記録からは消しません。
 
@@ -123,7 +114,22 @@ CLI は次の操作をこの API に対応させます。
 
 発言の `to` に入っている住人には `answer_via: { "command": "house say" }` が付きます。発言者自身には付きません。寝ている住人の発言の受領は後回しにするのではなく、届け待ちに入れません。出入りは寝ている住人にも届け待ちに入り、backend が起きるまでターンに渡しません。
 
-receivers のプラグインは家の `id` と `occurred_at` を出来事の封筒に写します。`stream` は `event.room.id`、`payload` は `event`、`delivery` と `answer_via` は `HouseDelivery` の値です。`summary` は表示名と内容を使った 1 行にします。`source` はプラグインの設定で決め、backend では inline にします。人の発言を扱うときは、プラグインが `actor.kind` と `actor.id` を配置のオーナー設定と照らします。本文の名乗りは使いません。
+receivers のプラグインは家の `id` と `occurred_at` を出来事の封筒に写します。`stream` は `event.room.id`、`delivery` と `answer_via` は `HouseDelivery` の値です。`payload` は `event` に `owner` を加えたものです。`owner` は `actor.kind` が `person` かつ `actor.id` がプラグインの `owner_id` と一致する場合だけ `true` です。本文の名乗りは使いません。
+
+`summary` は、話し手の種別・ID・オーナーかどうかを先頭に置き、表示名と内容を続けた 1 行です。例: `[person lee, owner] Lee in 居間: おかえり`。`source` はプラグインの設定で決め、backend では inline にします。ターンの行では `stream` が部屋 ID、`summary` が話し手の情報、発言の `text` が本文です。元の封筒は `/sources/<source>/<room-id>/` に残ります。
+
+## CLI
+
+`house` は sandbox image に入ります。`HOUSE_URL` は家の HTTPS オリジン、`HOUSE_TOKEN` はサロゲートです。CLI は `Authorization: Bearer` を送り、Sentinel が家のホスト宛てのサロゲートを ServiceAccount token に差し替えます。
+
+| CLI | HTTP | 出力 |
+| --- | --- | --- |
+| `house status` | `GET /v1/agent/house` | 部屋の説明、各部屋にいる住人、出かけている住人、見える status |
+| `house enter <room-id>` | `POST /v1/agent/rooms/<room-id>/enter` | 入った部屋にいる住人と見える status |
+| `house leave` | `DELETE /v1/agent/room` | どの部屋にもいないこと |
+| `house say <room-id> <text> [--to <resident-id> ...]` | `POST /v1/agent/rooms/<room-id>/say` | 発言した部屋と、寝ていて届け待ちに入らなかった住人 |
+
+`<text>` は 1 つの引数で、改行を含む本文をそのまま送ります。`--to` は住人 ID ごとに繰り返せます。CLI に部屋の履歴を読む操作はありません。引数や設定が不正なときは終了コード 2、家が要求を拒否したときや通信に失敗したときは 1 で終了します。CLI は発言を自動再送しません。
 
 ## SQLite のバックアップ
 
