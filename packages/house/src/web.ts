@@ -10,6 +10,13 @@ const MIME = new Map(Object.entries({
   ".woff": "font/woff", ".woff2": "font/woff2", ".webmanifest": "application/manifest+json",
 }));
 
+/** RFC 9110, 13.1.2: `*` or a list of tags, compared without regard to `W/`. */
+function namesIt(header: string | undefined, etag: string): boolean {
+  if (header === undefined) return false;
+  if (header.trim() === "*") return true;
+  return (header.match(/(?:W\/)?"[^"]*"/g) ?? []).some((tag) => tag.replace(/^W\//, "") === etag);
+}
+
 export async function serveWeb(dir: string, path: string, request: IncomingMessage, response: ServerResponse): Promise<boolean> {
   const name = path === "/" ? "/index.html" : path;
   if (!/^(?:\/[a-zA-Z0-9_-][a-zA-Z0-9_.-]*)+$/.test(name)) return false;
@@ -26,7 +33,7 @@ export async function serveWeb(dir: string, path: string, request: IncomingMessa
       "cache-control": name.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache",
       "x-content-type-options": "nosniff",
     };
-    if (request.headers["if-none-match"] === etag) {
+    if (namesIt(request.headers["if-none-match"], etag)) {
       response.writeHead(304, headers).end();
       return true;
     }

@@ -122,6 +122,17 @@ test("a page that has not changed is not sent again", async (t) => {
   assert.equal(await again.text(), "");
 });
 
+// RFC 9110, 13.1.2: If-None-Match compares weakly, and takes a list of tags or `*`.
+test("a page is not sent again for a weak tag, a list that names it, or any tag", async (t) => {
+  const house = await open(t);
+  const etag = (await house.request("/")).headers.get("etag")!;
+  for (const validator of [`W/${etag}`, `"another", ${etag}`, "*"]) {
+    assert.equal((await house.request("/", { "if-none-match": validator })).status, 304, validator);
+  }
+  assert.equal((await house.request("/", { "if-none-match": '"another"' })).status, 200);
+  assert.equal((await house.request("/", { "if-none-match": etag }, "HEAD")).status, 304);
+});
+
 // The build names what is under assets/ by its content; the page that names them must be asked for again.
 test("only the files named by their content are kept for good", async (t) => {
   const house = await open(t);
