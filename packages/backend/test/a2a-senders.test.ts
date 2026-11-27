@@ -6,9 +6,9 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { GatedAssertion } from "../src/a2a/gated.ts";
-import { Senders, whoIs, type SenderCheck } from "../src/a2a/senders.ts";
-import { TokenReview } from "../src/a2a/tokenreview.ts";
+import { GatedAssertion, TokenReview, type SenderCheck } from "@penelope/service-account-auth";
+
+import { Senders, whoIs } from "../src/a2a/senders.ts";
 import { FakeClock, tempDir } from "./support.ts";
 
 type Seen = { authorization: string | undefined; path: string; body: any };

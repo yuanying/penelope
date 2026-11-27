@@ -58,7 +58,7 @@ build-ts: node_modules/.package-lock.json ## Compile every npm workspace into it
 	$(NPM) run build
 
 # The targets of the Dockerfile, one image each.
-IMAGES ?= sentinel backend receivers sandbox
+IMAGES ?= sentinel backend receivers sandbox house
 
 .PHONY: images
 images: ## Build every image for this machine's platform, as penelope-<target>:$(VERSION).

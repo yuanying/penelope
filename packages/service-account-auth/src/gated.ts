@@ -26,7 +26,7 @@ export type GatedSettings = {
   issuer: string;
   /** Where gated publishes its keys. Never taken from an assertion. */
   jwksUrl: string;
-  /** The backend's public host name, compared with `aud`: never the call's `Host`. */
+  /** The service's public host name, compared with `aud`: never the call's `Host`. */
   audience: string;
   now?: () => number;
   log?: (line: string) => void;
@@ -118,7 +118,7 @@ export class GatedAssertion implements SenderCheck {
       this.keys = keys;
       this.expiresAt = startedAt + Math.min(maxAge(response.headers.get("cache-control")) ?? MAX_CACHE_MS, MAX_CACHE_MS);
     } catch (error) {
-      this.settings.log?.(`a2a: gated's keys could not be fetched from ${this.settings.jwksUrl}: ${error instanceof Error ? error.message : String(error)}`);
+      this.settings.log?.(`gated's keys could not be fetched from ${this.settings.jwksUrl}: ${error instanceof Error ? error.message : String(error)}`);
       // The cached keys stay, and the fetch is tried again a minute later, not on every call meanwhile.
       this.expiresAt = startedAt + REFETCH_INTERVAL_MS;
     } finally {

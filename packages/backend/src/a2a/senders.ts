@@ -3,29 +3,9 @@
 // every check, says whether that one is a sender and by what name.
 import type http from "node:http";
 
+import { identify, type SenderCheck } from "@penelope/service-account-auth";
+
 import { SEGMENT } from "../envelope.ts";
-
-/**
- * What one check makes of a call: the ServiceAccount it is
- * (`system:serviceaccount:<namespace>:<name>`), refused, or no answer to be had
- * (the API server or gated's keys out of reach). Only the first lets it in.
- */
-export type Verdict = { kind: "subject"; subject: string } | { kind: "refused"; reason: string } | { kind: "unavailable"; reason: string };
-
-/** Who a call is from: a sender by name, or not let in, and why (for the log, never the caller). */
-export type Who = { kind: "sender"; name: string } | { kind: "refused"; reason: string } | { kind: "unavailable"; reason: string };
-
-/**
- * One way of checking a sender, chosen by the settings. A call is decided by
- * the check whose header it carries; when it carries more than one, by the
- * check with the lowest `precedence`.
- */
-export interface SenderCheck {
-  readonly name: string;
-  readonly precedence: number;
-  carries(headers: http.IncomingHttpHeaders): boolean;
-  check(headers: http.IncomingHttpHeaders): Promise<Verdict>;
-}
 
 const PREFIX = "system:serviceaccount:";
 
@@ -60,17 +40,12 @@ export class Senders {
   }
 }
 
-/** Who a call is from, by the check whose header it carries. No check, no sender. */
-export async function whoIs(checks: readonly SenderCheck[], senders: Senders, headers: http.IncomingHttpHeaders): Promise<Who> {
-  const check = [...checks].sort((a, b) => a.precedence - b.precedence).find((each) => each.carries(headers));
-  if (check === undefined) return { kind: "refused", reason: "no credential any check reads" };
-  const verdict = await check.check(headers);
-  if (verdict.kind !== "subject") return { ...verdict, reason: `${check.name}: ${verdict.reason}` };
-  const name = senders.nameOf(verdict.subject);
-  return name === undefined ? { kind: "refused", reason: `${check.name}: ${verdict.subject} is not a sender` } : { kind: "sender", name };
-}
+/** Who a call is from: a sender by name, or not let in, and why (for the log, never the caller). */
+export type Who = { kind: "sender"; name: string } | { kind: "refused"; reason: string } | { kind: "unavailable"; reason: string };
 
-/** The token of `Authorization: Bearer <token>`, or undefined. */
-export function bearerOf(headers: http.IncomingHttpHeaders): string | undefined {
-  return /^Bearer ([A-Za-z0-9._~+/-]+=*)$/i.exec(headers.authorization ?? "")?.[1];
+export async function whoIs(checks: readonly SenderCheck[], senders: Senders, headers: http.IncomingHttpHeaders): Promise<Who> {
+  const verdict = await identify(checks, headers);
+  if (verdict.kind !== "subject") return verdict;
+  const name = senders.nameOf(verdict.subject);
+  return name === undefined ? { kind: "refused", reason: `${verdict.check}: ${verdict.subject} is not a sender` } : { kind: "sender", name };
 }

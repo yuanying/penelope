@@ -6,6 +6,7 @@
 #   backend    ghcr.io/yuanying/penelope-backend
 #   receivers  ghcr.io/yuanying/penelope-receivers
 #   sandbox    ghcr.io/yuanying/penelope-sandbox (the runner inside)
+#   house      ghcr.io/yuanying/penelope-house
 #
 # The build stages run on the builder's own platform and only their output is
 # copied into the image of the target platform: Go cross-compiles, and what tsc
@@ -84,12 +85,27 @@ COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelop
 COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 COPY --from=ts-build /src/packages/avatar/package.json ./node_modules/@penelope/avatar/
 COPY --from=ts-build /src/packages/avatar/dist ./node_modules/@penelope/avatar/dist
+COPY --from=ts-build /src/packages/service-account-auth/package.json ./node_modules/@penelope/service-account-auth/
+COPY --from=ts-build /src/packages/service-account-auth/dist ./node_modules/@penelope/service-account-auth/dist
 COPY --from=ts-build /src/packages/backend/dist ./dist
 COPY --from=ts-build /src/packages/web/dist ./web
 COPY assets/avatars ./avatars
 USER 1001:1001
 ENTRYPOINT ["node", "--disable-warning=ExperimentalWarning", "/app/dist/main.js"]
 CMD ["serve"]
+
+FROM node:24.22.3-trixie-slim AS house
+ARG VERSION
+ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
+WORKDIR /app
+COPY --from=ts-build /src/packages/house/package.json ./
+COPY --from=ts-build /src/packages/house/dist ./dist
+COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
+COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
+COPY --from=ts-build /src/packages/service-account-auth/package.json ./node_modules/@penelope/service-account-auth/
+COPY --from=ts-build /src/packages/service-account-auth/dist ./node_modules/@penelope/service-account-auth/dist
+USER 1000:1000
+ENTRYPOINT ["node", "--disable-warning=ExperimentalWarning", "/app/dist/main.js"]
 
 # The receivers' runtime dependencies (ws, for Slack's Socket Mode), as
 # for the backend. The Slack plugin's package is copied in place of its link.

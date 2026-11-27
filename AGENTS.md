@@ -43,6 +43,7 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 | runner | TypeScript | `packages/runner` | in the sandbox image |
 | sandbox image | Dockerfile | `Dockerfile` | `ghcr.io/yuanying/penelope-sandbox` (`sandbox`) |
 | receivers | TypeScript | `packages/receivers` | `ghcr.io/yuanying/penelope-receivers` (`receivers`) |
+| house | TypeScript | `packages/house` | `ghcr.io/yuanying/penelope-house` (`house`) |
 | Web UI | TypeScript | `packages/web` | served by the backend |
 | shared types | TypeScript | `packages/contract` | — |
 | iPhone app | Swift | `apple/` | — (built by Xcode) |

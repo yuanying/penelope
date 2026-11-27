@@ -166,7 +166,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        target: [sentinel, backend, receivers, sandbox]
+        target: [sentinel, backend, receivers, sandbox, house]
     steps:
       # Runs one at a time keep two pushes apart, but a run started again
       # later would put an older commit back under main. Only the commit at
@@ -230,7 +230,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        target: [sentinel, backend, receivers, sandbox]
+        target: [sentinel, backend, receivers, sandbox, house]
     steps:
       # Runs one at a time keep two pushes apart, but a run started again
       # later would put an older commit back under main. Only the commit at

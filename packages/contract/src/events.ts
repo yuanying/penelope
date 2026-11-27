@@ -6,6 +6,8 @@ import type { AgentStatus } from "./status.ts";
 /** The sources the backend has itself. Plugins in receivers add their own names. */
 export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "job" | "control" | "heartbeat";
 
+export const EVENT_PATH_SEGMENT = /^[a-z0-9_-][a-z0-9._-]{0,127}$/;
+
 /** Where an event came from. Also the first directory under /sources. */
 export type Source = BuiltinSource | (string & {});
 

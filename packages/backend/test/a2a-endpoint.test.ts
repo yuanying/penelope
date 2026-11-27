@@ -9,7 +9,9 @@ import { Client, DefaultAgentCardResolver, JsonRpcTransportFactory } from "@a2a-
 
 import { a2aHandler } from "../src/a2a/endpoint.ts";
 import { Inbox } from "../src/a2a/inbox.ts";
-import { Senders, type SenderCheck, type Verdict } from "../src/a2a/senders.ts";
+import type { SenderCheck, Verdict } from "@penelope/service-account-auth";
+
+import { Senders } from "../src/a2a/senders.ts";
 import { Assets, checkImages } from "../src/assets.ts";
 import { openDatabase } from "../src/db.ts";
 import { close, listenTcp } from "../src/http.ts";
