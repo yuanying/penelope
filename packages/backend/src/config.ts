@@ -7,12 +7,11 @@ import path from "node:path";
 import type { Delivery } from "@penelope/contract";
 import { audienceOf, type KubernetesSettings } from "@penelope/service-account-auth";
 
-import { cronOf } from "./schedules.ts";
-import { AwakeHours } from "./time.ts";
 import { CALLBACK_PATH, type GitHubSettings } from "./login/github.ts";
 import { Senders } from "./a2a/senders.ts";
 import type { ApnsSettings } from "./push/apns.ts";
 import { vapidKeyOf } from "./push/web-push.ts";
+import type { SleepLimits } from "./sleep.ts";
 
 /** A setting that cannot be used. The backend does not start. */
 export class ConfigError extends Error {}
@@ -30,9 +29,7 @@ export type Config = {
   sandboxToken: string | undefined;
   github: GitHubSettings | undefined;
   timeZone: string;
-  awakeHours: string;
-  nightly: string;
-  reviewWeekday: number;
+  sleep: SleepLimits & { reportTimeoutMs: number };
   batch: { quietMs: number; maxMs: number };
   redeliverMs: number;
   /** The heartbeat's quiet time (ADR-0031); none when it is off. */
@@ -110,8 +107,9 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
   const minutes = (name: string, fallback: number) => {
     const value = get(name);
     if (value === undefined) return fallback * MINUTE;
-    if (!/^\d+$/.test(value) || Number(value) <= 0) throw new ConfigError(`${name} must be a whole number of minutes above 0`);
-    return Number(value) * MINUTE;
+    const ms = Number(value) * MINUTE;
+    if (!/^\d+$/.test(value) || ms <= 0 || !Number.isSafeInteger(ms)) throw new ConfigError(`${name} must be a whole number of minutes above 0`);
+    return ms;
   };
   // The heartbeat's quiet time, in minutes, or in seconds for the tests (e2e/README.md); never both.
   const heartbeatOf = () => {
@@ -133,21 +131,11 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
   } catch {
     throw new ConfigError(`PENELOPE_TIME_ZONE: ${timeZone} is not a time zone`);
   }
-  const awakeHours = get("PENELOPE_AWAKE_HOURS") ?? "07:00-23:00";
-  try {
-    new AwakeHours(awakeHours, timeZone);
-  } catch (error) {
-    throw new ConfigError(`PENELOPE_AWAKE_HOURS: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  const nightly = get("PENELOPE_NIGHTLY_CRON") ?? "0 4 * * *";
-  try {
-    cronOf(nightly, timeZone, { seconds: true });
-  } catch (error) {
-    throw new ConfigError(`PENELOPE_NIGHTLY_CRON: ${error instanceof Error ? error.message : String(error)}`);
-  }
-
-  const reviewWeekday = get("PENELOPE_REVIEW_WEEKDAY") ?? "0";
-  if (!/^[0-6]$/.test(reviewWeekday)) throw new ConfigError("PENELOPE_REVIEW_WEEKDAY must be 0 (Sunday) through 6 (Saturday)");
+  const threshold = get("PENELOPE_SLEEPINESS_LIMIT") ?? "90";
+  if (!/^\d{1,2}$/.test(threshold)) throw new ConfigError("PENELOPE_SLEEPINESS_LIMIT must be an integer from 0 to 99");
+  const maxMs = minutes("PENELOPE_SLEEP_MAX_MINUTES", 720);
+  const defaultMs = minutes("PENELOPE_SLEEP_DEFAULT_MINUTES", 480);
+  if (defaultMs > maxMs) throw new ConfigError("PENELOPE_SLEEP_DEFAULT_MINUTES must not exceed PENELOPE_SLEEP_MAX_MINUTES");
 
   let publicUrl = get("PENELOPE_PUBLIC_URL");
   if (publicUrl !== undefined) {
@@ -201,9 +189,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
     sandboxToken: secret("PENELOPE_SANDBOX_TOKEN_FILE"),
     github,
     timeZone,
-    awakeHours,
-    nightly,
-    reviewWeekday: Number(reviewWeekday),
+    sleep: { threshold: Number(threshold), defaultMs, maxMs, reportTimeoutMs: minutes("PENELOPE_SLEEP_REPORT_TIMEOUT_MINUTES", 60) },
     batch: { quietMs: minutes("PENELOPE_BATCH_QUIET_MINUTES", 5), maxMs: minutes("PENELOPE_BATCH_MAX_MINUTES", 30) },
     redeliverMs: minutes("PENELOPE_REDELIVER_MINUTES", 5),
     heartbeatMs: heartbeatOf(),

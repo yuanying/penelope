@@ -8,7 +8,7 @@ import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty } f
 import type { Queue } from "./queue.ts";
 import type { Attachment } from "./sources.ts";
 
-export const BUILTIN_SOURCES: ReadonlySet<BuiltinSource> = new Set(["ui", "cron", "a2a", "self", "job", "control", "heartbeat"]);
+export const BUILTIN_SOURCES: ReadonlySet<BuiltinSource> = new Set(["ui", "cron", "a2a", "self", "job", "control", "heartbeat", "wake"]);
 
 /** The envelope with its files: 64 MiB in all by default. */
 export const DEFAULT_INTAKE_BYTES = 64 * 1024 * 1024;

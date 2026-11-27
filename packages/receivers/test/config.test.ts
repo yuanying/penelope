@@ -111,7 +111,7 @@ describe("the receivers do not start on settings", () => {
 
   test("with a source outside the envelope's letters, one of the backend's own, or one given twice", () => {
     for (const source of ["Alertmanager", ".am", "a/b", "", 1]) refused({ plugins: [{ ...fraction, source }] }, /^plugins\[0\]\.source: /);
-    for (const source of ["ui", "cron", "a2a", "self", "control", "heartbeat"]) refused({ plugins: [{ ...fraction, source }] }, /^plugins\[0\]\.source: /);
+    for (const source of ["ui", "cron", "a2a", "self", "control", "heartbeat", "wake"]) refused({ plugins: [{ ...fraction, source }] }, /^plugins\[0\]\.source: /);
     refused({ plugins: [fraction, { ...fraction, name: "lab" }] }, /^plugins\[1\]\.source: /);
   });
 

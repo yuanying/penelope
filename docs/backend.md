@@ -27,10 +27,11 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_GITHUB_CLIENT_ID` | なし | OAuth App の client ID |
 | `PENELOPE_GITHUB_CLIENT_SECRET_FILE` | なし | OAuth App の client secret |
 | `PENELOPE_OWNER_GITHUB_ID` | なし | オーナーの GitHub の数値の user ID |
-| `PENELOPE_TIME_ZONE` | `TZ`、それも無ければ `UTC` | 時間帯。`/sources` の日付、起きている時間、cron の式に使う |
-| `PENELOPE_AWAKE_HOURS` | `07:00-23:00` | 起きている時間（`HH:MM-HH:MM`、始まりを含み終わりを含まない。日をまたいでよい。始まりと終わりが同じならいつも起きている） |
-| `PENELOPE_NIGHTLY_CRON` | `0 4 * * *` | 夜の切り替えの時刻（5 欄の cron の式）。テスト用に、先頭に秒の欄を足した 6 欄も受ける（例: `*/20 * * * * *`） |
-| `PENELOPE_REVIEW_WEEKDAY` | `0` | 週の棚卸しを行う曜日（`0` は日曜、`6` は土曜）。`PENELOPE_TIME_ZONE` で数える |
+| `PENELOPE_TIME_ZONE` | `TZ`、それも無ければ `UTC` | `/sources` と棚卸しの日付、cron の式に使う時間帯 |
+| `PENELOPE_SLEEPINESS_LIMIT` | `90` | 安全網の眠気の上限。0〜99 の整数。この値を超えると backend が眠りを求める |
+| `PENELOPE_SLEEP_DEFAULT_MINUTES` | `480` | 安全網で眠る時間。最長時間以下 |
+| `PENELOPE_SLEEP_MAX_MINUTES` | `720` | 最初の求めから起きる時刻までの最長時間 |
+| `PENELOPE_SLEEP_REPORT_TIMEOUT_MINUTES` | `60` | 眠りを求めてから、切り替えの知らせが来なければ失敗とするまでの分 |
 | `PENELOPE_BATCH_QUIET_MINUTES` | `5` | `batch` の N（最後の 1 件から待つ分） |
 | `PENELOPE_BATCH_MAX_MINUTES` | `30` | `batch` の M（最初の 1 件から待つ最長の分） |
 | `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
@@ -64,7 +65,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | `tokenreview`: API server の証明書を確かめる CA |
 
 - GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
-- 数は分の整数で、0 より大きいもの。
+- 分の設定は正の整数。
 - A2A の受け口は、`PENELOPE_A2A_SENDERS` があるときだけ開く（[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)）。そのときは `PENELOPE_PUBLIC_URL`（Agent Card の URL と、`gated-assertion` の `aud` に使う）と `PENELOPE_A2A_AUTH` が要り、選んだ確かめ方に要るものがすべて要る。`gated-assertion` には発行元と JWKS の URL、`tokenreview` には audience と API server と、読める token のファイルと CA のファイル。欠けていれば起動しない。
 - `tokenreview` に audience を必ず求めるのは、API server 自身の audience では、その ServiceAccount で動くどの Pod にも mount されている token が通ってしまうためである。
 - `PENELOPE_A2A_SENDERS` が無ければ、ほかの `PENELOPE_A2A_*` は読まない。
@@ -74,7 +75,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - APNs には backend が Sentinel を通さず HTTP/2 で直接送り、登録時の environment で Apple の sandbox・production を選ぶ。topic は `io.github.yuanying.penelope.phone`。ES256 の認証 JWT は 50 分間使い回す。
 - APNs への送信は 1 回だけ。`410`、または `400` の `BadDeviceToken`・`DeviceTokenNotForTopic` では、その送信に使った登録を消す。送信後に登録し直されたものは消さない。ほかの失敗でも返事は履歴に残る。ログには登録の番号と結果だけを残し、会話の内容・端末の token・鍵は出さない。
 - `PENELOPE_AVATAR` が名前の形（小文字・数字・`.`・`_`・`-`）でなければ起動しない。
-- `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
+- `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。眠りの間は `now` も渡さず、起きたときに `wake` とともに待っている `batch` を渡す（[events.md](events.md) の「いつ渡すか」）。
 
 ## アバター
 
@@ -177,14 +178,20 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 ## 夜の切り替え
 
-[ADR-0044](adr/0044-check-memory-against-records-before-nightly-organization.md) と [sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」の、backend の役目を決める。
+[ADR-0069](adr/0069-sleep-by-her-own-call-until-a-wake-time.md) に従い、切り替えは時刻の設定ではなく眠りの求めで始まる。
 
-- `PENELOPE_NIGHTLY_CRON` の時刻に、`source` が `control`、`id` が `nightly@<時刻>`、`payload` が `{kind: "nightly"}` の出来事を列に入れる。backend が止まっていて時刻を過ぎたものは、後から入れない。次の夜を待つ。
-- 棚卸しは、配置のタイムゾーンで `PENELOPE_REVIEW_WEEKDAY` に当たる日の最初の予定の夜とする。その出来事の `payload` に予定時刻の現地日付 `review_date`（`YYYY-MM-DD`）を保存する。判定は配送・実行時刻ではなく予定時刻で行い、再配送でも同じ `payload` を渡す。最初の予定を逃したり、その曜日に予定が無かったりした週は棚卸しを埋め合わせない。
-- 時刻は 15 秒ごとに確かめる。テスト用の秒の欄で夜どうしの間が 1 分より短いときは、1 秒ごとに確かめる。
-- backend は切り替えの段を数えない。制御の出来事も、ほかの出来事と同じく、ack が無ければ `PENELOPE_REDELIVER_MINUTES` の後にもう一度渡すだけである。
-- 切り替えの知らせ（`POST /v1/sessions/rotated`）は、段の結果とともに活動の記録に残す（下の「活動の記録」）。
-- runner は振り返り、照合係、整理係、新しいセッションの順に進める。backend は段の実行や失敗による再開を管理せず、runner から受けた段の結果を記録する。
+- 本体の `sleep` または安全網が眠りを求めると、backend は切り替えの制御イベントと `sleeps` の行を同じ SQLite トランザクションで保存する。行には制御イベントの `seq`、最初に求めた時刻、求めた側、予定の起きる時刻、切り替えが済んだ時刻、実際に起きた時刻がある。
+- 起きた時刻が入れば「起きている」。起きる前は、切り替えが済むまでは「寝つく間」、済めば「寝ている」。未完了の眠りがなければ「起きている」。寝つく間の再要求は予定の起きる時刻だけを変える。
+- runner は今のターンを終えてから、振り返り、照合係、整理係、新しいセッションの順に進める（[ADR-0044](adr/0044-check-memory-against-records-before-nightly-organization.md)）。`POST /v1/sessions/rotated` の結果を活動の記録に残す。新しいセッションが始まったという知らせで切り替えを完了とする。ack の無い制御イベントは従来どおり渡し直す。
+- 起きる時刻には、切り替えが未完了でも配送を再開する。停止中に時刻を過ぎていた場合は再起動時に起きる。backend は起きた時刻、眠気のリセット、保留中の `batch` の解放を同じトランザクションで保存する。`wake` は続けて列に入れる。通知を書けなかった場合は次の確かめで再試行し、そのために配送を止めない。
+- 起きているとき、眠気が設定の限界を超えたら安全網が既定の睡眠時間で同じ操作を行う。起動時、ターンの終了時と定期的に判定する。既定の限界は振り返りのためにコンテキストの余裕を残す。
+- 整理係が最後に棚卸しを完了してから 7 日以上経った最初の眠りを棚卸しにする。成功の記録がない場合は最初の眠りにする。失敗した棚卸しでは基準を進めない。制御イベントに、眠りを求めた時刻の現地日付 `review_date` を保存する。
+
+### 版を上げるとき
+
+スキーマ 18 は眠りの記録を加え、旧版の眠気の起点を捨てる。旧設定が作った未 ack の夜の制御イベントは取り消す。それ以外の待ち行列と過去の切り替えの記録は残す。新版は起きている状態から始まる。`PENELOPE_AWAKE_HOURS`、`PENELOPE_NIGHTLY_CRON`、`PENELOPE_REVIEW_WEEKDAY` は、配置に残っていても読まない。
+
+旧版の backend はスキーマ 18 を開けない。旧版に戻す場合は、移行前の SQLite のバックアップを復元する。
 
 ## 活動の記録
 
@@ -196,11 +203,11 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - 返事は、会話の履歴の行の `turn_id` でターンに結び付ける。ターンの返事の数は、そこから数える。
 - 夜のターンの `turns.memory_change` には、コミットのファイル数と増減行数、振り返りに限りルートの `handoff.md` が変わったかを持つ。記憶の本文・ファイル名・コミットメッセージはここに残さない。
 - runner は `Night-stage: verifier`・`curator` の印で、夜の係が最後に書いた日を見取り図に出す。振り返りと参照の修正はここには数えない。
-- `session_rotations`: 夜の切り替えの知らせ 1 回が 1 行。夜の制御の出来事の `seq`（同じ `seq` は 1 行で、後の知らせが置き換える）、段の結果の JSON、予定の時刻（出来事の `occurred_at`）、始まり（その夜の段のターンの最初の始まり、無ければ知らせの時刻）、段に失敗があるかを持つ。段の知らせにあるターン ID が同じ夜の同じ段に一致したときだけ、そのターンの変更量を段の JSON に写す。前の試行の変更量は引き継がない。毎回読む層の超過、対象から外れた未照合の記録の件数、棚卸しの各ターンの ID・成否・理由・変更量もこの JSON に足す。記憶の画面が夜の最後の版を区別するため、段を報告したときに読んだ HEAD は `memory_head` に別に持つ。棚卸しの詳細では、同じ夜の整理係に属する、知らせに記された ID のターンだけを返す。
+- `session_rotations`: 夜の切り替えの知らせ 1 回が 1 行。夜の制御の出来事の `seq`（同じ `seq` は 1 行で、後の知らせが置き換える）、段の結果の JSON、眠りを求めた時刻（出来事の `occurred_at`）、始まり（その夜の段のターンの最初の始まり、無ければ知らせの時刻）、段に失敗があるかを持つ。段の知らせにあるターン ID が同じ夜の同じ段に一致したときだけ、そのターンの変更量を段の JSON に写す。前の試行の変更量は引き継がない。毎回読む層の超過、対象から外れた未照合の記録の件数、棚卸しの各ターンの ID・成否・理由・変更量もこの JSON に足す。記憶の画面が夜の最後の版を区別するため、段を報告したときに読んだ HEAD は `memory_head` に別に持つ。棚卸しの詳細では、同じ夜の整理係に属する、知らせに記された ID のターンだけを返す。
 - `record_jobs`: 裏の仕事の終わり 1 件が 1 行。終わりの出来事の `payload` から、コマンドの頭・始まり・終わり・秒・終わり方・exit code・シグナル・失敗か・受けた時刻を写す。
-- `record_state`: 記録が始まった時刻（この版の backend が初めて立ち上がった時刻。逃した夜をここから数える）と、オーナーが記録を開いた時刻（オーナーの GitHub の user ID ごと）。
+- `record_state`: 記録が始まった時刻（オーナーがまだ見ていないときの基準）と、オーナーが記録を開いた時刻（オーナーの GitHub の user ID ごと）。
 - 閉じたサブエージェントは、`sub_agents` の閉じた行を使う。閉じた時刻は、閉じた知らせを受けた時刻（`updated_at`）である。
-- 逃した夜は表に書かない。読むたびに、`PENELOPE_NIGHTLY_CRON` の予定と、夜の制御の出来事（`id` が `nightly@<時刻>`）と、`session_rotations` から決める。`seq` の無い知らせ（段の結果を送らない runner）は、その夜の時刻から次の夜の時刻までに来たものを、その夜の知らせとする。
+- 眠れなかった眠りは、求めた時刻から `PENELOPE_SLEEP_REPORT_TIMEOUT_MINUTES` が過ぎても、対応する `seq` の知らせが `session_rotations` に無いもの。読むときに `sleeps` と切り替えの記録から引く。遅れて知らせが来れば、切り替えの結果を代わりに出す。
 
 ### この版より前の記録
 
@@ -210,11 +217,10 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - 段の結果を持たない `session_rotations` の行は、段の結果の分からない夜として出る。段を持つ旧行は、照合係を `skipped` として出す。
 - スキーマ 9 は `turns.stage` に `verifier` を認めるため、既存の行とインデックスを保って `turns` を作り直す。移行は一方通行で、旧版の backend はスキーマ 9 を開かない。旧版へ戻すには移行前の DB のバックアップが必要である。
 - スキーマ 10 は `turns.memory_change` を足す。古い行は未計測のまま（0 にはしない）。移行は一方通行で、旧版に戻すには移行前の DB のバックアップが必要である。
-- 記録が始まる前の夜は、逃した夜として出さない。
 
 ### 消す
 
-- 途中経過（`activities`）は 30 日（`RECORD_FLOW_DAYS`）、`turns`・`session_rotations`・`record_jobs`・閉じた `sub_agents` は 1 年（`RECORD_SUMMARY_DAYS`）を過ぎたら消す。どれも時刻の索引で引く。
+- 途中経過（`activities`）は 30 日（`RECORD_FLOW_DAYS`）、`turns`・`session_rotations`・`record_jobs`・閉じた `sub_agents`・`sleeps` は 1 年（`RECORD_SUMMARY_DAYS`）を過ぎたら消す。現在の眠りと直近に起きた眠りは、状態と起点を求めるために残す。
 - 消すのは、立ち上がったときと、その後 1 時間ごとである。1 回の DELETE は 500 行までにし、その間に event loop を譲る。SQLite は 1 つの接続で、読み書きは同じ event loop で順に回るので、ひとつの DELETE の間だけ待たせる。
 - 消した場所は SQLite のファイルの中で使い回され、ファイルは小さくならない（`VACUUM` はしない）。
 - 途中経過が消えたターンは、`turns` の行が残り、UI に「流れは消えた」と出る（`expired`）。
@@ -234,11 +240,10 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 [ADR-0068](adr/0068-sleepiness-as-one-value-with-its-facts.md) の眠気は、どの配置でも backend が同じ式で計算する。
 
-- `awake_seconds` は、起点から経過した秒数の整数部分である。起点は本体の新しいセッションが始まったと backend が受け取った時刻とする。初回は、記録があれば直近の成功した切り替えの時刻、無ければ最初に眠気を扱い始めた時刻とする。
+- `awake_seconds` は、直近の実際に起きた時刻からの秒数。まだ眠っていなければ、この版の初回起動時から数える。寝つく間と寝ている間は、求めた時点から増やさない。
 - 時間の割合は `awake_seconds / 86_400`、コンテキストの割合は `context.tokens / context.context_window`。大きい方の割合に 100 を掛け、小数を切り捨て、100 を上限とする。コンテキストの報告が無ければ時間の割合だけを使う。時間だけでも 24 時間で 100 になる。
-- そのセッションで以前に記録した値より小さければ、以前の値を使う。コンテキストが減っても値は下がらない。起点、直近の本体のターン終了時のコンテキスト、眠気の最高値を SQLite に保存する。
-- 新しいセッションの開始に成功した切り替えで、起点を進め、直近のコンテキストと最高値を消す。同じ制御イベントの報告が再度届いてもリセットしない。夜の切り替えの時刻と出来事を渡す条件は変えない。
-- runner と UI は、同じ計算結果を元の事実と一緒に `AgentStatus` として受け取る。heartbeat には列に入れた時点の結果を保存する。
+- 起きている間に記録した最高値より小さければ、最高値を使う。起きた時点で最高値と直近のコンテキストを消す。新しいセッションへの切り替えだけでは消さない。
+- runner と UI は、同じ計算結果を元の事実と一緒に `AgentStatus` として受け取る。heartbeat と `wake` には列に入れた時点の結果を保存する。
 
 ## heartbeat
 
@@ -246,7 +251,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 - `PENELOPE_HEARTBEAT_MINUTES`（テストでは `PENELOPE_HEARTBEAT_SECONDS`）があるときだけ動く。既定は無し（切ってある）。
 - backend は 15 秒ごとに確かめ、次のすべてが揃えば heartbeat の出来事を 1 件入れる。遅れは最大で 15 秒である。N が 1 分より短いとき（テストだけ）は 1 秒ごとに確かめる。
-  - 今が起きている時間（`PENELOPE_AWAKE_HOURS`）の中である。
+  - 本体が起きている。寝つく間と寝ている間は入れない。
   - 本体（`main`）が待っている。途中経過の記録の最後が `turn_end` か、まだ記録が無い（「状態」）。
   - その `turn_end` の時刻から N 分以上たっている。まだターンが無ければ、backend が立ち上がった時刻から数える。
   - 渡す時が来ていて ack の無い出来事が 1 つも無い。渡す前のもの、渡してターンがまだ終わっていないものの両方を含む。`batch` で待っている途中のものは数えない。
@@ -256,15 +261,14 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
   - 夜の切り替えの間。制御の出来事は、新しいセッションが始まってから ack されるので、振り返り・照合・整理のターンの合い間にも入らない。
 - サブエージェントのターンは数えない。本体の記録だけを見る。
 - heartbeat のターンが終わると、その `turn_end` からまた数える。何もない時間が続けば、N 分ごとに入る。
-- 起きている時間の外で N 分を過ぎたときは、次に起きている時間が始まった最初の確かめで入る。夜の切り替えのターンの終わりから数えるので、N が夜の切り替えから朝までより短ければ、朝いちばんに入る。
 - `/sources` に書けずに入れられなかったときは、次の 15 秒で入れ直す。
 
 ### 残っている仕事
 
 - 列に入れるときに、期限内の A2A の `working`・`input-required` の Task を採る。期限と返事の宛先は送り手の最後のメッセージを基準にし、Task の状態はこの読み取りでは変えない。
-- 失敗は、前の heartbeat を列に入れた時刻より後（同時刻は含めない）に backend が知ったものを活動の記録から採る。前の heartbeat が無ければ、入れる時刻から N 分さかのぼった時刻を基準にする。受け渡しや ack の時刻、オーナーが記録を見た時刻は使わない。
-- 対象は `failed` の通常のターン（本体・サブエージェント）と、記録上失敗した裏の仕事（非ゼロ終了、タイムアウト、外部からのシグナル）。中断、夜の切り替えとその段のターン、逃した夜は含めない。
-- 種類ごとに最大 5 件を `pending` に入れ、残りは件数だけを添える。取得できない種類はログに残して省き、heartbeat の配送は続ける。配送し直すときは列に入れた時点の内容を再び渡す。
+- heartbeat と `wake` は同じ種類の残っている仕事を載せる。失敗は、前の heartbeat または `wake` を列に入れた時刻より後に backend が知ったものを採る。どちらも無ければ、heartbeat は入れる時刻の N 分前、`wake` は眠りを求めた時刻を基準にする。同時刻は含めない。
+- 対象は `failed` の通常のターン（本体・サブエージェント）と、記録上失敗した裏の仕事（非ゼロ終了、タイムアウト、外部からのシグナル）。中断、夜の切り替えとその段のターン、眠れなかった眠りは含めない。
+- 種類ごとに最大 5 件を `pending` に入れ、残りは件数だけを添える。取得できない種類はログに残して省く。出来事の配送は続ける。配送し直すときは列に入れた時点の内容を再び渡す。
 
 ## 予約
 

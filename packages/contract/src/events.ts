@@ -4,7 +4,7 @@ import type { HeartbeatPending } from "./heartbeat.ts";
 import type { AgentStatus } from "./status.ts";
 
 /** The sources the backend has itself. Plugins in receivers add their own names. */
-export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "job" | "control" | "heartbeat";
+export type BuiltinSource = "ui" | "cron" | "a2a" | "self" | "job" | "control" | "heartbeat" | "wake";
 
 export const EVENT_PATH_SEGMENT = /^[a-z0-9_-][a-z0-9._-]{0,127}$/;
 
@@ -13,9 +13,8 @@ export type Source = BuiltinSource | (string & {});
 
 /**
  * When the event reaches a turn. `now`: at once, steering a running turn or
- * starting one, even outside the awake hours. `batch`: the backend holds it
- * and hands it over with the others later, after a running turn rather than
- * into it. Only the source's side decides it.
+ * starting one. `batch`: the backend holds it and hands it over with the
+ * others later. The source decides which. Both are held until wake during sleep.
  */
 export type Delivery = "now" | "batch";
 
@@ -65,18 +64,24 @@ export type SourcesLine = {
 };
 
 /** The payload of a `control` event. The runner handles it; it never enters her turn. */
-export type ControlPayload = { kind: "nightly"; /** Scheduled local date, only for weekly review. */ review_date?: string };
+export type ControlPayload = { kind: "nightly"; /** Local date of the sleep request, only for weekly review. */ review_date?: string };
 
 /** The payload of a `cron` event: one of her schedules came due. */
 export type CronPayload = { schedule_id: string; reason: string };
 
 /**
- * The payload of a `heartbeat` event (ADR-0031): the awake hours went
+ * The payload of a `heartbeat` event (ADR-0031): the agent is awake and went
  * `quiet_minutes` with no turn, counted from `since` (when her last turn
  * ended, or when the backend started if she has had none). A fraction only
  * when the tests set the quiet time in seconds.
  */
-export type HeartbeatPayload = { since: string; quiet_minutes: number; pending?: HeartbeatPending; status?: AgentStatus };
+export function isPresenceSource(source: string): source is "heartbeat" | "wake" {
+  return source === "heartbeat" || source === "wake";
+}
+
+export type PresenceNotes = { pending?: HeartbeatPending; status?: AgentStatus };
+export type HeartbeatPayload = PresenceNotes & { since: string; quiet_minutes: number };
+export type WakePayload = PresenceNotes & { sleep_seq: number; wake_at: string };
 
 /** The body of every 4xx and 5xx answer of the backend. */
 export type ErrorBody = { error: string };

@@ -1,30 +1,25 @@
-// Her schedules (docs/sandbox-api.md) and the nightly switch (ADR-0007):
+// Her schedules (docs/sandbox-api.md):
 // when one comes due, the backend queues an event.
 import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { AgentId, ControlPayload, CronPayload, Schedule, ScheduleEntry, ScheduleWhen } from "@penelope/contract";
+import type { AgentId, CronPayload, Schedule, ScheduleEntry, ScheduleWhen } from "@penelope/contract";
 import { Cron } from "croner";
 
 import { isTime } from "./envelope.ts";
 import type { Queue } from "./queue.ts";
-import { dayIn, iso, tickMs } from "./time.ts";
+import { iso } from "./time.ts";
 
 /** A schedule that cannot be made, answered with 400. */
 export class ScheduleError extends Error {}
 
 type Row = { id: string; agent: string; reason: string; cron: string | null; at: string | null; next_ms: number };
 
-/**
- * A five-field cron expression in the time zone, or with `seconds` one of six
- * fields whose first is the second. Throws ScheduleError when it is not one.
- */
-export function cronOf(expression: string, timeZone: string, { seconds = false } = {}): Cron {
+function cronOf(expression: string, timeZone: string): Cron {
   try {
-    return new Cron(expression, { timezone: timeZone, paused: true, mode: seconds ? "5-or-6-parts" : "5-part" });
+    return new Cron(expression, { timezone: timeZone, paused: true, mode: "5-part" });
   } catch (error) {
-    const fields = seconds ? "five- or six-field" : "five-field";
-    throw new ScheduleError(`cron must be a ${fields} cron expression: ${error instanceof Error ? error.message : String(error)}`);
+    throw new ScheduleError(`cron must be a five-field cron expression: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -100,37 +95,23 @@ function schedule(row: Row): Schedule {
   return row.cron !== null ? { ...base, cron: row.cron } : { ...base, at: row.at ?? "" };
 }
 
-/**
- * Queues the events of the schedules that came due and the nightly control
- * event. A run missed while the backend was down is queued once when it is
- * back; a missed nightly switch is not made up, the next one is the next
- * night's.
- */
+/** A schedule missed while the backend was down is queued once when it comes back. */
 export class Scheduler {
   private readonly schedules: Schedules;
   private readonly queue: Queue;
   private readonly now: () => number;
   private readonly log: (line: string) => void;
-  private readonly nightly: Cron;
-  private readonly timeZone: string;
-  private readonly reviewWeekday: number;
-  private nextNightly: number | undefined;
   private timer: NodeJS.Timeout | undefined;
 
   constructor(
     schedules: Schedules,
     queue: Queue,
-    options: { now: () => number; timeZone: string; nightly: string; reviewWeekday?: number; log?: (line: string) => void },
+    options: { now: () => number; log?: (line: string) => void },
   ) {
     this.schedules = schedules;
     this.queue = queue;
     this.now = options.now;
     this.log = options.log ?? console.error;
-    // A field of seconds is for the tests, to have a night come in seconds.
-    this.timeZone = options.timeZone;
-    this.reviewWeekday = options.reviewWeekday ?? 0;
-    this.nightly = cronOf(options.nightly, this.timeZone, { seconds: true });
-    this.nextNightly = this.nightly.nextRun(new Date(this.now()))?.getTime();
   }
 
   tick(): void {
@@ -142,36 +123,13 @@ export class Scheduler {
         this.schedules.fired(row, now);
       }
     }
-    if (this.nextNightly !== undefined && this.nextNightly <= now) {
-      const due = iso(this.nextNightly);
-      const reviewDate = this.reviewDate(this.nextNightly);
-      const payload: ControlPayload = { kind: "nightly", ...(reviewDate ? { review_date: reviewDate } : {}) };
-      if (this.queueEvent({ source: "control", id: `nightly@${due}`, occurred_at: due, summary: "the nightly switch", payload })) {
-        this.nextNightly = this.nightly.nextRun(new Date(now))?.getTime();
-      }
-    }
   }
 
-  /** Mark the first scheduled occurrence on the review weekday, even if the cron runs more than once a day. */
-  private reviewDate(due: number): string | undefined {
-    const day = dayIn(due, this.timeZone);
-    if (new Date(`${day}T00:00:00Z`).getUTCDay() !== this.reviewWeekday) return undefined;
-    const [previous] = this.nightly.previousRuns(1, new Date(due));
-    return previous && dayIn(previous.getTime(), this.timeZone) === day ? undefined : day;
-  }
-
-  /** Ticks every `everyMs` until stopped: by default as often as the nights come for. */
-  start(everyMs = tickMs(this.nightlyGapMs())): () => void {
+  start(everyMs = 15_000): () => void {
     this.tick();
     this.timer = setInterval(() => this.tick(), everyMs);
     this.timer.unref();
     return () => clearInterval(this.timer);
-  }
-
-  /** The time between the next two nights. */
-  private nightlyGapMs(): number {
-    const [first, second] = this.nightly.nextRuns(2, new Date(this.now()));
-    return first && second ? second.getTime() - first.getTime() : Infinity;
   }
 
   private queueEvent(event: { source: string; id: string; occurred_at: string; summary: string; payload: unknown }): boolean {

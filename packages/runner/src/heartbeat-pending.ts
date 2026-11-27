@@ -1,11 +1,11 @@
-// The runner's part of the main agent's heartbeat (ADR-0055).
-import { type DeliveredEvent, HEARTBEAT_PENDING_LIMIT, type HeartbeatPending, type HeartbeatPendingList, RECORD_COMMAND_MAX } from "@penelope/contract";
+// The runner's part of the main agent's heartbeat and wake notices.
+import { type DeliveredEvent, HEARTBEAT_PENDING_LIMIT, type HeartbeatPending, type HeartbeatPendingList, isPresenceSource, RECORD_COMMAND_MAX } from "@penelope/contract";
 
 import type { Jobs } from "./jobs.ts";
 import type { SubAgents } from "./subagents.ts";
 
-const isHeartbeat = (event: DeliveredEvent): event is Extract<DeliveredEvent, { inline: false }> & { source: "heartbeat" } =>
-  event.source === "heartbeat" && !event.inline;
+const hasPresenceNotes = (event: DeliveredEvent): event is Extract<DeliveredEvent, { inline: false }> =>
+  isPresenceSource(event.source) && !event.inline;
 
 function bounded<T>(items: T[], compare: (a: T, b: T) => number): HeartbeatPendingList<T> | undefined {
   if (items.length === 0) return undefined;
@@ -18,7 +18,7 @@ export function withHeartbeatPending(
   subAgents: Pick<SubAgents, "heartbeatState">,
   log: (line: string) => void,
 ): DeliveredEvent[] {
-  if (!events.some(isHeartbeat)) return events;
+  if (!events.some(hasPresenceNotes)) return events;
 
   function gather<K extends "jobs" | "subagents">(kind: K, collect: () => HeartbeatPending[K]): HeartbeatPending[K] {
     try {
@@ -40,7 +40,7 @@ export function withHeartbeatPending(
     (a, b) => a.since.localeCompare(b.since) || a.name.localeCompare(b.name),
   ));
   if (!running && !open) return events;
-  return events.map((event) => isHeartbeat(event) ? {
+  return events.map((event) => hasPresenceNotes(event) ? {
     ...event,
     pending: { ...event.pending, ...(running ? { jobs: running } : {}), ...(open ? { subagents: open } : {}) },
   } : event);

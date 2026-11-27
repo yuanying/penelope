@@ -50,7 +50,7 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 | `GET /api/summary/stream` | 配置の要約の流れ（SSE） |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
 | `GET /api/agents` | 閉じていないサブエージェントの一覧 |
-| `GET /api/status` | 現在の眠気とその元の事実 |
+| `GET /api/status` | 眠りの状態と眠気 |
 | `GET /api/assets/<id>` | 返事とオーナーのメッセージに添えられた画像の写し |
 | `GET /api/push`・`POST /api/push/subscriptions`・`POST /api/push/subscriptions/delete` | 返事の知らせ（Web Push）の鍵と、購読の登録と解除 |
 | `GET /api/schedules`・`DELETE /api/schedules/<id>` | エージェントの予約の一覧と取り消し |
@@ -217,7 +217,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 ## 本体の状態
 
-`GET /api/status` は、オーナーの cookie または iPhone の Bearer token で認証する。現在の眠気と元の事実を `200` と [`AgentStatus`](sandbox-api.md#本体の状態) で返す。キャッシュはしない。
+`GET /api/status` は、オーナーの cookie または iPhone の Bearer token で認証する。現在の眠りの状態、眠気と元の事実を `200` と [`AgentStatus`](sandbox-api.md#本体の状態) で返す。キャッシュはしない。
 
 ## 設定
 
@@ -256,8 +256,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 
 - **失敗** は、`result` が `failed` のターン、`result` が `failed` の夜、`failed_at` を持つ裏の仕事（0 以外の exit code で終わった `exited`、`timed-out`、`signaled`）である。止められたターン（`stopped`）、エージェントが止めた裏の仕事（`stopped`）、runner の立ち上がり直しで切れた裏の仕事（`interrupted`）は失敗でない。
 - 夜の切り替えのターン（`night` を持つターン）は、その夜の行の中にあり、一覧のターンの行には出ない。失敗も夜の 1 つとして数える。夜の切り替えの知らせがまだ来ていない夜のターンは、ふつうのターンとして出る。
-- 失敗の行は `failed_at`（backend がその失敗を知った時刻）を持つ。逃した夜も持つ。失敗でない行は持たない。
-- **日ごとの数**（`turns`・`failures`）には逃した夜を数えない。**まだ見ていない失敗の数**（`unseen`）には数える。
+- 失敗の行は `failed_at`（backend が失敗とした時刻）を持つ。眠れなかった眠りも日ごとの `failures` とまだ見ていない失敗の `unseen` に数える。
 
 ### 一覧
 
@@ -267,13 +266,13 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 | --- | --- |
 | `day` | `YYYY-MM-DD`。省くと `tz` での今日 |
 | `tz` | 日を区切る時間帯（IANA の名前、例 `Asia/Tokyo`）。省くと backend の `PENELOPE_TIME_ZONE`。Web UI はブラウザの時間帯を渡す（予約の一覧と同じく、日付はブラウザの時間帯で書くため） |
-| `failed` | `1` で失敗の行と逃した夜だけ。`0` か省くと全部 |
-| `agent` | `main` で本体の行（本体のターン・夜・逃した夜・裏の仕事）だけ。サブエージェントの名前で、その人のターンと閉じた行だけ |
-| `kind` | `turn`・`night`（逃した夜も）・`job`・`sub_agent` のどれか |
+| `failed` | `1` で失敗の行だけ。`0` か省くと全部 |
+| `agent` | `main` で本体の行（本体のターン・夜・眠れなかった眠り・裏の仕事）だけ。サブエージェントの名前で、その人のターンと閉じた行だけ |
+| `kind` | `turn`・`night`（眠れなかった眠りも）・`job`・`sub_agent` のどれか |
 
 - 形の違う `day`、知らない `tz`・`kind`、`0` と `1` でない `failed` は `400`。
 - 応答は `{day, rows, turns, failures, before?, agents}`。
-  - `rows` は行の並びで、`at` の新しい順。`at` は行の位置の時刻で、ターンと夜は始まり、逃した夜は予定の時刻、裏の仕事は終わり、閉じたサブエージェントは閉じた時刻である。
+  - `rows` は行の並びで、`at` の新しい順。`at` は行の位置の時刻で、ターンと夜は始まり、眠れなかった眠りは眠りを求めた時刻、裏の仕事は終わり、閉じたサブエージェントは閉じた時刻である。
   - `turns`・`failures` はその日の全部の数（絞り込みは効かない）。`turns` は夜の切り替えのターンを除いたターンの数。
   - `before` は、同じ絞り込みで行のある、より前の日（`YYYY-MM-DD`）。行の無い日は飛ばす。無ければ欄が無い。Web UI は下までスクロールしたら `day=<before>` で次を読む。
   - `agents` は記録の知っているサブエージェントの名前の一覧（閉じたものも）。「誰の」の絞り込みの選択肢に使う。
@@ -295,7 +294,7 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 - 夜の `memory_change` は `{files, added, removed, handoff_changed?}`（型は `RecordMemoryChange`）。振り返り・照合係・整理係で計測できたときだけ、その段でコミットした変更ファイル数と増減行数を返す。振り返りでは `handoff_changed` が引き継ぎファイル `handoff.md` を変えたかを示す。変更なしは 3 つの数が 0。旧記録、計測できなかった段、新しいセッションでは欄が無い。段の成否とは別で、失敗した段にも変更量はありうる。
 - 任意の `stages.verifier.dropped_records` は持ち越しの上限を超えて照合対象から外れた未照合の記録の件数、`stages.curator.always_read_over_target` は整理前に目安を超えた毎回読む層の合計と目安（`{total_bytes, target_bytes}`）である。どちらも引き継ぎ未更新と同じく失敗には数えない。欄が無ければ表示しない。旧 runner が送らなかった場合も含むため、欄が無いことから件数 0 や目安以内とは判断しない。
 - `stages.curator.review` があれば棚卸しの夜で、`{content, structure}` にそれぞれの `{result, reason?, turn_id?, memory_change?}` を持つ。通常の夜や旧記録にはこの欄は無い。夜全体の成否は引き続き 4 段で決め、整理係に失敗があっても夜の失敗は 1 件である。
-- **逃した夜** は、記録が始まった後の予定の夜の時刻（backend の `PENELOPE_NIGHTLY_CRON`、今の設定で数える）のうち、次のどちらかのものである。夜の出来事が、その時刻から 1 分たっても列に無い（backend が止まっていた）。夜の出来事はあるが、次の夜の時刻までに切り替えの知らせが来なかった。`failed_at` はそれが決まった時刻（1 分後か、次の夜の時刻）。後から知らせが来れば、逃した夜ではなくなる。
+- **眠れなかった眠り** は、求めてから `PENELOPE_SLEEP_REPORT_TIMEOUT_MINUTES` が経っても切り替えの知らせが来ないもの。行の `kind` は従来の `missed_night` のまま。`at` と `scheduled_at` は眠りを求めた時刻、`failed_at` は知らせの期限。後から知らせが来れば、切り替えの結果の行を代わりに出す。
 - 閉じたサブエージェントの `turns` と `failed_turns` は、記録に残っているそのサブエージェントのターンと、うち失敗の数。
 
 ### 1 件
@@ -314,9 +313,9 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 ### まだ見ていない失敗と「見た」
 
 - backend は、オーナーが活動の記録の画面を開いた時刻を 1 つ覚える（配置のオーナーごと。ブラウザごとではない）。まだ一度も開いていなければ、記録が始まった時刻を使う。
-- **まだ見ていない失敗の数** は、その時刻より後の `failed_at` を持つ失敗と逃した夜の数である。
+- **まだ見ていない失敗の数** は、その時刻より後の `failed_at` を持つ失敗の数である。
 - `GET /api/record/unseen` は `{unseen}`（型は `RecordUnseenResponse`）。Web UI は、最初につなぐときとつなぎ直すときにこれを読み、左のレールとメニューの札にする。
-- 数が変わると、流れで `record`（`{unseen}`）を送る。backend は記録が失敗を受けたとき、オーナーが開いたとき、15 秒ごと（逃した夜は時がたつだけで決まるため）に数え直し、前に送った数と違えば送る。
+- 数が変わると、流れで `record`（`{unseen}`）を送る。backend は記録が失敗を受けたとき、オーナーが開いたとき、15 秒ごと（切り替えの知らせが来ないまま期限が過ぎる場合があるため）に数え直し、前に送った数と違えば送る。
 - `POST /api/record/seen` は、今を開いた時刻として覚え、`{unseen, previous_seen_at}`（型は `RecordSeenResponse`）を返す。`unseen` は覚える前のまだ見ていない数、`previous_seen_at` は前に開いた時刻（初めてなら記録が始まった時刻）。Web UI は、活動の記録の画面を開いたときに 1 回送り、`unseen` が 1 以上なら「前に見たあとの失敗が n 件あります」を出し、`failed_at` が `previous_seen_at` より後の行に「新しい」の札を付ける。札は画面を離れるまで残す。
 
 ### Web UI の活動の記録

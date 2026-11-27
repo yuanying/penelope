@@ -379,6 +379,25 @@ export const MIGRATIONS: readonly string[] = [
     context_window INTEGER
   );
   `,
+  `
+  ALTER TABLE sleepiness DROP COLUMN rotation_seq;
+  DELETE FROM sleepiness;
+
+  CREATE TABLE sleeps (
+    control_seq  INTEGER PRIMARY KEY REFERENCES events(seq),
+    requested_ms INTEGER NOT NULL,
+    requested_by TEXT NOT NULL CHECK (requested_by IN ('agent', 'safety_net')),
+    wake_ms      INTEGER NOT NULL,
+    completed_ms INTEGER,
+    woken_ms     INTEGER,
+    wake_notice_seq INTEGER REFERENCES events(seq)
+  );
+  CREATE INDEX sleeps_requested ON sleeps (requested_ms);
+  CREATE INDEX sleeps_unsent_wake ON sleeps (control_seq) WHERE woken_ms IS NOT NULL AND wake_notice_seq IS NULL;
+
+  UPDATE events SET acked_ms = received_ms
+    WHERE source = 'control' AND id LIKE 'nightly@%' AND acked_ms IS NULL;
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

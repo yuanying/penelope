@@ -127,8 +127,6 @@ services:
       PENELOPE_GITHUB_CLIENT_SECRET_FILE: /run/secrets/e2e/github-client-secret
       PENELOPE_OWNER_GITHUB_ID: "4242"
       PENELOPE_TIME_ZONE: UTC
-      PENELOPE_AWAKE_HOURS: "00:00-00:00"
-      PENELOPE_NIGHTLY_CRON: ${PENELOPE_E2E_NIGHTLY_CRON:-0 4 1 1 *}
       # Slack's events are inline, and the runner draws them (ADR-0029).
       PENELOPE_INLINE_SOURCES: ui,job,slack,a2a
       # Off until the heartbeat's scenario makes the backend again with it, in seconds.

@@ -17,7 +17,6 @@ import { openDatabase } from "../src/db.ts";
 import { close, listenTcp } from "../src/http.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { ask, FakeClock, tempDir } from "./support.ts";
 
 const MINUTE = 60_000;
@@ -43,7 +42,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { d
     inline: new Set(["ui", "control"]),
     builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
     batch: { quietMs: 5 * MINUTE, maxMs: 30 * MINUTE },
-    awake: new AwakeHours("07:00-23:00", "UTC"),
+    timeZone: "UTC",
     redeliverMs: 5 * MINUTE,
   });
   const assetsDir = path.join(dir, "assets");

@@ -13,41 +13,40 @@ import { Feed } from "../src/feed.ts";
 import { Heartbeat } from "../src/heartbeat.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
-import { cronOf } from "../src/schedules.ts";
+import { Sleep } from "../src/sleep.ts";
 import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours, iso } from "../src/time.ts";
+import { iso } from "../src/time.ts";
 import { FakeClock, tempDir } from "./support.ts";
 
 const QUIET_MINUTES = 60;
 
 function setup(
   t: { after: (fn: () => void) => void },
-  { start = "2026-11-16T09:00:00Z", awake = "07:00-23:00", quietMs = QUIET_MINUTES * 60_000 } = {},
+  { start = "2026-11-16T09:00:00Z", quietMs = QUIET_MINUTES * 60_000 } = {},
 ) {
   const dir = tempDir(t);
   const clock = new FakeClock(start);
   const db = openDatabase(path.join(dir, "backend.sqlite"));
   t.after(() => db.close());
-  const awakeHours = new AwakeHours(awake, "UTC");
   const queue = new Queue(db, new Sources(path.join(dir, "sources"), "UTC"), {
     now: clock.now,
     inline: new Set(["ui", "control"]),
     builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
     batch: { quietMs: 5 * 60_000, maxMs: 30 * 60_000 },
-    awake: awakeHours,
+    timeZone: "UTC",
     redeliverMs: 5 * 60_000,
   });
   const feed = new Feed();
   const conversation = new Conversation(db, feed, { now: clock.now });
-  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf("0 0 * * *", "UTC") });
+  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const inbox = new Inbox(db, queue, {
     assets: new Assets(db, path.join(dir, "assets"), { now: clock.now }),
     now: clock.now,
     limits: { maxOpenTasks: 3, deadlineMs: 120 * 60_000 },
   });
   const sleepiness = new Sleepiness(db, clock.now);
-  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, awake: awakeHours, log: () => {}, inbox, record, sleepiness });
+  const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, log: () => {}, inbox, record, sleepiness });
   let turns = 0;
   /** The runner's blocks of one turn: its start, or its end. */
   const turn = (kind: "turn_start" | "turn_end") => {
@@ -61,11 +60,11 @@ function setup(
     queue.ack(events.map((event) => event.seq));
     return events;
   };
-  return { clock, queue, conversation, heartbeat, inbox, record, turn, takeAll };
+  return { db, clock, queue, conversation, heartbeat, inbox, record, sleepiness, turn, takeAll };
 }
 
 describe("the heartbeat", () => {
-  it("is queued once the awake hours have gone the set minutes since the last turn ended", (t) => {
+  it("is queued after the set minutes since the last turn ended", (t) => {
     const { clock, queue, heartbeat, turn } = setup(t);
     turn("turn_start");
     turn("turn_end");
@@ -92,7 +91,7 @@ describe("the heartbeat", () => {
     heartbeat.tick();
     clock.advance(10);
     const [event] = queue.take({ after: 0 });
-    assert.deepEqual(event?.status, { sleepiness: 25, awake_seconds: 21_600 });
+    assert.deepEqual(event?.status, { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600 });
   });
 
   it("writes since when it counted and how long it waited as the payload", (t) => {
@@ -301,18 +300,20 @@ describe("the heartbeat", () => {
     );
   });
 
-  it("is not queued outside the awake hours, and is when they start", (t) => {
-    const { clock, queue, heartbeat, turn } = setup(t, { start: "2026-11-16T22:30:00Z" });
-    turn("turn_start");
-    turn("turn_end");
-    clock.set("2026-11-16T23:30:00Z");
+  it("does not queue a heartbeat after the switch completes but before wake", (t) => {
+    const { db, clock, queue, heartbeat, sleepiness, takeAll } = setup(t);
+    const sleep = new Sleep(db, queue, sleepiness, {
+      now: clock.now, timeZone: "UTC", limits: { threshold: 90, defaultMs: 120 * 60_000, maxMs: 120 * 60_000 },
+      notes: (at, since) => heartbeat.notes(at, since), log: () => {},
+    });
+    sleep.request(clock.now() + 120 * 60_000);
+    sleep.completed(takeAll()[0]!.seq);
+    clock.advance(QUIET_MINUTES);
     heartbeat.tick();
-    clock.set("2026-11-17T06:59:00Z");
-    heartbeat.tick();
-    assert.deepEqual(queue.take({ after: 0 }), []);
-    clock.set("2026-11-17T07:00:00Z");
-    heartbeat.tick();
-    assert.deepEqual(queue.take({ after: 0 }).map((event) => event.id), ["heartbeat@2026-11-17T07:00:00.000Z"]);
+    assert.deepEqual(takeAll(), []);
+    clock.advance(QUIET_MINUTES);
+    sleep.tick();
+    assert.deepEqual(takeAll().map((event) => event.source), ["wake"]);
   });
 
   it("counts from when the backend started when there has been no turn", (t) => {

@@ -28,7 +28,7 @@ type TurnEventBase = TurnLineBase & {
 
 /**
  * One event. An inline event carries its content as `text`; any other
- * carries where its content was appended under /sources. Only a heartbeat
+ * carries where its content was appended under /sources. A heartbeat or wake event
  * can also carry pending work and status.
  */
 export type TurnEvent =

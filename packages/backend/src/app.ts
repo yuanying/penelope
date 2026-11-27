@@ -34,10 +34,10 @@ import { vapidKeyOf, type WebPushRequest, WebPushChannel } from "./push/web-push
 import { Queue } from "./queue.ts";
 import { ActivityRecord } from "./record.ts";
 import { sandboxHandler } from "./sandbox-api.ts";
-import { cronOf, Scheduler, Schedules } from "./schedules.ts";
+import { Scheduler, Schedules } from "./schedules.ts";
+import { Sleep } from "./sleep.ts";
 import { Sleepiness } from "./sleepiness.ts";
 import { Sources } from "./sources.ts";
-import { AwakeHours } from "./time.ts";
 import { uiHandler } from "./ui-api.ts";
 import { webHandler } from "./web.ts";
 
@@ -66,13 +66,12 @@ export async function startBackend(
   memory.afterCommit(warmMemory);
   const modelSettings = new ModelSettings(db, now);
   const sleepiness = new Sleepiness(db, now);
-  const awake = new AwakeHours(config.awakeHours, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
     now,
     inline: config.inline,
     builtinDelivery: config.builtinDelivery,
     batch: config.batch,
-    awake,
+    timeZone: config.timeZone,
     redeliverMs: config.redeliverMs,
   });
   const feed = new Feed();
@@ -80,17 +79,21 @@ export async function startBackend(
   const conversation = new Conversation(db, feed, { now, assets });
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
-  const scheduler = new Scheduler(schedules, queue, { now, timeZone: config.timeZone, nightly: config.nightly, reviewWeekday: config.reviewWeekday, log });
+  const scheduler = new Scheduler(schedules, queue, { now, log });
   const record = new ActivityRecord(db, feed, {
     now,
     timeZone: config.timeZone,
-    nightly: cronOf(config.nightly, config.timeZone, { seconds: true }),
+    sleepReportTimeoutMs: config.sleep.reportTimeoutMs,
     ...(config.github === undefined ? {} : { owner: config.github.ownerId }),
     log,
   });
   const sessions = new LoginSessions(db, { now });
   const appTokens = new AppTokens(db, { now });
   const inbox = new Inbox(db, queue, { assets, now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
+  const heartbeat = new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, inbox, record, sleepiness, log });
+  const sleep = new Sleep(db, queue, sleepiness, {
+    now, timeZone: config.timeZone, limits: config.sleep, notes: (at, since) => heartbeat.notes(at, since), log,
+  });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
   const subscriptions = new PushSubscriptions(db, { now });
   const vapid = config.webPush === undefined ? undefined : vapidKeyOf(config.webPush.vapidKey);
@@ -119,7 +122,7 @@ export async function startBackend(
     intake = await opening(listenUnix(intakeHandler(queue, { log }), config.intakeSocket, log));
     sandbox = await opening(
       listenUnix(
-        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, now, log }),
+        sandboxHandler({ token: config.sandboxToken, queue, conversation, agents, schedules, memory, memoryView, inbox, record, modelSettings, sleepiness, sleep, now, log }),
         config.sandboxSocket,
         log,
       ),
@@ -161,10 +164,10 @@ export async function startBackend(
     throw error;
   }
   warmMemory();
+  const stopSleep = sleep.start();
   const stopScheduler = scheduler.start();
   const stopRecord = record.start();
-  const stopHeartbeat =
-    config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, inbox, record, sleepiness, log }).start();
+  const stopHeartbeat = heartbeat.start();
   const stopNotifier = channels.length === 0 ? () => {} : notifier.start();
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
@@ -177,6 +180,7 @@ export async function startBackend(
   return {
     port,
     close: async () => {
+      stopSleep();
       stopScheduler();
       stopRecord();
       stopHeartbeat();

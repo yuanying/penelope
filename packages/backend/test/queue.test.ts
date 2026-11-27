@@ -8,7 +8,6 @@ import type { Event } from "@penelope/contract";
 import { openDatabase } from "../src/db.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { FakeClock, tempDir, unwritable } from "./support.ts";
 
 const MINUTE = 60_000;
@@ -24,7 +23,7 @@ function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T10:00
     inline: new Set(["ui", "control"]),
     builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
     batch: { quietMs: 5 * MINUTE, maxMs: 30 * MINUTE },
-    awake: new AwakeHours("07:00-23:00", timeZone),
+    timeZone: timeZone,
     redeliverMs: 5 * MINUTE,
   });
   return { dir, sourcesDir, clock, queue };
@@ -267,14 +266,6 @@ describe("the queue", () => {
       assert.deepEqual(seqs(queue.take({ after: 0 })), [1, 2, 3]);
     });
 
-    it("goes with a now event even outside the awake hours", (t) => {
-      const { queue } = setup(t, "2026-11-14T23:30:00Z");
-      queue.accept(event());
-      assert.deepEqual(queue.take({ after: 0 }), []);
-      queue.accept(event({ delivery: "now" }));
-      assert.deepEqual(seqs(queue.take({ after: 0 })), [1, 2]);
-    });
-
     it("that starts after a now event was handed over waits again", (t) => {
       const { queue, clock } = setup(t);
       queue.accept(event({ delivery: "now" }));
@@ -296,15 +287,6 @@ describe("the queue", () => {
       queue.ack([1]);
       clock.advance(5);
       assert.deepEqual(seqs(queue.take({ after: 1 })), [2]);
-    });
-
-    it("that would end outside the awake hours waits for the morning", (t) => {
-      const { queue, clock } = setup(t, "2026-11-14T22:58:00Z");
-      queue.accept(event());
-      clock.set("2026-11-15T06:59:00Z");
-      assert.deepEqual(queue.take({ after: 0 }), []);
-      clock.set("2026-11-15T07:00:00Z");
-      assert.deepEqual(seqs(queue.take({ after: 0 })), [1]);
     });
 
     it("starts again with the next event after one was handed over", (t) => {

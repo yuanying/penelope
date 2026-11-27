@@ -2,6 +2,9 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { AgentStatus, ContextUsage } from "@penelope/contract";
 
+import { latestSleep } from "./sleep.ts";
+import { iso } from "./time.ts";
+
 const DAY_SECONDS = 86_400;
 
 type State = {
@@ -18,13 +21,7 @@ export class Sleepiness {
   constructor(db: DatabaseSync, now: () => number) {
     this.db = db;
     this.now = now;
-    const rotation = db.prepare(`
-      SELECT at, seq FROM session_rotations WHERE agent = 'main'
-        AND (stages IS NULL OR json_extract(stages, '$.session.result') = 'done')
-      ORDER BY at DESC, row DESC LIMIT 1
-    `).get() as { at: string; seq: number | null } | undefined;
-    db.prepare("INSERT OR IGNORE INTO sleepiness VALUES (1, ?, ?, 0, NULL, NULL)")
-      .run(rotation ? Date.parse(rotation.at) : now(), rotation?.seq ?? null);
+    db.prepare("INSERT OR IGNORE INTO sleepiness (singleton, awake_since_ms, peak) VALUES (1, ?, 0)").run(now());
   }
 
   status(now = this.now()): AgentStatus {
@@ -32,7 +29,13 @@ export class Sleepiness {
     const context = state.tokens === null || state.context_window === null
       ? undefined
       : { tokens: state.tokens, context_window: state.context_window };
-    const status = measure(state, now, context);
+    const last = latestSleep(this.db);
+    const asleep = last?.woken_ms === null;
+    const awakeSince = (asleep ? this.lastWake() : last?.woken_ms) ?? state.awake_since_ms;
+    const status = measure(
+      state.peak, (asleep ? last.requested_ms : now) - awakeSince, context,
+      asleep ? { state: last.completed_ms === null ? "falling_asleep" : "asleep", wake_at: iso(last.wake_ms) } : { state: "awake" },
+    );
     if (status.sleepiness > state.peak) {
       this.db.prepare("UPDATE sleepiness SET peak = ? WHERE singleton = 1").run(status.sleepiness);
     }
@@ -40,17 +43,23 @@ export class Sleepiness {
   }
 
   turnEnded(context: ContextUsage | undefined): void {
-    const status = measure(this.state(), this.now(), context);
+    const last = latestSleep(this.db);
+    if (last?.woken_ms === null) return;
+    const state = this.state();
+    const { sleepiness } = measure(state.peak, this.now() - (last?.woken_ms ?? state.awake_since_ms), context, { state: "awake" });
     this.db.prepare("UPDATE sleepiness SET peak = ?, tokens = ?, context_window = ? WHERE singleton = 1")
-      .run(status.sleepiness, context?.tokens ?? null, context?.context_window ?? null);
+      .run(sleepiness, context?.tokens ?? null, context?.context_window ?? null);
   }
 
-  rotated(seq: number | undefined): void {
-    this.db.prepare(`
-      UPDATE sleepiness SET awake_since_ms = ?, rotation_seq = coalesce(?, rotation_seq),
-        peak = 0, tokens = NULL, context_window = NULL
-      WHERE singleton = 1 AND (? IS NULL OR rotation_seq IS NULL OR rotation_seq < ?)
-    `).run(this.now(), seq ?? null, seq ?? null, seq ?? null);
+  reset(): void {
+    this.db.prepare("UPDATE sleepiness SET peak = 0, tokens = NULL, context_window = NULL WHERE singleton = 1").run();
+  }
+
+  private lastWake(): number | undefined {
+    const row = this.db.prepare("SELECT woken_ms FROM sleeps WHERE woken_ms IS NOT NULL ORDER BY control_seq DESC LIMIT 1").get() as
+      | { woken_ms: number }
+      | undefined;
+    return row?.woken_ms;
   }
 
   private state(): State {
@@ -58,10 +67,10 @@ export class Sleepiness {
   }
 }
 
-function measure(state: State, now: number, context: ContextUsage | undefined): AgentStatus {
-  const awake_seconds = Math.max(0, Math.floor((now - state.awake_since_ms) / 1000));
+function measure(peak: number, awakeMs: number, context: ContextUsage | undefined, sleep: AgentStatus["sleep"]): AgentStatus {
+  const awake_seconds = Math.max(0, Math.floor(awakeMs / 1000));
   const timePercent = 100 * awake_seconds / DAY_SECONDS;
   const contextPercent = context === undefined ? 0 : 100 * context.tokens / context.context_window;
-  const sleepiness = Math.max(state.peak, Math.min(100, Math.floor(Math.max(timePercent, contextPercent))));
-  return { sleepiness, awake_seconds, ...(context === undefined ? {} : { context }) };
+  const sleepiness = Math.max(peak, Math.min(100, Math.floor(Math.max(timePercent, contextPercent))));
+  return { sleep, sleepiness, awake_seconds, ...(context === undefined ? {} : { context }) };
 }

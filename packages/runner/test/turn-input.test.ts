@@ -48,7 +48,7 @@ test("only the heartbeat line includes pending work alongside its summary and so
 });
 
 test("only the heartbeat line carries the event's status snapshot", () => {
-  const status = { sleepiness: 85, awake_seconds: 120, context: { tokens: 8_500, context_window: 10_000 } };
+  const status = { sleep: { state: "awake" as const }, sleepiness: 85, awake_seconds: 120, context: { tokens: 8_500, context_window: 10_000 } };
   const [other, heartbeat] = lines(formatEvents([
     { ...mention, status },
     { ...mention, seq: 14, id: "heartbeat", source: "heartbeat", status },

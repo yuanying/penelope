@@ -70,7 +70,7 @@ type DeliveredBase = {
 /**
  * An event as `GET /v1/events` hands it over. An inline source's event
  * carries its payload into the turn; any other carries only the summary and
- * where to read it. Only a heartbeat can also carry pending work and status.
+ * where to read it. Heartbeat and wake events can also carry pending work and status.
  */
 export type DeliveredEvent =
   | (DeliveredBase & { inline: true; payload: unknown; pending?: never; status?: never })
@@ -124,6 +124,10 @@ export type JobEnd = {
 
 /** `POST /v1/job-events`: a background job of the main agent ended (`source: "job"`). */
 export type JobEventRequest = FromAgent & { id: string; summary: string; payload: JobEnd };
+
+/** `POST /v1/sleep`: the main session asks to sleep after its turn. */
+export type SleepRequest = FromAgent & { wake_at: string };
+export type SleepResponse = { wake_at: string; clamped: boolean };
 
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {

@@ -104,6 +104,13 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("This session ends now")) {
       return [{ calls: [write("/memory/handoff.md", "E2E-HANDOFF: the next session starts from here.\n")] }, { text: "Handed off." }];
     }
+    if (input.includes("E2E-SLEEP")) {
+      return [
+        { calls: [{ name: "sleep", args: { wake_at: new Date(Date.now() + 10_000).toISOString() } }] },
+        { calls: [reply("E2E-SLEEPING")] },
+        { text: "Requested sleep." },
+      ];
+    }
     if (input.includes('"source":"heartbeat"')) return [{}];
     if (input.includes("E2E-TURN-1")) {
       return [

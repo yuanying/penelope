@@ -10,7 +10,6 @@ import { Assets } from "../src/assets.ts";
 import { openDatabase } from "../src/db.ts";
 import { Queue } from "../src/queue.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { FakeClock, tempDir, unwritable } from "./support.ts";
 
 const MINUTE = 60_000;
@@ -27,7 +26,7 @@ function setup(t: { after: (fn: () => void) => void }, limits = { deadlineMs: 24
     inline: new Set(["ui", "control"]),
     builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now" },
     batch: { quietMs: 5 * MINUTE, maxMs: 30 * MINUTE },
-    awake: new AwakeHours("07:00-23:00", "UTC"),
+    timeZone: "UTC",
     redeliverMs: 5 * MINUTE,
   });
   const assetsDir = path.join(dir, "assets");

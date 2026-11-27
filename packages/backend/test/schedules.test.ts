@@ -7,7 +7,6 @@ import { openDatabase } from "../src/db.ts";
 import { Queue } from "../src/queue.ts";
 import { Scheduler, ScheduleError, Schedules } from "../src/schedules.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { FakeClock, tempDir, unwritable } from "./support.ts";
 
 function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T08:30:00Z") {
@@ -21,11 +20,11 @@ function setup(t: { after: (fn: () => void) => void }, start = "2026-11-14T08:30
     inline: new Set(["ui", "control"]),
     builtinDelivery: { cron: "now" },
     batch: { quietMs: 300_000, maxMs: 1_800_000 },
-    awake: new AwakeHours("00:00-00:00", "UTC"),
+    timeZone: "UTC",
     redeliverMs: 300_000,
   });
   const schedules = new Schedules(db, { now: clock.now, timeZone: "UTC" });
-  const scheduler = new Scheduler(schedules, queue, { now: clock.now, timeZone: "UTC", nightly: "0 4 * * *", log: () => {} });
+  const scheduler = new Scheduler(schedules, queue, { now: clock.now, log: () => {} });
   return { clock, queue, schedules, scheduler, sourcesDir };
 }
 
@@ -133,72 +132,4 @@ describe("the scheduler", () => {
     assert.deepEqual(queue.take({ after: 1 }).map((e) => e.summary), ["a"]);
   });
 
-  it("queues the nightly control event at the nightly time", (t) => {
-    const { clock, scheduler, queue } = setup(t, "2026-11-14T03:59:00Z");
-    scheduler.tick();
-    assert.deepEqual(queue.take({ after: 0 }), []);
-    clock.set("2026-11-14T04:00:00Z");
-    scheduler.tick();
-    const [nightly] = queue.take({ after: 0 });
-    assert.equal(nightly?.source, "control");
-    assert.equal(nightly?.inline, true);
-    assert.deepEqual(nightly?.inline && nightly.payload, { kind: "nightly" });
-    clock.set("2026-11-14T04:01:00Z");
-    scheduler.tick();
-    assert.deepEqual(queue.take({ after: 1 }), []);
-  });
-
-  it("queues the nightly control event on the second with a field of seconds, ticking every second (the tests')", (t) => {
-    // Guards against: a night of the tests' seconds left for the 15 s tick, so that the test waits on the tick.
-    t.mock.timers.enable({ apis: ["setInterval"] });
-    const { clock, queue } = setup(t, "2026-11-14T08:30:00Z");
-    const db = openDatabase(":memory:");
-    t.after(() => db.close());
-    const scheduler = new Scheduler(new Schedules(db, { now: clock.now, timeZone: "UTC" }), queue, {
-      now: clock.now,
-      timeZone: "UTC",
-      nightly: "*/10 * * * * *",
-      log: () => {},
-    });
-    const stop = scheduler.start();
-    t.after(stop);
-    assert.deepEqual(queue.take({ after: 0 }), []);
-    clock.set("2026-11-14T08:30:10Z");
-    t.mock.timers.tick(1_000);
-    const [nightly] = queue.take({ after: 0 });
-    assert.equal(nightly?.id, "nightly@2026-11-14T08:30:10.000Z");
-  });
-
-  it("marks only the first scheduled switch on the configured local weekday and keeps its review date on redelivery", (t) => {
-    const { clock, queue, schedules } = setup(t, "2026-11-15T14:59:00Z");
-    const scheduler = new Scheduler(schedules, queue, {
-      now: clock.now, timeZone: "Asia/Tokyo", nightly: "0 0,1 * * *", reviewWeekday: 1, log: () => {},
-    });
-    // The first Monday occurrence is still Sunday in UTC.
-    clock.set("2026-11-15T15:01:00Z");
-    scheduler.tick();
-    const [first] = queue.take({ after: 0 });
-    assert.deepEqual(first?.inline && first.payload, { kind: "nightly", review_date: "2026-11-16" });
-    clock.set("2026-11-15T16:00:00Z");
-    scheduler.tick();
-    const [again, second] = queue.take({ after: first!.seq });
-    assert.deepEqual(again, first);
-    assert.deepEqual(second?.inline && second.payload, { kind: "nightly" });
-  });
-
-  it("does not make up a nightly switch the backend was down for", (t) => {
-    const { clock, queue } = setup(t, "2026-11-14T03:00:00Z");
-    // Started after the nightly time: the next one is tomorrow's.
-    clock.set("2026-11-14T10:00:00Z");
-    const { scheduler } = setupAgain(t, clock, queue);
-    scheduler.tick();
-    assert.deepEqual(queue.take({ after: 0 }), []);
-  });
 });
-
-function setupAgain(t: { after: (fn: () => void) => void }, clock: FakeClock, queue: Queue) {
-  const db = openDatabase(":memory:");
-  t.after(() => db.close());
-  const schedules = new Schedules(db, { now: clock.now, timeZone: "UTC" });
-  return { scheduler: new Scheduler(schedules, queue, { now: clock.now, timeZone: "UTC", nightly: "0 4 * * *", log: () => {} }) };
-}

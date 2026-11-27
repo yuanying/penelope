@@ -102,7 +102,7 @@ base が決めている場所:
 | `kustomization.yaml` | `images` の `newTag` | 使う版（v0.9.1 以降）。4 つとも同じ版 |
 | `backend.env`・`sandbox/env` | `https://penelope.example.com` | backend に届く公開の URL |
 | `backend.env` | `PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_OWNER_GITHUB_ID` | GitHub の OAuth App の client ID と、オーナーの数値の user ID（`gh api users/<名前> --jq .id`） |
-| `backend.env` | `PENELOPE_TIME_ZONE`・`PENELOPE_AWAKE_HOURS`・`PENELOPE_NIGHTLY_CRON`・`PENELOPE_HEARTBEAT_MINUTES` | 時間帯、起きている時間、夜の切り替え、heartbeat |
+| `backend.env` | `PENELOPE_TIME_ZONE`・`PENELOPE_HEARTBEAT_MINUTES` | 時間帯、heartbeat。眠りの既定は [backend の設定](../../docs/backend.md#設定) |
 | `backend.env` | `PENELOPE_AVATAR=example`、`PENELOPE_AGENT_NAME` | 最初に写すアバターと、UI に出す名前（下の「アバター」） |
 | `sandbox/env` | `PENELOPE_NAME` | システムプロンプトに入る名前。`PENELOPE_AGENT_NAME` と同じにする |
 | `sandbox/env` | `PENELOPE_ROLE`・`PENELOPE_OWNER` | 役目とオーナー（システムプロンプトに入る） |

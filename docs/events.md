@@ -14,7 +14,7 @@ receivers のプラグインが封筒を作る形は [receivers.md](receivers.md
 
 | 欄 | 必須 | 中身 |
 | --- | --- | --- |
-| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat` |
+| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake` |
 | `id` | ○ | 受信元が付ける。`source` と組で一意。重複を除くキー |
 | `occurred_at` | ○ | 起きた時刻（RFC 3339） |
 | `summary` | ○ | 1 行の要約。人とモデルが読む |
@@ -34,10 +34,10 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 ### `delivery`
 
-- `now`: すぐにターンへ。ターンの最中なら割り込み（steer）、待っていれば新しいターン。起きている時間の外でも。
+- `now`: 起きていればすぐにターンへ。ターンの最中なら割り込み（steer）、待っていれば新しいターン。
 - `batch`: `/sources` にはすぐ書くが、ターンへはまとめて後で渡す。`now` の出来事が来たら、それと一緒に渡す。いつ渡すかは backend が決める（下の「いつ渡すか」）。
 - **決めるのは受信元の側だけ**である。receivers のプラグインは自分の設定（例: Slack ならメンションと DM は `now`）に従って出来事ごとに付ける。backend はそれを上書きしない。
-- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`）は backend の設定で決め、既定はどれも `now`。`control` と `heartbeat` は常に `now`。
+- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`）は backend の設定で決め、既定はどれも `now`。`control`・`heartbeat`・`wake` は常に `now`。
 
 ### `answer_via`
 
@@ -52,13 +52,14 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - 中身（`payload`）をそのままターンに載せる受信元。封筒の欄ではなく、backend の設定で受信元ごとに決める。
 - 既定は `ui`（オーナーのメッセージ）・`job`（裏の仕事の終わり、[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）・`control`（制御の出来事）。サブエージェントの知らせ（`self`）は inline でない。
 - Slack のプラグインの出来事を受ける配置は、その `source` も inline にする（[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)）。runner がそれを描いてターンに載せる（下の「ターンに入る形」の「Slack の出来事」）。
-- `heartbeat` は設定にかかわらず inline ではない。
+- `heartbeat` と `wake` は設定にかかわらず inline ではない。
 - inline の出来事も、ほかと同じく `/sources` に書く。
 
 ### 制御の出来事
 
 - `source` は `control`。runner が受けて手順を回し、エージェントのターンには入らない。
-- 最初は夜の切り替えだけである。backend が夜の時刻に `payload` が `{kind: "nightly"}` の出来事を列に入れ、runner が振り返り → 照合係 → 整理係 → 新しいセッションを回す。週の棚卸しの夜だけ `payload` に配置のタイムゾーンでの予定日 `review_date`（`YYYY-MM-DD`）を足し、整理係が中身と構成を別々のターンで見直す（[ADR-0044](adr/0044-check-memory-against-records-before-nightly-organization.md)）。終わったら runner が知らせる（[sandbox-api.md](sandbox-api.md) の「セッションの切り替えの知らせ」）。
+- 眠りを求められたとき、backend は `id` が `sleep@<UUID>`、`occurred_at` が求めた時刻、`payload` が `{kind: "nightly"}` の制御イベントを列に入れる。runner は今のターンを終えてから、振り返り、照合係、整理係、新しいセッションを順に回し、[切り替えを報告する](sandbox-api.md#セッションの切り替えの知らせ)。
+- 棚卸しのときだけ、眠りを求めた時刻の現地日付を `review_date`（`YYYY-MM-DD`）に入れる。整理係は中身と構成を別のターンで見直す。
 
 ### 予約の出来事
 
@@ -67,12 +68,18 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 
 ### heartbeat の出来事
 
-- 起きている時間に、本体の最後のターンの終わりから決めた時間がたつと、backend が `source` が `heartbeat` の出来事を 1 件入れる（[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)）。いつ入れるか、入れないかは [backend.md](backend.md) の「heartbeat」。
+- 本体が起きており、最後のターンの終わりから決めた時間がたつと、backend が `source` が `heartbeat` の出来事を 1 件入れる（[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)）。いつ入れるか、入れないかは [backend.md](backend.md) の「heartbeat」。
 - `id` は `heartbeat@<入れた時刻>`、`occurred_at` は入れた時刻、`stream` は無い。`delivery` はいつも `now` で、待っている `batch` の出来事を連れていく。
 - `summary` は `no turn for <N> minutes`（N が 1 なら `minute`）。N をテスト用に秒で決めて分で割り切れないときは `no turn for <秒> seconds`。
 - `payload` は `since`（数え始めた時刻。最後のターンの終わり、まだターンが無ければ backend が立ち上がった時刻）と `quiet_minutes`（N。テスト用の秒では端数になる）、列に入れた時点の `status`、残っている仕事があれば `pending` を持つ（型は `HeartbeatPayload`）。`/sources` にはこの `payload` を書く。何をすべきかは書かない。
 - ターンの行には、要約と場所に加え、`status` と、残っている仕事があれば `pending` を載せる（[ADR-0068](adr/0068-sleepiness-as-one-value-with-its-facts.md)、[ADR-0055](adr/0055-show-unfinished-work-in-heartbeats.md)）。`payload` 全体は載せず、`summary` に件数は足さない。
 - heartbeat だけで始まったターンも、ほかの出来事を含むターンも、同じ[畳む前の頼みの条件](#畳む前の頼み)に従う。
+
+### 起きたときの出来事
+
+- 起きる時刻に、backend は `source` が `wake` の出来事を 1 件入れる。heartbeat が無効な配置でも入る。
+- `id` は `wake@<眠りの制御イベントの seq>`、`occurred_at` は実際に起きた時刻、`summary` は `woke up`。 `stream` は無く、`delivery` は `now`。
+- `payload` は `sleep_seq`（制御イベントの `seq`）、`wake_at`（予定の時刻）、`status` と、残っている仕事があれば `pending` を持つ（`WakePayload`）。ターンの行には、heartbeat と同じく `status` と `pending` だけを要約と場所に添える。
 
 ### A2A の出来事
 
@@ -100,7 +107,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - multipart では、封筒は `event` の部分（文字の欄でも、JSON のファイルでもよい）、ファイルは `file` の部分を繰り返す。ファイルの名前は部分の filename である。
 - JSON と multipart のどちらも、封筒の `answer_via` が不正なら `400` で断る。
 - 大きさの上限は、封筒とファイルを合わせた body の全体で 64 MiB。
-- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
+- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
 
 | 応答 | 意味 |
 | --- | --- |
@@ -166,8 +173,8 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `text` | inline の出来事だけ。`payload` の `text`（文字列）。無ければ `payload` を JSON にした文字列 |
 | `appended` | inline でない出来事だけ。中身を足した場所。`path` と `lines`（`[from, to]`、1 始まり・両端を含む） |
 | `attachments` | 添付があるときだけ。1 件は `path`・`mime_type`・`size`（sandbox 向けの口の添付と同じ） |
-| `pending` | `heartbeat` の出来事だけ。残っている仕事があるときに載せる |
-| `status` | `heartbeat` の出来事だけ。列に入れた時点の [本体の状態](sandbox-api.md#本体の状態) |
+| `pending` | `heartbeat` と `wake` だけ。残っている仕事があるときに載せる |
+| `status` | `heartbeat` と `wake` だけ。列に入れた時点の [本体の状態](sandbox-api.md#本体の状態) |
 
 - inline の出来事は中身（`text`）を持ち、`appended` を持たない。inline でない出来事は `appended` を持ち、`text` を持たない。中身は、エージェントが必要なときに sandbox の shell でそのファイルを読む。
 - inline の出来事に付いた画像（`mime_type` が `image/png`・`image/jpeg`・`image/gif`・`image/webp` のもの）は、`attachments` に加えて、画像としてもターンに載せる。runner が `/sources` から読み、Pi の画像の入力として渡す。1 つの入力に 4 枚まで、添付の `size` が runner の設定の大きさ（既定 5 MiB）を超えるものと読めないものは載せず、`attachments` だけにする。
@@ -175,11 +182,11 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 
 ### ターンの始まりの `status`
 
-本体の通常のターンの最初の入力では、`</events>` の後の `<runner_notes>` の JSON に `status` を載せる。runner がターン開始時に読んだ値であり、heartbeat を列に入れた時点の値と異なることがある。途中で出来事を渡すときは `<runner_notes>` に `status` を添えない。
+本体の通常のターンの最初の入力では、`</events>` の後の `<runner_notes>` の JSON に `status` を載せる。runner がターン開始時に読んだ値であり、heartbeat または `wake` を列に入れた時点の値と異なることがある。途中で出来事を渡すときは `<runner_notes>` に `status` を添えない。
 
-### heartbeat の `pending`
+### heartbeat と起きたときの `pending`
 
-`pending`（型は `HeartbeatPending`）は、本体への heartbeat の行だけに載る。種類ごとに `{items, omitted}` を持ち、`items` は最大 5 件、`omitted` は入りきらなかった件数（全件が載れば 0）。空の種類は省き、すべて空なら `pending` も省く。時刻は RFC 3339。
+`pending`（型は `HeartbeatPending`）は、本体への `heartbeat` と `wake` の行だけに載る。種類ごとに `{items, omitted}` を持ち、`items` は最大 5 件、`omitted` は入りきらなかった件数（全件が載れば 0）。空の種類は省き、すべて空なら `pending` も省く。時刻は RFC 3339。
 
 | 種類 | `items` の 1 件 |
 | --- | --- |
@@ -188,7 +195,7 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | `jobs` | `job`（道具で使う名前）、`started_at`、`command`（先頭行の先頭 200 字まで）。`started_at` が古い順、同時なら `job` 順 |
 | `subagents` | `name`、`purpose`、`state`（`running`・`waiting`）、`since`（その状態になった時刻）。`since` が古い順、同時なら `name` 順 |
 
-`a2a_tasks` と `failures` は backend が heartbeat を列に入れるときに採る。`jobs` と `subagents` は runner が本体への行を組み立てるときに採り、backend から来た分に足す。採れない種類は省く。時刻を持たない旧い `waiting` の記録は、状態が変わった時刻の代わりに `agent.json` の最終更新時刻を `since` に載せる。最終更新時刻も読めなければ、そのサブエージェントは一覧に載せない。
+`a2a_tasks` と `failures` は backend が heartbeat または `wake` を列に入れるときに採る。`jobs` と `subagents` は runner が本体への行を組み立てるときに採り、backend から来た分に足す。採れない種類は省く。時刻を持たない旧い `waiting` の記録は、状態が変わった時刻の代わりに `agent.json` の最終更新時刻を `since` に載せる。最終更新時刻も読めなければ、そのサブエージェントは一覧に載せない。
 
 ### `batch` のまとめ
 
@@ -244,9 +251,9 @@ Slack のプラグインの出来事は、runner が `packages/slack` の描き�
 ### いつ渡すか
 
 - **いつ渡すかは backend が決め、渡す時が来た出来事だけを sandbox 向けの口で返す**（[sandbox-api.md](sandbox-api.md) の「出来事を取る」）。runner は時を数えない。
-- `now`: backend はすぐに渡す。runner は、ターンの最中なら steer、待っていれば新しいターンにする。
-- `batch`: backend は、受信元と `stream` をまたいで、まだ渡していない `batch` の最初の 1 件を受けると待ちを始める。待ちは、新しい `batch` の出来事が来るたびに N 分先まで延び、最初の 1 件から M 分で打ち切る。待ちが終わったら、それまでに溜まったものを一度に渡す。起きている時間の外に来たものは、朝まで渡さない。
-  - 待ちの終わりが起きている時間の外に落ちたら、次に起きている時間が始まるときに渡す。
-  - `now` の出来事を初めて渡すときは、待ちの途中でも、その時点で待っている `batch` の出来事をすべて一緒に、`seq` の順で渡す。起きている時間の外でも同じである。たとえば Slack の流れ（`seq` 10、`batch`）の後に自分へのメンション（`seq` 11、`now`）が来たら、10 と 11 を 1 回の poll で返す。ターンが、そこに至る流れと一緒にメンションを見られるようにするためである。ack が無くてもう一度渡す `now` の出来事は、`batch` を連れていかない。
-  - N・M・起きている時間は backend の設定（[backend.md](backend.md)）。既定は N が 5 分、M が 30 分、起きている時間が 07:00〜23:00。
+- 寝つく間と寝ている間、backend はその眠りの制御イベントだけを渡す。`now` と `batch` は列と `/sources` に保存し、`wake` とともに渡す。眠りを求める前に runner が受け取った出来事は、切り替えより前に扱う。
+- 起きているときは、backend は `now` をすぐに渡す。runner は、ターンの最中なら steer、待っていれば新しいターンにする。
+- `batch`: backend は、受信元と `stream` をまたいで、まだ渡していない `batch` の最初の 1 件を受けると待ちを始める。待ちは、新しい `batch` の出来事が来るたびに N 分先まで延び、最初の 1 件から M 分で打ち切る。起きていれば、待ちが終わったときに溜まった出来事を渡す。
+  - `now` の出来事を初めて渡すときは、待ちの途中でも、その時点で待っている `batch` の出来事をすべて一緒に、`seq` の順で渡す。たとえば Slack の流れ（`seq` 10、`batch`）の後に自分へのメンション（`seq` 11、`now`）が来たら、10 と 11 を 1 回の poll で返す。ターンが、そこに至る流れと一緒にメンションを見られるようにするためである。ack が無くてもう一度渡す `now` の出来事は、`batch` を連れていかない。
+  - N と M は [backend の設定](backend.md#設定)。既定は N が 5 分、M が 30 分。
 - runner は、一度に渡された `batch` の出来事を 1 つの入力にまとめる。ターンの最中に `batch` だけが渡されたときは steer にせず、そのターンの後に follow-up で入れる。`now` の出来事と一緒に渡されたときは、`now` と同じ 1 つの入力にして steer で入れる。

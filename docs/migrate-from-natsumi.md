@@ -57,9 +57,8 @@ natsumi の config（JSON）の項目と、それを書く penelope の配置の
 | `listen`（`tls`・`behindProxy` を含む） | 無い。backend は `8080` で平文で待ち、TLS は Ingress が終える |
 | `github.clientId`・`clientSecretFile`・`allowedUserId` | `backend.env` の `PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_OWNER_GITHUB_ID`、Secret `penelope-backend` の `github-client-secret`。callback の道は同じ `/auth/github/callback` なので、公開の URL を変えなければ同じ OAuth App を使える |
 | `loop.timeZone` | `backend.env` の `PENELOPE_TIME_ZONE` と `sandbox/env` の `TZ` |
-| `loop.awakeHours` | `PENELOPE_AWAKE_HOURS`（例 `08:00-23:00`） |
-| `loop.nightlyRotationAt` | `PENELOPE_NIGHTLY_CRON`（例 `02:00` なら `0 2 * * *`） |
-| `loop.pingIntervalMinutes` | `PENELOPE_HEARTBEAT_MINUTES`（起きている時間に、静かな時間が続いたら出来事を入れる。[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)） |
+| `loop.awakeHours`・`loop.nightlyRotationAt` | 移さない。本体は `sleep` で自分で眠り、時刻を決めて起きる（[ADR-0069](adr/0069-sleep-by-her-own-call-until-a-wake-time.md)） |
+| `loop.pingIntervalMinutes` | `PENELOPE_HEARTBEAT_MINUTES`（本体が起きていて、静かな時間が続いたら出来事を入れる。[ADR-0031](adr/0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)） |
 | `loop` のほか・`curator` | 無い |
 | `pi.routes`・`defaultRoute` | `sandbox/env` の `PENELOPE_MODEL`（`<provider>/<model>`）、`sandbox/models.json`、`sentinel/sentinel.yaml` のモデルの API のホストと Secret `penelope-sentinel` の鍵（下の「モデル」） |
 | `avatar` | `backend.env` の `PENELOPE_AVATAR` と、自分のアバターなら `PENELOPE_AVATARS_DIR`（下の「アバター」） |
@@ -282,7 +281,7 @@ kubectl -n $ns exec -i penelope-0 -c sandbox -- \
 - 出るのは `posted`・`skipped past due`・断られた数と状態コード・入れる前と後の予約の数だけである。`posted` と `skipped past due` の和が 5 の 3 の `pending` と同じで、`after` が `before` と `posted` の和であること。
 - 全部入れると JSON を消す。断られたものがあれば終了コード 1 で、残りだけが JSON に残る。もう一度流すと残りだけを入れる。
 - cron の式はどちらも 5 欄で、natsumi は `loop.timeZone`、penelope は `PENELOPE_TIME_ZONE` で読む。2 つを同じ時間帯にしておく。読めない式は `400` で断られる。その予約は、オーナーがエージェントに頼んで入れ直してもらう。
-- **届く時間が変わる。** natsumi は、起きている時間の外に来た予約を起きてから届けていた。penelope の予約の出来事は、既定（`PENELOPE_DELIVERY_CRON=now`）では時刻どおりに渡る。`batch` にすると、起きている時間の外に来たものは朝に渡る（[events.md](events.md) の「いつ渡すか」）。夜中の回を持つ繰り返しの予約があれば、ふるまいが変わる。
+- **届く時間が変わる。** penelope は、眠りの間に時刻が来た予約を起きたときに渡す。起きているときは、既定の `PENELOPE_DELIVERY_CRON=now` なら時刻どおりに渡す（[配送の条件](events.md#いつ渡すか)）。
 
 ### 9. 確かめる
 

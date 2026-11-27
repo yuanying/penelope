@@ -12,7 +12,7 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AgentStatus, Appended, DeliveredEvent, SourcesLine, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
+import { type AgentStatus, type Appended, type DeliveredEvent, isPresenceSource, type SourcesLine, type TurnBatch, type TurnEvent, type TurnLine } from "@penelope/contract";
 import { drawChanges, readContext, readPayload } from "@penelope/slack";
 
 import type { ExtensionNotice } from "./extensions.ts";
@@ -54,7 +54,7 @@ function single(event: DeliveredEvent, drawn?: string): TurnEvent {
   };
   const attachments = event.attachments?.length ? { attachments: event.attachments } : {};
   if (event.inline) return { ...head, text: drawn ?? text(event.payload), ...attachments };
-  const { pending, status } = event.source === "heartbeat" ? event : {};
+  const { pending, status } = isPresenceSource(event.source) ? event : {};
   return {
     ...head, appended: event.appended, ...attachments,
     ...(pending === undefined ? {} : { pending }),

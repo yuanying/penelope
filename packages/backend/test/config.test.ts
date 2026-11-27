@@ -49,9 +49,7 @@ describe("the configuration", () => {
       sandboxToken: undefined,
       github: undefined,
       timeZone: "UTC",
-      awakeHours: "07:00-23:00",
-      nightly: "0 4 * * *",
-      reviewWeekday: 0,
+      sleep: { threshold: 90, defaultMs: 480 * 60_000, maxMs: 720 * 60_000, reportTimeoutMs: 60 * 60_000 },
       batch: { quietMs: 5 * 60_000, maxMs: 30 * 60_000 },
       redeliverMs: 5 * 60_000,
       heartbeatMs: undefined,
@@ -83,8 +81,7 @@ describe("the configuration", () => {
         PENELOPE_GITHUB_CLIENT_SECRET_FILE: "/secrets/github-secret",
         PENELOPE_OWNER_GITHUB_ID: "4242",
         PENELOPE_TIME_ZONE: "Asia/Tokyo",
-        PENELOPE_AWAKE_HOURS: "08:00-22:00",
-        PENELOPE_NIGHTLY_CRON: "30 3 * * *",
+
         PENELOPE_BATCH_QUIET_MINUTES: "2",
         PENELOPE_BATCH_MAX_MINUTES: "10",
         PENELOPE_REDELIVER_MINUTES: "3",
@@ -151,22 +148,21 @@ describe("the configuration", () => {
     assert.throws(() => loadConfig({ PENELOPE_HEARTBEAT_MINUTES: "1", PENELOPE_HEARTBEAT_SECONDS: "5" }, read), ConfigError);
   });
 
-  it("takes a nightly cron with a field of seconds first, for the tests", () => {
-    assert.equal(loadConfig({ PENELOPE_NIGHTLY_CRON: "*/10 * * * * *" }, read).nightly, "*/10 * * * * *");
+  it("starts even with retired sleep settings that would previously have been rejected", () => {
+    loadConfig({ PENELOPE_AWAKE_HOURS: "morning", PENELOPE_NIGHTLY_CRON: "at night", PENELOPE_REVIEW_WEEKDAY: "someday" }, read);
   });
 
   it("refuses values it cannot use", () => {
     for (const env of [
       { PENELOPE_LISTEN: "8080" },
       { PENELOPE_TIME_ZONE: "Mars/Olympus" },
-      { PENELOPE_AWAKE_HOURS: "morning" },
-      { PENELOPE_NIGHTLY_CRON: "at night" },
+      { PENELOPE_SLEEPINESS_LIMIT: "100" },
+      { PENELOPE_SLEEP_DEFAULT_MINUTES: "481", PENELOPE_SLEEP_MAX_MINUTES: "480" },
       { PENELOPE_BATCH_QUIET_MINUTES: "-1" },
       { PENELOPE_HEARTBEAT_MINUTES: "0" },
       { PENELOPE_HEARTBEAT_MINUTES: "an hour" },
       { PENELOPE_HEARTBEAT_SECONDS: "0" },
       { PENELOPE_HEARTBEAT_SECONDS: "1.5" },
-      { PENELOPE_NIGHTLY_CRON: "0 0 4 * * * *" },
       { PENELOPE_DELIVERY_UI: "later" },
       { PENELOPE_OWNER_GITHUB_ID: "someone" },
       { PENELOPE_PUBLIC_URL: "not a url" },

@@ -1,7 +1,7 @@
 // The activity record (ADR-0038, docs/backend.md "活動の記録"): a one-line
 // summary of each turn, night and background job beside the activities that
 // are a turn's flow; what the UI reads of them (docs/ui-api.md "活動の記録");
-// the missed nights, found from the nightly schedule when read; and the
+// sleep requests whose switch report did not arrive; and the
 // failures the owner has not seen. The old is removed with time.
 import type { DatabaseSync } from "node:sqlite";
 
@@ -38,19 +38,16 @@ import {
   type RecordTurnResponse,
   type TurnResult,
 } from "@penelope/contract";
-import type { Cron } from "croner";
 
 import type { Feed } from "./feed.ts";
 import { iso } from "./time.ts";
 
 const DAY_MS = 86_400_000;
-/** A night's event is queued within a tick of its time; one not queued a minute after was missed. */
-const QUEUE_GRACE_MS = 60_000;
 /** Rows removed at a time, so that reads and writes are not held up for long. */
 const PRUNE_BATCH = 500;
 /** How often the old is removed. */
 const PRUNE_EVERY_MS = 3_600_000;
-/** How often the number of unseen failures is looked at again: the missed nights change it with time alone. */
+/** Unreported sleep requests can cross the failure deadline without an event. */
 const UNSEEN_EVERY_MS = 15_000;
 /** Turns of a sub-agent on one page. */
 export const SUB_AGENT_PAGE = 20;
@@ -134,7 +131,7 @@ export class ActivityRecord {
   private readonly feed: Feed;
   private readonly now: () => number;
   private readonly timeZone: string;
-  private readonly nightly: Cron;
+  private readonly sleepReportTimeoutMs: number;
   private readonly owner: string;
   private readonly log: (line: string) => void;
   private lastUnseen: number | undefined;
@@ -142,16 +139,15 @@ export class ActivityRecord {
   constructor(
     db: DatabaseSync,
     feed: Feed,
-    options: { now: () => number; timeZone: string; nightly: Cron; owner?: number; log?: (line: string) => void },
+    options: { now: () => number; timeZone: string; sleepReportTimeoutMs: number; owner?: number; log?: (line: string) => void },
   ) {
     this.db = db;
     this.feed = feed;
     this.now = options.now;
     this.timeZone = options.timeZone;
-    this.nightly = options.nightly;
+    this.sleepReportTimeoutMs = options.sleepReportTimeoutMs;
     this.owner = String(options.owner ?? "owner");
     this.log = options.log ?? console.error;
-    // Nights before the record began are not counted as missed.
     db.prepare("INSERT OR IGNORE INTO record_state (key, value) VALUES ('since', ?)").run(iso(this.now()));
   }
 
@@ -235,7 +231,7 @@ export class ActivityRecord {
     } else if (kept !== null) {
       this.db.prepare("UPDATE session_rotations SET at = ?, stages = ?, started_at = ?, failed = ? WHERE row = ?").run(now, kept, started, failed, before.row);
     }
-    if (failed) this.publishUnseen();
+    this.publishUnseen();
   }
 
   /** Copy counts for this attempt only: an earlier attempt may have reached a stage this one did not. */
@@ -437,8 +433,8 @@ export class ActivityRecord {
     );
     const nights = count("SELECT count(*) AS n FROM session_rotations WHERE failed = 1 AND at > ?");
     const jobs = count("SELECT count(*) AS n FROM record_jobs WHERE failed = 1 AND received_at > ?");
-    // A missed night is known at most two nights after it was due.
-    const missed = this.missed(Date.parse(since) - 2 * this.nightGap(), this.now()).filter((night) => night.failed_at > since).length;
+    const now = this.now();
+    const missed = this.missed(Date.parse(since) - this.sleepReportTimeoutMs + 1, now + 1).length;
     return turns + nights + jobs + missed;
   }
 
@@ -462,10 +458,14 @@ export class ActivityRecord {
   async prune(): Promise<void> {
     const flow = iso(this.now() - RECORD_FLOW_DAYS * DAY_MS);
     const summary = iso(this.now() - RECORD_SUMMARY_DAYS * DAY_MS);
-    const steps: Array<[string, string]> = [
+    const steps: Array<[string, string | number]> = [
       ["DELETE FROM activities WHERE row IN (SELECT row FROM activities WHERE at < ? LIMIT ?)", flow],
       ["DELETE FROM turns WHERE rowid IN (SELECT rowid FROM turns WHERE at < ? LIMIT ?)", summary],
       ["DELETE FROM session_rotations WHERE row IN (SELECT row FROM session_rotations WHERE at < ? LIMIT ?)", summary],
+      [`DELETE FROM sleeps WHERE control_seq IN (
+        SELECT control_seq FROM sleeps WHERE requested_ms < ? AND woken_ms IS NOT NULL
+          AND control_seq < (SELECT max(control_seq) FROM sleeps WHERE woken_ms IS NOT NULL)
+        LIMIT ?)`, Date.parse(summary)],
       ["DELETE FROM record_jobs WHERE rowid IN (SELECT rowid FROM record_jobs WHERE ended_at < ? LIMIT ?)", summary],
       ["DELETE FROM sub_agents WHERE rowid IN (SELECT rowid FROM sub_agents WHERE closed = 1 AND updated_at < ? LIMIT ?)", summary],
     ];
@@ -562,7 +562,7 @@ export class ActivityRecord {
         )
         .all(a, b) as NightRow[];
       rows.push(...nights.map(nightOf));
-      rows.push(...this.missed(from, Math.min(to, this.now())));
+      rows.push(...this.missed(from, to));
     }
     if (main && (kind === undefined || kind === "job")) {
       const jobs = this.db.prepare(`SELECT * FROM record_jobs WHERE ended_at >= ? AND ended_at < ? ${failed ? "AND failed = 1" : ""}`).all(a, b) as JobRow[];
@@ -578,7 +578,7 @@ export class ActivityRecord {
     return rows;
   }
 
-  /** The whole day's turns and failures, not narrowed. A missed night is not counted. */
+  /** The whole day's turns and failures, not narrowed. */
   private counts(a: string, b: string): { turns: number; failures: number } {
     const turns = this.db
       .prepare(
@@ -590,7 +590,8 @@ export class ActivityRecord {
       .prepare("SELECT count(*) AS n FROM session_rotations WHERE failed = 1 AND coalesce(started_at, at) >= ? AND coalesce(started_at, at) < ?")
       .get(a, b) as { n: number };
     const jobs = this.db.prepare("SELECT count(*) AS n FROM record_jobs WHERE failed = 1 AND ended_at >= ? AND ended_at < ?").get(a, b) as { n: number };
-    return { turns: turns.n, failures: turns.failed + nights.n + jobs.n };
+    const missed = this.missed(Date.parse(a), Date.parse(b)).length;
+    return { turns: turns.n, failures: turns.failed + nights.n + jobs.n + missed };
   }
 
   /** The time of the latest row before `from` that the narrowing keeps. */
@@ -623,40 +624,17 @@ export class ActivityRecord {
     return Date.parse(found.reduce((a, b) => (a > b ? a : b)));
   }
 
-  /**
-   * The nights due in [from, to) since the record began that were not
-   * switched: no control event was queued for one a minute after it was due,
-   * or one was and no report of it came before the next night was due.
-   */
   private missed(from: number, to: number): RecordMissedNight[] {
-    const start = Math.max(from, Date.parse(this.state("since")!));
-    const now = this.now();
-    const event = this.db.prepare("SELECT seq FROM events WHERE source = 'control' AND id = ?");
-    const reported = this.db.prepare("SELECT 1 FROM session_rotations WHERE seq = ?");
-    const reportedBetween = this.db.prepare("SELECT 1 FROM session_rotations WHERE seq IS NULL AND at >= ? AND at < ? LIMIT 1");
-    const missed: RecordMissedNight[] = [];
-    let due = this.nightly.nextRun(new Date(start - 1));
-    while (due !== null && due.getTime() < to) {
-      const dueMs = due.getTime();
-      const next = this.nightly.nextRun(due);
-      const nextMs = next?.getTime() ?? Infinity;
-      const queued = event.get(`nightly@${iso(dueMs)}`) as { seq: number } | undefined;
-      const known = queued !== undefined && reported.get(queued.seq) !== undefined;
-      // An older runner reports with no seq: a report before the next night is the night's.
-      const knownByTime = !known && reportedBetween.get(iso(dueMs), iso(nextMs === Infinity ? now : nextMs)) !== undefined;
-      const decided = queued === undefined ? dueMs + QUEUE_GRACE_MS : nextMs;
-      if (!known && !knownByTime && decided <= now) {
-        missed.push({ kind: "missed_night", id: `missed@${iso(dueMs)}`, at: iso(dueMs), scheduled_at: iso(dueMs), failed_at: iso(decided) });
-      }
-      due = next;
-    }
-    return missed;
-  }
-
-  /** The time between two nights. */
-  private nightGap(): number {
-    const [first, second] = this.nightly.nextRuns(2, new Date(this.now()));
-    return first && second ? second.getTime() - first.getTime() : DAY_MS;
+    const rows = this.db.prepare(`
+      SELECT control_seq, requested_ms FROM sleeps s
+      WHERE requested_ms >= ? AND requested_ms < ? AND requested_ms <= ?
+        AND NOT EXISTS (SELECT 1 FROM session_rotations n WHERE n.seq = s.control_seq)
+      ORDER BY requested_ms, control_seq
+    `).all(Math.max(from, this.now() - RECORD_SUMMARY_DAYS * DAY_MS), to, this.now() - this.sleepReportTimeoutMs) as { control_seq: number; requested_ms: number }[];
+    return rows.map(({ control_seq, requested_ms }) => ({
+      kind: "missed_night", id: `missed@${control_seq}`, at: iso(requested_ms),
+      scheduled_at: iso(requested_ms), failed_at: iso(requested_ms + this.sleepReportTimeoutMs),
+    }));
   }
 }
 

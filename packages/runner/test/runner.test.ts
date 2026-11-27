@@ -417,7 +417,7 @@ test("the main turn end reports the model's last context usage and window", asyn
 
 test("an event that comes during a turn steers it; the turn acks both", async () => {
   const { fake, start, calls } = await world();
-  fake.status = { sleepiness: 25, awake_seconds: 21_600 };
+  fake.status = { sleep: { state: "awake" }, sleepiness: 25, awake_seconds: 21_600 };
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
   await start(async (call) => {
@@ -439,7 +439,7 @@ test("an event that comes during a turn steers it; the turn acks both", async ()
 
   assert.ok(calls.some((c) => c.userTexts.length === 2 && c.userTexts[1]!.includes("and this")));
   const [initial, steer] = calls.at(-1)!.userTexts;
-  assert.match(initial!, /<runner_notes>\n\{"status":\{"sleepiness":25,"awake_seconds":21600\}\}\n<\/runner_notes>/);
+  assert.match(initial!, /<runner_notes>\n\{"status":\{"sleep":\{"state":"awake"\},"sleepiness":25,"awake_seconds":21600\}\}\n<\/runner_notes>/);
   assert.doesNotMatch(steer!, /runner_notes/);
   // Guards against: the activity record missing what joined the turn as its trigger.
   assert.deepEqual((fake.sent("POST", "/v1/turns/end") as TurnEndRequest[]).map((end) => end.seqs), [[1, 2]]);

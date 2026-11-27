@@ -21,14 +21,15 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 同じ UID で動くエージェントを、backend と UI が見分けるための欄である。確かめはしない（sandbox の中の名乗り）。
 
 - サブエージェントは出来事を取らない。本体からサブエージェントへの頼みは runner の中で直接渡り、backend はサブエージェントの列を持たない（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。`agent` が `main` でない `GET /v1/events` は `400` で断る。
-- サブエージェントには返事・A2A の返事・予約・裏の仕事の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
+- サブエージェントには返事・A2A の返事・眠り・予約・裏の仕事の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・`POST /v1/sleep`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
 
 ## 口の一覧
 
 | 口 | 中身 |
 | --- | --- |
 | `GET /v1/events?agent=&after=&wait=` | 出来事を取る（long-poll） |
-| `GET /v1/status?agent=main` | 現在の眠気とその元の事実を読む |
+| `GET /v1/status?agent=main` | 眠りの状態と眠気を読む |
+| `POST /v1/sleep` | 本体のターンの後に眠りを始める |
 | `PUT /v1/model-settings` | runner のモデル候補を知らせ、オーナーの設定を読む |
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
@@ -46,13 +47,13 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 
 - `after` より後の `seq` で、まだ済んでいない出来事を、`seq` の順に返す。無ければ `wait` 秒まで待ち、それでも無ければ空の一覧を返す。
 - 返したものは「渡した」になる。渡したまま一定時間 ack の無いものは、次の poll でもう一度渡す。
-- 返すのは、渡す時が来たものだけである。`batch` の待ちと起きている時間は backend が数える（[events.md](events.md) の「いつ渡すか」）。runner は受け取った分をターンに入れるだけである。ターンに入る形（`<events>` の 1 行 1 件の JSON）は [events.md](events.md) の「ターンに入る形」にある。
+- 返すのは、渡す時が来たものだけである。`batch` の待ちと眠りは backend が管理する（[events.md](events.md) の「いつ渡すか」）。runner は受け取った分をターンに入れるだけである。ターンに入る形（`<events>` の 1 行 1 件の JSON）は [events.md](events.md) の「ターンに入る形」にある。
 - ack の無いままもう一度渡す出来事は、`seq` が `after` 以下でも返す。runner は再起動の後、`after` を省いて（0 として）取り直す。
 - まだ一度も渡していない出来事も、`seq` が `after` 以下でも返す。`batch` の出来事は、後に来た `now` の出来事より後に渡ることがあり、そのとき `seq` は runner が受け取った最大の `seq` より小さい。
 - 一定時間は backend の設定で、既定は 5 分（[backend.md](backend.md) の `PENELOPE_REDELIVER_MINUTES`）。ターンがそれより長く続くと、そのターンに入れたまま ack していない出来事も、もう一度渡る。
 - `wait` の上限は 60 秒で、それより長い値は 60 秒として扱う。一度に返すのは 100 件まで。
 - 応答は `{events: [...]}`。1 件ごとに `seq`・`source`・`id`・`stream`・`occurred_at`・`received_at`・`summary`・`delivery`・足された場所（`appended`: `path` と `lines` の 1 始まり・両端を含む範囲）・添付（`attachments`）を持つ。inline の出来事だけが `inline: true` と `payload` を持つ。封筒に `answer_via` があれば、inline かどうかにかかわらず同じ値を返す。無ければ省く。
-- `heartbeat` は常に `inline: false` で、`payload` の代わりに `status` と、残っている仕事があれば `pending` を渡す。どちらも列に入れた時点の値で、以前の版で入れられた出来事には `status` が無いことがある。runner はこれらを heartbeat の行に直接載せる。backend が採る `pending` の欄は `a2a_tasks` と `failures`。`jobs` と `subagents` は runner 側の欄で、この応答には含まれない（[events.md](events.md) の「heartbeat の `pending`」）。
+- `heartbeat` と `wake` は常に `inline: false` で、`payload` の代わりに `status` と、残っている仕事があれば `pending` を渡す。どちらも列に入れた時点の値で、以前の版で入れられた出来事には `status` が無いことがある。runner はこれらを該当する出来事の行に直接載せる。backend が採る `pending` の欄は `a2a_tasks` と `failures`。`jobs` と `subagents` は runner 側の欄で、この応答には含まれない（[events.md](events.md) の「heartbeat と起きたときの `pending`」）。
 - `occurred_at` は全受信元について、同じ瞬間を backend の `PENELOPE_TIME_ZONE`（[backend.md](backend.md) の「設定」）で表した RFC 3339 で返す。UTC オフセット（UTC なら `+00:00`）は発生時点のものを使う。たとえば `Asia/Tokyo` では `2026-11-18T23:00:00Z` は `2026-11-19T08:00:00+09:00` になる。変換できない保存済みの値はそのまま返す。SQLite と `/sources` に保存した値や `received_at` は変えない。
 - `attachments` の 1 件は、`/sources` に置いた場所（`path`）、MIME（`mime_type`）、大きさ（`size`、byte）を持つ。添付が無ければ欄ごと省く。`/sources` の行の `attachments` は、場所だけの一覧のままである（[events.md](events.md)）。
 - `mime_type` は、PNG・JPEG・GIF・WebP なら中身の先頭の bytes から決める。ほかは送り手が付けた Content-Type で、それも無いか形が違えば `application/octet-stream`。送り手が画像の型を付けても、中身がその画像でなければ `application/octet-stream` にする。画像だと言われたものが画像であるようにするためである。
@@ -309,6 +310,14 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 - `PURPOSE.md` は、配置ごとに何を知っているべきか、どの問いに答えられるべきかを書いた任意のファイルである。オーナーの同意を得て書く。知識は既存のトピックに書き、専用の階層は設けない。日中と夜の係に共通する記憶の説明では、変わりうる事実に時点と確認の根拠を添えることを伝える（[ADR-0049](adr/0049-grow-memory-around-an-instance-purpose.md)）。トピックは今わかっていることを残す場所で、何をいつ確かめたかの日ごとの記録は `diary/` に置く（[ADR-0059](adr/0059-keep-topics-current-and-review-large-topics-first.md)）。
 
+## 眠りを求める
+
+`POST /v1/sleep` の body は `{agent: "main", wake_at}`（`SleepRequest`）。`wake_at` は未来の RFC 3339 の時刻。形が違う場合、過去または現在の時刻、サブエージェントの名乗りは `400`。切り替えが済んでまだ寝ていれば `409`。
+
+成功は `200` と `{wake_at, clamped}`（`SleepResponse`）。`wake_at` は受け付けた UTC の時刻。最初に眠りを求めた時刻からの最長時間に合わせて早めた場合、`clamped` は `true`。寝つく間にもう一度求めると、起きる時刻だけを置き直し、切り替えは増やさない。
+
+runner は本体にだけ `sleep` ツールを渡す。ツールは受け付けた時刻を返す。切り替えは今のターンを終えてから始まる。眠りの間の配送は [出来事を渡す条件](events.md#いつ渡すか) に従う。
+
 ## セッションの切り替えの知らせ
 
 - 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?, memory_reads?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
@@ -360,8 +369,9 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 | 欄 | 中身 |
 | --- | --- |
+| `sleep` | 起きていれば `{state: "awake"}`。寝つく間は `{state: "falling_asleep", wake_at}`、寝ていれば `{state: "asleep", wake_at}`。 `wake_at` は RFC 3339 の予定時刻 |
 | `sleepiness` | backend が計算した眠気。0〜100 の整数 |
-| `awake_seconds` | 本体のセッションの始まりからの秒数 |
+| `awake_seconds` | 実際に起きた時刻からの秒数。眠りの間は増えない |
 | `context` | 直近の本体の通常のターンのコンテキストを表す `{tokens, context_window}`。報告がなければ欄ごと省く |
 
 計算と起点の決め方は [backend.md の「眠気」](backend.md#眠気)。

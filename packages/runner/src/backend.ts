@@ -21,6 +21,8 @@ import type {
   ScheduleWhen,
   SelfEventRequest,
   SessionRotatedRequest,
+  SleepRequest,
+  SleepResponse,
   SubAgentStatus,
   TurnEndRequest,
 } from "@penelope/contract";
@@ -113,6 +115,10 @@ export class Backend {
 
   async reply(reply: Without<ReplyRequest>): Promise<ReplyResponse> {
     return (await this.post("/v1/replies", reply)) as ReplyResponse;
+  }
+
+  async sleep(request: Without<SleepRequest>): Promise<SleepResponse> {
+    return (await this.post("/v1/sleep", request)) as SleepResponse;
   }
 
   async a2aReply(reply: Without<A2AReplyRequest>): Promise<A2AReplyResponse> {

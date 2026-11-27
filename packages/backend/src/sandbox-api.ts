@@ -20,6 +20,7 @@ import type { ModelSettings } from "./model-settings.ts";
 import type { Queue } from "./queue.ts";
 import type { ActivityRecord, TurnEnd } from "./record.ts";
 import { ScheduleError, type Schedules } from "./schedules.ts";
+import { type Sleep, SleepRefusal } from "./sleep.ts";
 import type { Sleepiness } from "./sleepiness.ts";
 import { iso } from "./time.ts";
 
@@ -46,6 +47,7 @@ export type SandboxOptions = {
   record: ActivityRecord;
   modelSettings: ModelSettings;
   sleepiness: Sleepiness;
+  sleep: Sleep;
   now: () => number;
   maxBytes?: number;
   /** The limit of a reply's body, which carries its images. */
@@ -54,7 +56,7 @@ export type SandboxOptions = {
 };
 
 export function sandboxHandler(options: SandboxOptions): Handler {
-  const { queue, conversation, agents, schedules, memory, memoryView, inbox, record, now } = options;
+  const { queue, conversation, agents, schedules, memory, memoryView, inbox, record, sleep, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
   const maxReplyBytes = options.maxReplyBytes ?? DEFAULT_REPLY_BYTES;
@@ -80,7 +82,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       mainOnly(agentOf(url.searchParams.get("agent")), "takes events");
       const after = integer(url.searchParams.get("after") ?? "0", "after");
       const wait = Math.min(integer(url.searchParams.get("wait") ?? "0", "wait"), MAX_WAIT_SECONDS);
-      const events = await poll(queue, after, wait * 1000, response, now);
+      const events = await poll(queue, sleep, after, wait * 1000, response, now);
       sendJson(response, 200, { events });
       return;
     }
@@ -88,8 +90,21 @@ export function sandboxHandler(options: SandboxOptions): Handler {
     switch (route) {
       case "GET /v1/status":
         mainOnly(agentOf(url.searchParams.get("agent")), "reads the main session's status");
+        sleep.tick();
         sendJson(response, 200, options.sleepiness.status(), { "cache-control": "no-store" });
         return;
+      case "POST /v1/sleep": {
+        const { agent, wake_at } = withAgent(await body());
+        mainOnly(agent, "sleeps");
+        if (!isTime(wake_at)) throw new HttpError(400, "wake_at must be an RFC 3339 time");
+        try {
+          sendJson(response, 200, sleep.request(Date.parse(wake_at)));
+        } catch (error) {
+          if (error instanceof SleepRefusal) throw new HttpError(error.status, error.message);
+          throw error;
+        }
+        return;
+      }
       case "GET /v1/model-settings": {
         mainOnly(agentOf(url.searchParams.get("agent")), "reads the saved model selection");
         sendJson(response, 200, { selection: options.modelSettings.selection() });
@@ -209,7 +224,10 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         const end = turnEnd(request);
         const { agent, context } = request;
         const turn_id = end.turn_id;
-        if (agent === "main" && end.night === undefined) options.sleepiness.turnEnded(contextUsage(context));
+        if (agent === "main" && end.night === undefined) {
+          options.sleepiness.turnEnded(contextUsage(context));
+          sleep.tick();
+        }
         keep(() => record.turnEnded(agent, end));
         conversation.turnEnded(agent, turn_id);
         try {
@@ -302,7 +320,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         if (memory_reads !== undefined && stages === undefined) throw new HttpError(400, "memory_reads comes with the night's stages");
         const steps = stages === undefined ? undefined : nightStages(stages);
         const reads = memory_reads === undefined ? undefined : readSnapshot(memory_reads);
-        if (steps === undefined || steps.session.result === "done") options.sleepiness.rotated(seq);
+        if (seq !== undefined && (steps === undefined || steps.session.result === "done")) sleep.completed(seq);
         const head = steps === undefined ? undefined : await memoryView.head().catch(() => {
           log("memory: final night version could not be read");
           return undefined;
@@ -342,18 +360,20 @@ export function sandboxHandler(options: SandboxOptions): Handler {
  */
 async function poll(
   queue: Queue,
+  lifecycle: Sleep,
   after: number,
   waitMs: number,
   response: http.ServerResponse,
   now: () => number,
 ): Promise<DeliveredEvent[]> {
-  const deadline = now() + waitMs;
+  const deadline = performance.now() + waitMs;
   let gone = false;
   response.once("close", () => (gone = true));
   for (;;) {
     if (gone) return [];
+    lifecycle.tick();
     const events = queue.take({ after });
-    const left = deadline - now();
+    const left = deadline - performance.now();
     if (events.length > 0 || left <= 0) return events;
     const wake = queue.nextWakeAt();
     // At least a little sleep, so that a wake time already past cannot spin.

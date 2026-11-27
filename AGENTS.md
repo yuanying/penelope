@@ -17,7 +17,8 @@ ADRs are written in Japanese. Read the related ADRs before changing a design, an
 
 - State facts and the environment; leave the how to the agent. Do not pile up instructions and prohibitions.
 - The system prompt carries only: who she is (name, role, owner), where she is (the sandbox, egress through the
-  Sentinel, the internal CA), how events arrive and how to answer, and the shape of `/memory`.
+  Sentinel, the internal CA), how events arrive and how to answer, the shape of `/memory`, and how her own state
+  (sleep, sleepiness, and mood) works.
 - Writing rules, procedures and per-event handling do not go in the prompt. What is needed goes in the owner's
   `always.md` or a skill.
 - A line that must hold is enforced by the system (the Sentinel, the read-only `.git` of `/memory`), not by a sentence.

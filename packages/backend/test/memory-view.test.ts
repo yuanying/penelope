@@ -8,7 +8,6 @@ import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
 import { Memory } from "../src/memory.ts";
 import { ActivityRecord } from "../src/record.ts";
-import { cronOf } from "../src/schedules.ts";
 import { MemoryView } from "../src/memory-view.ts";
 import { tempDir } from "./support.ts";
 
@@ -20,7 +19,7 @@ function setup(t: Parameters<typeof tempDir>[0], options: { targetBytes?: number
   const now = () => Date.parse("2026-11-23T16:00:00Z");
   const timeZone = "Asia/Tokyo";
   return { dir, writer: new Memory(dir, author), view: new MemoryView(dir, db, { now, timeZone, ...options }),
-    record: new ActivityRecord(db, new Feed(), { now, timeZone, nightly: cronOf("0 4 * * *", timeZone) }) };
+    record: new ActivityRecord(db, new Feed(), { now, timeZone, sleepReportTimeoutMs: 60 * 60_000 }) };
 }
 
 it("keeps packed memory readable by the shared group and usable as a save base", async (t) => {

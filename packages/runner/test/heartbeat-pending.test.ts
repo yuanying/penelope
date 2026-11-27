@@ -4,6 +4,7 @@ import { test } from "node:test";
 import type { HeartbeatPending } from "@penelope/contract";
 
 import { withHeartbeatPending } from "../src/heartbeat-pending.ts";
+import { formatEvents } from "../src/turn-input.ts";
 import { heartbeat } from "./world.ts";
 
 const at = (minute: number) => `2026-11-14T09:0${minute}:00.000Z`;
@@ -17,6 +18,17 @@ test("the heartbeat shows the oldest jobs and counts those that do not fit", () 
     items: [1, 2, 3, 4, 5].map((minute) => ({ job: `job-${minute}`, started_at: at(minute), command: "echo test" })),
     omitted: 2,
   });
+});
+
+test("the wake notice in the turn shows background jobs that are still running", () => {
+  const input = formatEvents(withHeartbeatPending(
+    [{ ...heartbeat(1), source: "wake" }],
+    { list: () => [{ id: "job-1", started_at: at(1), command: "make test", cwd: "/work", timeout_seconds: 60, output: "/work/out" }] },
+    { heartbeatState: () => [] },
+    assert.fail,
+  ));
+  const line = JSON.parse(input.split("\n")[1]!);
+  assert.deepEqual(line.pending.jobs.items, [{ job: "job-1", started_at: at(1), command: "make test" }]);
 });
 
 test("when one runner category cannot be collected, the others still reach the heartbeat", () => {

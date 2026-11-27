@@ -540,9 +540,13 @@ export class Runner {
     // A nightly event that comes again after its switch was made only needs telling.
     const made = this.state?.nightly === event.seq;
     const report = made ? undefined : await this.nightly(event.seq, payload.review_date);
-    await this.backend
-      .rotated({ seq: event.seq, ...report })
-      .catch((error: unknown) => this.log(`rotation not sent: ${failure(error)}`));
+    try {
+      await this.backend.rotated({ seq: event.seq, ...report });
+    } catch (error) {
+      this.log(`rotation not sent: ${failure(error)}`);
+      this.taken.delete(event.seq);
+      return;
+    }
     // Without a new session the event is not acked: it comes again, and the night is run again.
     if (report && report.stages.session.result !== "done") {
       this.taken.delete(event.seq);

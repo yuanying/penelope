@@ -1,4 +1,5 @@
 import type { Delivery } from "./events.ts";
+import type { SleepStatus } from "./status.ts";
 
 export type HouseActor = { id: string; name: string; kind: "agent" | "person" };
 export type HouseRoom = { id: string; name: string; description: string; capacity: number | null };
@@ -6,7 +7,7 @@ export type HouseRoom = { id: string; name: string; description: string; capacit
 export type HouseAgentStatus = {
   mood: string | null;
   sleepiness: number;
-  sleep: { state: "awake" } | { state: "falling_asleep" | "asleep"; wake_at: string };
+  sleep: SleepStatus;
 };
 
 export type HouseResident = HouseActor & {

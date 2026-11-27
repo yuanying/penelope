@@ -24,10 +24,9 @@ import { ApnsRegistrations } from "../src/push/apns-registrations.ts";
 import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
-import { cronOf, Schedules } from "../src/schedules.ts";
+import { Schedules } from "../src/schedules.ts";
 import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { uiHandler } from "../src/ui-api.ts";
 import { ask, type Ask, FakeClock, multipart, SseReader, tempDir } from "./support.ts";
 
@@ -93,7 +92,7 @@ async function setup(
     inline: new Set(["ui", "control"]),
     builtinDelivery: { ui: "now" },
     batch: { quietMs: 300_000, maxMs: 1_800_000 },
-    awake: new AwakeHours("00:00-00:00", "UTC"),
+    timeZone: "UTC",
     redeliverMs: 300_000,
   });
   const feed = new Feed();
@@ -101,7 +100,7 @@ async function setup(
   const conversation = new Conversation(db, feed, { now, assets });
   const agents = new SubAgents(db, feed, conversation, { now });
   const schedules = new Schedules(db, { now, timeZone: "Asia/Tokyo" });
-  const record = new ActivityRecord(db, feed, { now, timeZone: "UTC", nightly: cronOf("0 4 * * *", "UTC") });
+  const record = new ActivityRecord(db, feed, { now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
   const modelSettings = new ModelSettings(db, now);
@@ -331,7 +330,7 @@ it("serves current sleepiness and its facts to the owner", async (t) => {
   clock.advance(12 * 60);
   const answer = await call("/api/status", signIn());
   assert.equal(answer.status, 200);
-  assert.deepEqual(answer.json(), { sleepiness: 50, awake_seconds: 43_200 });
+  assert.deepEqual(answer.json(), { sleep: { state: "awake" }, sleepiness: 50, awake_seconds: 43_200 });
 });
 
 const modelChoice = { model: "example/org/chat", thinking: "low" } as const;

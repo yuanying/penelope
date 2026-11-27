@@ -553,7 +553,7 @@ function recordDay(w: World, query: URLSearchParams): RecordDayResponse {
     day,
     rows: whole.filter(kept).sort(newestFirst),
     turns: whole.filter((row) => row.kind === "turn").length,
-    failures: whole.filter((row) => row.failed_at !== undefined && row.kind !== "missed_night").length,
+    failures: whole.filter((row) => row.failed_at !== undefined).length,
     ...(older.length === 0 ? {} : { before: older.at(-1)! }),
     agents: [...names].sort(),
   };

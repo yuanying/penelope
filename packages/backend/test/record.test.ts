@@ -9,13 +9,12 @@ import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
-import { cronOf } from "../src/schedules.ts";
+import { Sleep } from "../src/sleep.ts";
+import { Sleepiness } from "../src/sleepiness.ts";
 import { Sources } from "../src/sources.ts";
-import { AwakeHours } from "../src/time.ts";
 import { FakeClock, tempDir } from "./support.ts";
 
-/** The record begins at 09:00 on the 14th; the nights are at 04:00 UTC. */
-function setup(t: { after: (fn: () => void) => void }, nightly = "0 4 * * *") {
+function setup(t: { after: (fn: () => void) => void }) {
   const dir = tempDir(t);
   const clock = new FakeClock("2026-11-14T09:00:00Z");
   const db = openDatabase(path.join(dir, "backend.sqlite"));
@@ -25,14 +24,14 @@ function setup(t: { after: (fn: () => void) => void }, nightly = "0 4 * * *") {
     inline: new Set(["ui", "control"]),
     builtinDelivery: {},
     batch: { quietMs: 300_000, maxMs: 1_800_000 },
-    awake: new AwakeHours("00:00-00:00", "UTC"),
+    timeZone: "UTC",
     redeliverMs: 300_000,
   });
   const feed = new Feed();
   const streamed: StreamEvent[] = [];
   feed.subscribe(undefined, (_id, event) => streamed.push(event));
   const conversation = new Conversation(db, feed, { now: clock.now });
-  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", nightly: cronOf(nightly, "UTC"), owner: 1, log: () => {} });
+  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000, owner: 1, log: () => {} });
   const event = (source: string, id: string, summary: string) =>
     queue.accept({ source, id, occurred_at: new Date(clock.now()).toISOString(), summary, payload: { text: summary } }, { builtin: true }).seq;
   /** A turn from start to end, its blocks kept as the sandbox's API keeps them. */
@@ -225,42 +224,23 @@ describe("the activity record", () => {
     });
   });
 
-  describe("missed nights", () => {
-    it("shows a night due while the backend was down, a minute after it was due", (t) => {
-      const { record, clock } = setup(t);
-      clock.set("2026-11-15T04:00:30Z");
-      assert.deepEqual(record.day({ day: "2026-11-15" }).rows, []);
-      clock.set("2026-11-15T04:01:00Z");
-      assert.deepEqual(record.day({ day: "2026-11-15" }).rows, [
-        { kind: "missed_night", id: "missed@2026-11-15T04:00:00.000Z", at: "2026-11-15T04:00:00.000Z", scheduled_at: "2026-11-15T04:00:00.000Z", failed_at: "2026-11-15T04:01:00.000Z" },
-      ]);
+  it("counts an unreported sleep as a failure only after the report deadline", (t) => {
+    const { db, record, clock, queue } = setup(t);
+    const sleep = new Sleep(db, queue, new Sleepiness(db, clock.now), {
+      now: clock.now, timeZone: "UTC", limits: { threshold: 90, defaultMs: 60_000, maxMs: 60_000 },
+      notes: () => ({}), log: () => {},
     });
+    sleep.request(clock.now() + 60_000);
+    const [control] = queue.take({ after: 0 });
+    clock.advance(59);
+    assert.equal(record.unseen(), 0);
+    clock.advance(1);
+    assert.equal(record.unseen(), 1);
+    const { rows, failures } = record.day({ day: "2026-11-14", failed: true });
+    assert.deepEqual([rows[0]?.kind, rows[0]?.failed_at, failures], ["missed_night", "2026-11-14T10:00:00.000Z", 1]);
 
-    it("shows a night whose event was queued as missed only when no report came before the next night", (t) => {
-      const { record, clock, night } = setup(t);
-      clock.set("2026-11-15T04:00:00Z");
-      night("2026-11-15T04:00:00.000Z");
-      clock.set("2026-11-16T03:59:59Z");
-      assert.deepEqual(record.day({ day: "2026-11-15" }).rows, []);
-      clock.set("2026-11-16T04:00:00Z");
-      assert.deepEqual(record.day({ day: "2026-11-15" }).rows.map((row) => row.kind), ["missed_night"]);
-    });
-
-    it("takes an older runner's report as the night it came after", (t) => {
-      const { record, clock, night } = setup(t);
-      clock.set("2026-11-15T04:00:00Z");
-      night("2026-11-15T04:00:00.000Z");
-      clock.set("2026-11-15T04:05:00Z");
-      record.nightReported({});
-      clock.set("2026-11-16T05:00:00Z");
-      assert.deepEqual(record.day({ day: "2026-11-15" }).rows.map((row) => row.kind), ["night"]);
-    });
-
-    it("does not show the nights before the record began", (t) => {
-      const { record, clock } = setup(t);
-      clock.set("2026-11-14T12:00:00Z");
-      assert.deepEqual(record.day({ day: "2026-11-14" }).rows, [], "the 04:00 of the 14th came before the record");
-    });
+    record.nightReported({ seq: control!.seq, stages: { reflection: done, verifier: done, curator: done, session: done } });
+    assert.equal(record.unseen(), 0);
   });
 
   describe("background jobs", () => {
@@ -351,15 +331,14 @@ describe("the activity record", () => {
   });
 
   describe("the unseen failures", () => {
-    it("counts the failures after the owner last opened the record, missed nights too, and none once she opens it", (t) => {
+    it("counts only failures the owner has not seen", (t) => {
       const { record, turn, clock } = setup(t);
       clock.set("2026-11-14T10:00:02Z");
       turn("main", "t-1", "2026-11-14T10:00:00.000Z", "2026-11-14T10:00:01.000Z");
       record.turnEnded("main", { turn_id: "t-1", result: "failed" });
       clock.set("2026-11-15T05:00:00Z");
-      assert.equal(record.unseen(), 2, "the failed turn and the missed night of the 15th");
-      assert.equal(record.day({ day: "2026-11-15" }).failures, 0, "a missed night is not a failure of its day");
-      assert.deepEqual(record.seen(), { unseen: 2, previous_seen_at: "2026-11-14T09:00:00.000Z" }, "the first time, when the record began");
+      assert.equal(record.unseen(), 1);
+      assert.deepEqual(record.seen(), { unseen: 1, previous_seen_at: "2026-11-14T09:00:00.000Z" }, "the first time, when the record began");
       assert.equal(record.unseen(), 0);
       clock.set("2026-11-15T06:00:00Z");
       assert.deepEqual(record.seen(), { unseen: 0, previous_seen_at: "2026-11-15T05:00:00.000Z" });

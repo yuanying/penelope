@@ -952,15 +952,15 @@ describe("the Pod end to end", () => {
     }
   }));
 
-  // Last, as from here on a night comes every 20 seconds.
-  it("switches the session at night: reflection, verifier, curator, a new session, and handoff.md committed", track(async () => {
-    // Guards against: the nightly switch not running through, or the new session not starting from handoff.md.
-    // The backend is made again with a night every 20 seconds, so that the test waits for the next one
-    // whatever time it is and however long the start took.
-    composeEnv.PENELOPE_E2E_NIGHTLY_CRON = "*/20 * * * * *";
+  it("runs the four stages after sleep and handles a queued message with the wake notice", track(async () => {
     stream.close();
     compose(["up", "--detach", "--no-deps", "backend"]);
     await eventually("the backend's health", async () => ((await browser.request("/healthz")).status === 200 ? true : undefined));
+    stream = new Stream();
+    await stream.open(browser.cookie!);
+    await send("E2E-SLEEP");
+    await replied("E2E-SLEEPING");
+    await send("E2E-TURN-4");
 
     await eventually(
       "the curator's turn",
@@ -987,26 +987,11 @@ describe("the Pod end to end", () => {
     const { reflection, verifier, curator, session } = night.stages;
     assert.deepEqual([reflection.result, verifier.result, curator.result, session.result], ["done", "done", "done", "done"]);
 
-    stream = new Stream();
-    await stream.open(browser.cookie!);
-    await send("E2E-TURN-4");
     await replied("E2E-REPLY-4");
     const [first] = await callsFor("E2E-TURN-4", 0);
     const sent = where(first!);
+    assert.ok(eventLines(sent.input).some((event) => event.source === "wake"), "the queued message reaches the wake turn");
     assert.ok(sent.system.includes("E2E-HANDOFF: the next session starts from here."), "handoff.md is in the new system prompt");
     assert.ok(!JSON.stringify(first!.messages).includes("E2E-TURN-1"), "the day's session is left behind");
-
-    // The next night switches again, and turns go on after it.
-    await eventually(
-      "a second switch",
-      () => {
-        const text = exec("sandbox", "cat /home/agent/.pi/agent/sessions/main/current.json", { check: false }).stdout;
-        const next = JSON.parse(text) as { nightly?: number };
-        return next.nightly !== undefined && next.nightly > state.nightly ? true : undefined;
-      },
-      150_000,
-    );
-    await send("E2E-TURN-5");
-    await replied("E2E-REPLY-5");
   }));
 });
