@@ -20,6 +20,7 @@ import { LoginSessions } from "../src/login/sessions.ts";
 import { MemoryView } from "../src/memory-view.ts";
 import { Memory } from "../src/memory.ts";
 import { ModelSettings } from "../src/model-settings.ts";
+import { ApnsRegistrations } from "../src/push/apns-registrations.ts";
 import { PushSubscriptions } from "../src/push/notifier.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
@@ -108,6 +109,7 @@ async function setup(
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
   const subscriptions = new PushSubscriptions(db, { now });
+  const apnsRegistrations = new ApnsRegistrations(db, { now, ownerId: settings?.ownerId });
   const memoryDir = path.join(dir, "memory");
   const memory = new Memory(memoryDir, { name: "Backend", email: "backend@example.com" });
   const push = pushKey === undefined ? undefined : { publicKey: pushKey, subscriptions };
@@ -125,6 +127,7 @@ async function setup(
       login,
       sessions,
       appTokens: new AppTokens(db, { now }),
+      apnsRegistrations,
       modelSettings,
       ownerId: settings?.ownerId,
       publicUrl,
@@ -147,7 +150,7 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, memoryDir, memory };
+  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, apnsRegistrations, memoryDir, memory };
 }
 
 it("requires an owner session even on the committed memory image endpoint", async (t) => {
@@ -389,6 +392,37 @@ async function appCode(env: Awaited<ReturnType<typeof setup>>): Promise<string> 
   assert.ok(code);
   return code;
 }
+
+describe("the iPhone push registration", () => {
+  const pathname = "/api/app/push";
+
+  it("does not let a Web session manage a device's APNs registration", async (t) => {
+    const env = await setup(t, { publicUrl: "https://penelope.example.com" });
+    const cookie = env.signIn();
+    assert.equal((await env.call(pathname, cookie, { method: "PUT", json: {} })).status, 403);
+    assert.equal((await env.call(pathname, cookie, { method: "DELETE" })).status, 403);
+  });
+
+  it("lets the iPhone turn off APNs without signing out, even before APNs is configured", async (t) => {
+    const env = await setup(t, { publicUrl: "https://penelope.example.com" });
+    const { token } = (await appExchange(env, await appCode(env))).json();
+    const headers = bearer(token);
+    const key = createECDH("prime256v1").generateKeys().toString("base64");
+    const registration = { token: "ab".repeat(32), environment: "sandbox", public_key: key };
+    assert.equal((await env.call(pathname, undefined, { method: "PUT", headers, json: registration })).status, 204);
+    assert.deepEqual(env.apnsRegistrations.all().map((entry) => entry.token), [registration.token]);
+    assert.equal((await env.call(pathname, undefined, { method: "DELETE", headers })).status, 204);
+    assert.deepEqual(env.apnsRegistrations.all(), []);
+    assert.equal((await env.call("/api/history", undefined, { headers })).status, 200);
+  });
+
+  it("rejects a device public key that is not a point on P-256", async (t) => {
+    const env = await setup(t, { publicUrl: "https://penelope.example.com" });
+    const { token } = (await appExchange(env, await appCode(env))).json();
+    const json = { token: "ab".repeat(32), environment: "sandbox", public_key: Buffer.alloc(65, 4).toString("base64") };
+    assert.equal((await env.call(pathname, undefined, { method: "PUT", headers: bearer(token), json })).status, 400);
+  });
+});
 
 describe("the iPhone login", () => {
   const https = { publicUrl: "https://penelope.example.com" };

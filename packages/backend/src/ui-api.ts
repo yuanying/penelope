@@ -24,6 +24,7 @@ import { MEMORY_PATH, memoryRoute } from "./memory-api.ts";
 import type { MemoryView } from "./memory-view.ts";
 import type { Memory } from "./memory.ts";
 import type { ModelSettings } from "./model-settings.ts";
+import { apnsRegistrationOf, type ApnsRegistrations } from "./push/apns-registrations.ts";
 import type { PushSubscriptions } from "./push/notifier.ts";
 import { webPushSubscriptionOf } from "./push/web-push.ts";
 import type { Queue } from "./queue.ts";
@@ -62,6 +63,7 @@ export type UiOptions = {
   login: GitHubLogin;
   sessions: LoginSessions;
   appTokens: AppTokens;
+  apnsRegistrations: ApnsRegistrations;
   modelSettings: ModelSettings;
   /** The owner's GitHub user ID. Without one, no one gets in. */
   ownerId: number | undefined;
@@ -212,6 +214,20 @@ export function uiHandler(options: UiOptions): Handler {
     if (route === "DELETE /api/app/devices/current") {
       if (deviceId === undefined) throw new HttpError(403, "requires an app token");
       appTokens.revoke(deviceId, ownerId);
+      sendEmpty(response, 204, { "cache-control": "no-store" });
+      return;
+    }
+    if (route === "PUT /api/app/push" || route === "DELETE /api/app/push") {
+      if (deviceId === undefined || appToken === undefined) throw new HttpError(403, "requires an app token");
+      if (route === "PUT /api/app/push") {
+        const registration = apnsRegistrationOf(await readJson(request, PUSH_BYTES));
+        if (registration === undefined) throw new HttpError(400, "invalid-apns-registration");
+        // The body can arrive after this device has expired or been revoked.
+        if (appTokens.authenticate(appToken, ownerId) !== deviceId) throw new HttpError(401, "not signed in");
+        options.apnsRegistrations.save(deviceId, registration);
+      } else {
+        options.apnsRegistrations.remove(deviceId);
+      }
       sendEmpty(response, 204, { "cache-control": "no-store" });
       return;
     }

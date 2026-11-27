@@ -6,7 +6,7 @@ import type { Notice } from "@penelope/contract";
 
 import { openDatabase } from "../src/db.ts";
 import { Feed } from "../src/feed.ts";
-import { NOTICE_TEXT_LENGTH, Notifier, noticeOf, PushSubscriptions } from "../src/push/notifier.ts";
+import { NOTICE_TEXT_LENGTH, noticeChannel, Notifier, noticeOf, PushSubscriptions } from "../src/push/notifier.ts";
 import { encryptWebPush, vapidAuthorization, vapidKeyOf, WebPushChannel, type WebPushRequest, webPushSubscriptionOf } from "../src/push/web-push.ts";
 import { FakeClock } from "./support.ts";
 
@@ -150,10 +150,8 @@ async function setup(t: { after: (fn: () => void) => void }, answer: (request: W
   const vapid = vapidKeyOf(vapidPem());
   const notifier = new Notifier({
     feed,
-    subscriptions,
     agentName: "Iris",
-    channels: {
-      "web-push": new WebPushChannel({
+    channels: [noticeChannel("web-push", subscriptions, new WebPushChannel({
         vapid,
         subject: "https://penelope.example.com",
         now: clock.now,
@@ -161,8 +159,7 @@ async function setup(t: { after: (fn: () => void) => void }, answer: (request: W
           sent.push(request);
           return answer(request);
         },
-      }),
-    },
+    }))],
     log: (line) => logs.push(line),
   });
   const stop = notifier.start();

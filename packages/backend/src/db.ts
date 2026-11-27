@@ -359,6 +359,16 @@ export const MIGRATIONS: readonly string[] = [
   INSERT INTO conversation_read VALUES (1, (SELECT coalesce(max(row), 0) FROM history));
   CREATE INDEX history_replies ON history (row) WHERE kind = 'agent';
   `,
+  `
+  CREATE TABLE apns_registrations (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    device_id   TEXT NOT NULL UNIQUE REFERENCES app_devices(id) ON DELETE CASCADE,
+    token       TEXT NOT NULL,
+    environment TEXT NOT NULL CHECK (environment IN ('sandbox', 'production')),
+    public_key  BLOB NOT NULL,
+    UNIQUE (environment, token)
+  );
+  `,
 ];
 
 /** Opens the file (or `:memory:`) and brings its schema up to date. */

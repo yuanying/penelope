@@ -4,6 +4,8 @@
 // posts to the push service itself, not through the Sentinel.
 import { createCipheriv, createECDH, createPrivateKey, createPublicKey, ECDH, hkdfSync, type KeyObject, randomBytes, sign } from "node:crypto";
 
+import type { Notice } from "@penelope/contract";
+
 import type { Channel, Delivery, StoredSubscription } from "./notifier.ts";
 
 /** One record of rs 4096 holds this much: 4096 less the header (86), the tag (16) and the delimiter (1). */
@@ -91,7 +93,7 @@ function base64url(value: unknown): Buffer | undefined {
 export type WebPushRequest = { endpoint: string; headers: Record<string, string>; body: Buffer };
 
 /** Sends a notice to one browser's push service, once. */
-export class WebPushChannel implements Channel {
+export class WebPushChannel implements Channel<StoredSubscription> {
   private readonly vapid: VapidKey;
   private readonly subject: string;
   private readonly now: () => number;
@@ -106,7 +108,8 @@ export class WebPushChannel implements Channel {
 
   maxBytes = WEB_PUSH_PLAINTEXT_MAX_BYTES;
 
-  async deliver(target: StoredSubscription, plaintext: Buffer): Promise<Delivery> {
+  async deliver(target: StoredSubscription, notice: Notice): Promise<Delivery> {
+    const plaintext = Buffer.from(JSON.stringify(notice));
     const status = await this.send({
       endpoint: target.endpoint,
       headers: {

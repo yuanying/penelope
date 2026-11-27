@@ -1,6 +1,7 @@
 // The backend's settings, from environment variables (docs/backend.md).
 // Secrets are read from files, named by the variables, so that their values
 // never sit in the environment.
+import { createPrivateKey } from "node:crypto";
 import path from "node:path";
 
 import type { Delivery } from "@penelope/contract";
@@ -11,6 +12,7 @@ import { CALLBACK_PATH, type GitHubSettings } from "./login/github.ts";
 import { audienceOf } from "./a2a/gated.ts";
 import { Senders } from "./a2a/senders.ts";
 import type { KubernetesSettings } from "./a2a/tokenreview.ts";
+import type { ApnsSettings } from "./push/apns.ts";
 import { vapidKeyOf } from "./push/web-push.ts";
 
 /** A setting that cannot be used. The backend does not start. */
@@ -47,6 +49,8 @@ export type Config = {
   a2a: A2ASettings | undefined;
   /** Web Push (ADR-0027): the VAPID private key in PEM and the subject it names; none without the key. */
   webPush: { vapidKey: string; subject: string } | undefined;
+  /** APNs (ADR-0065): provider credentials and the HTTPS URL to open from the alert. */
+  apns: (ApnsSettings & { url: string }) | undefined;
 };
 
 /** The A2A way in: who may send, how they are checked (one way or both), and the limits. */
@@ -81,7 +85,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 const MINUTE = 60_000;
 
-export function loadConfig(env: Env, readFile: (file: string) => string): Config {
+export function loadConfig(env: Env, readFile: (file: string) => string, log = console.error): Config {
   const get = (name: string) => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;
@@ -233,7 +237,29 @@ export function loadConfig(env: Env, readFile: (file: string) => string): Config
     webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
     a2a: a2aOf(get, readFile, publicUrl),
     webPush: webPushOf(secret("PENELOPE_WEB_PUSH_VAPID_KEY_FILE"), publicUrl),
+    apns: apnsOf(get, secret, publicUrl, log),
   };
+}
+
+/** Missing or unusable APNs settings leave the backend and Web Push running. */
+function apnsOf(get: (name: string) => string | undefined, secret: (name: string) => string | undefined, url: string | undefined, log: (line: string) => void): Config["apns"] {
+  const keyFile = "PENELOPE_APNS_KEY_FILE";
+  const keyId = get("PENELOPE_APNS_KEY_ID");
+  const teamId = get("PENELOPE_APNS_TEAM_ID");
+  if (keyId === undefined && teamId === undefined && get(keyFile) === undefined) return undefined;
+  const appleId = /^[A-Z0-9]{10}$/;
+  if (!keyId || !appleId.test(keyId) || !teamId || !appleId.test(teamId) || !url?.startsWith("https:") || get(keyFile) === undefined) {
+    log("backend: APNs disabled; check PENELOPE_APNS_KEY_ID, PENELOPE_APNS_TEAM_ID, PENELOPE_APNS_KEY_FILE and the HTTPS public URL");
+    return undefined;
+  }
+  try {
+    const key = createPrivateKey(secret(keyFile)!);
+    if (key.asymmetricKeyType === "ec" && key.asymmetricKeyDetails?.namedCurve === "prime256v1") return { key, keyId, teamId, url };
+  } catch {
+    // Neither the secret's path nor its content belongs in the log.
+  }
+  log("backend: APNs disabled; PENELOPE_APNS_KEY_FILE must be a readable P-256 private key");
+  return undefined;
 }
 
 /**

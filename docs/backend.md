@@ -58,6 +58,9 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_KUBERNETES_URL` | `https://<KUBERNETES_SERVICE_HOST>:<KUBERNETES_SERVICE_PORT>` | `tokenreview`: API server の URL |
 | `PENELOPE_KUBERNETES_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | `tokenreview`: backend 自身の ServiceAccount の token。尋ねるたびに読み直す |
 | `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` | なし | Web Push の VAPID の秘密鍵（P-256、PEM）。無ければ Web Push は無い（[ui-api.md](ui-api.md) の「知らせ」） |
+| `PENELOPE_APNS_KEY_ID` | なし | APNs の署名鍵の ID |
+| `PENELOPE_APNS_TEAM_ID` | なし | 署名鍵を持つ Apple Developer のチーム ID |
+| `PENELOPE_APNS_KEY_FILE` | なし | 配置の Secret から渡す APNs の `.p8` ファイル（P-256 の PEM 秘密鍵） |
 | `PENELOPE_KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | `tokenreview`: API server の証明書を確かめる CA |
 
 - GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
@@ -67,6 +70,9 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - `PENELOPE_A2A_SENDERS` が無ければ、ほかの `PENELOPE_A2A_*` は読まない。
 - Web Push は `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` があるときだけ動く（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。そのときは `PENELOPE_PUBLIC_URL` が要る（VAPID の token の `sub`。Apple の push service に届くには https にする）。鍵が読めない、PEM の秘密鍵でない、P-256 でないときは起動しない。backend は鍵を作らない。
 - VAPID の鍵は配置の Secret として長く保つ。鍵を替えると、それまでの購読には届かなくなる（Web UI は、次に開いたときに購読を作り直す）。作るには `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem`。
+- APNs は `PENELOPE_APNS_KEY_ID`・`PENELOPE_APNS_TEAM_ID`・`PENELOPE_APNS_KEY_FILE` と HTTPS の `PENELOPE_PUBLIC_URL` が揃ったときに有効になる（[ADR-0065](adr/0065-encrypted-reply-notifications-over-apns.md)）。設定の不足や読めない鍵は APNs だけを無効にし、起動や Web Push には影響しない。鍵の値は環境変数に置かない。
+- APNs には backend が Sentinel を通さず HTTP/2 で直接送り、登録時の environment で Apple の sandbox・production を選ぶ。topic は `io.github.yuanying.penelope.phone`。ES256 の認証 JWT は 50 分間使い回す。
+- APNs への送信は 1 回だけ。`410`、または `400` の `BadDeviceToken`・`DeviceTokenNotForTopic` では、その送信に使った登録を消す。送信後に登録し直されたものは消さない。ほかの失敗でも返事は履歴に残る。ログには登録の番号と結果だけを残し、会話の内容・端末の token・鍵は出さない。
 - `PENELOPE_AVATAR` が名前の形（小文字・数字・`.`・`_`・`-`）でなければ起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。そのとき待っている `batch` の出来事は、起きている時間の外でも、`now` の出来事と一緒に渡す（[events.md](events.md) の「いつ渡すか」）。
 
@@ -132,6 +138,9 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - GitHub の確認に使う state と、確認後にアプリへ返す短命の code はメモリにだけ置く。code は SHA-256 をキーに、GitHub の user ID・アプリの PKCE challenge・期限を持つ。再起動すると、引き換えていない code は使えなくなる。
 - SQLite の `app_devices`（schema 14）には端末の UUID、端末名、GitHub の user ID、発行時刻・期限、256 bit の乱数 token の SHA-256 だけを置く。平文の token は引き換えの応答で一度だけ返す。認証のたびに期限と今のオーナーを確かめる。失効時は行を削除し、期限切れは次の引き換え時に削除する。
 - schema 14 は表の追加だけで、既存の行は移さない。ただし古い backend は新しい版のファイルを開かないため、前の backend に戻すには migration 前の SQLite のバックアップが要る。
+
+- SQLite の `apns_registrations`（schema 16）は `app_devices` の端末ごとに APNs の token・environment・端末の公開鍵を 1 組持つ。端末が削除されると登録も削除する。期限切れと今のオーナー以外の端末には送らない。
+- schema 16 は表の追加だけで、既存の行は移さない。古い backend は schema 16 のファイルを開かない。旧版へ戻すには migration 前の SQLite のバックアップが要る。
 
 ## `/memory` のコミット
 

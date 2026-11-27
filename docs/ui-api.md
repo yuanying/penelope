@@ -56,6 +56,7 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 | `GET /api/settings`・`PUT /api/settings` | モデルと思考の深さの設定 |
 | `GET /api/app/devices`・`DELETE /api/app/devices/<id>` | iPhone の端末の一覧と失効（Web の cookie） |
 | `DELETE /api/app/devices/current` | 呼び出した iPhone の端末の失効（Bearer） |
+| `PUT /api/app/push`・`DELETE /api/app/push` | 呼び出した iPhone の APNs 登録・解除（Bearer） |
 | `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
 | `GET /api/memory` および `/api/memory/…` | コミット済みの記憶の閲覧（「記憶」） |
 | `POST /api/memory/save` | 既存の記憶ファイル 1 つの保存（「保存と復元」） |
@@ -150,7 +151,9 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 
 ## 知らせ
 
-エージェントの返事（`reply`）は、すべてオーナーの購読に知らせる（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。最初の種類は Web Push だけである。オーナー自身のメッセージ、途中経過、A2A の Task への返事は知らせない。
+エージェントの返事（`reply`）は、すべてオーナーの購読に知らせる（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。送り先は Web Push と iPhone アプリの APNs（[ADR-0065](adr/0065-encrypted-reply-notifications-over-apns.md)）。オーナー自身のメッセージ、途中経過、A2A の Task への返事、失敗や承認待ちは知らせない。
+
+### Web Push の購読
 
 - `GET /api/push` は `{web_push?}`（型は `PushResponse`）。`web_push` は、配置が VAPID の鍵を渡しているとき（[backend.md](backend.md) の `PENELOPE_WEB_PUSH_VAPID_KEY_FILE`）だけあり、`public_key`（VAPID の公開鍵。非圧縮の P-256 を base64url で）を持つ。無ければ、Web UI は通知を使えないと示す。
 - `POST /api/push/subscriptions` は購読を 1 つ登録する。body は `{kind: "web-push", endpoint, keys: {p256dh, auth}}`（型は `PushSubscriptionRequest`。ブラウザの `PushSubscription.toJSON()` に `kind` を足したもの）。応答は `204`。同じ `endpoint` をもう一度登録すると、鍵を置き換える。購読の数に上限は置かない。
@@ -182,7 +185,7 @@ Web UI と iPhone アプリが backend を呼ぶ API を決める。方針は [A
 - Web UI を開くたびに、ブラウザが購読を持っていれば登録し直す。購読の鍵が今の `public_key` と違えば、作り直してから登録する（鍵の替わった配置へは、前の購読では届かない）。
 - 押せないときは、その訳を出す: 配置に鍵が無い、ブラウザが Web Push を持たない、オーナーがブラウザで通知を断った。
 
-### iPhone で受けるには
+### ホーム画面に追加した Web アプリで受けるには
 
 iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push を受けられる。Safari のタブのままでは受けられない。
 
@@ -192,6 +195,18 @@ iOS・iPadOS 16.4 から、ホーム画面に置いた Web アプリが Web Push
 4. メニューを開いて「通知を受ける」を押し、通知を許す。
 
 止めるときは、メニューの「通知を止める」か、iPhone の「設定」の「通知」でそのアプリを止める。配置ごと（エージェントごと）に、この手順で購読する。
+
+### iPhone アプリの APNs 登録
+
+- `PUT /api/app/push` は `{token, environment, public_key}`（型は `ApnsRegistrationRequest`）。`token` は APNs の device token を 16 進で表した文字列（1〜256 バイト、小文字に正規化）、`environment` は `sandbox` または `production`（TestFlight は `production`）、`public_key` は P-256 の曲線上の非圧縮 X9.63 公開鍵（65 バイト、詰め物付きの標準 base64）。不正な登録には `400`（`invalid-apns-registration`）。
+- `PUT` は呼び出した端末の登録を置き換える。アプリの再インストールなどで別の端末資格から同じ environment・token を登録したときは新しい方を使う。`DELETE /api/app/push` はその端末の通知登録だけを消し、Bearer token は失効させない。どちらも成功時は `204`（解除は登録が無くても `204`）。
+- HTTPS の配置で、有効なアプリ用 Bearer token に限る。Web の cookie だけなら `403`、認証できなければ `401`。APNs の送信設定が無くても登録・解除はできる。アプリから配置を外すときは `DELETE /api/app/devices/current` で端末の資格ごと消す。
+
+### APNs の中身
+
+- `ApnsReplyPayload` は `{aps, messageId, kind: "reply", e}`。`messageId` は返事の履歴の `id`、`aps` は `mutable-content: 1`、`sound: "default"` と `alert: {title, body}` を持つ。題はエージェントの名前、本文は固定の「返事があります」。復号できなければこの汎用通知のまま表示する。
+- `e` は natsumi ADR 0029 と同じ `{v: 1, epk, nonce, ct}`。`epk` は送信ごとの一時 P-256 公開鍵（非圧縮 X9.63）。ECDH の共有秘密から HKDF-SHA256（salt は `epk ‖ 端末公開鍵` の生バイト、info は ASCII の `natsumi-push-v1`、出力は 32 バイト）で AES-256-GCM の鍵を導く。AAD は `messageId` の UTF-8、`nonce` は 12 バイトの乱数、`ct` は暗号文に 16 バイトの認証タグを連結したもの。`epk`・`nonce`・`ct` は詰め物付きの標準 base64。
+- 平文（型は `ApnsReplyPreview`）は `{text, expression?, images?, url}`。Web Push と同じ返事の冒頭・表情・画像数を使い、通知から会話を開くための配置の HTTPS URL も暗号化の内側に置く。natsumi の `position` やバッジは送らず、未読は backend の要約の流れで共有する。APNs 全体の上限（4096 バイト）に収まらないときは `text` をさらに短くし、それでも収まらなければ送らない。
 
 ## Web UI の配り方
 

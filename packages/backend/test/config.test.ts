@@ -20,6 +20,21 @@ const read = (file: string) => {
 };
 
 describe("the configuration", () => {
+  it("disables only APNs when it cannot read its signing key, without logging the path", () => {
+    const logs: string[] = [];
+    const config = loadConfig({
+      PENELOPE_PUBLIC_URL: "https://penelope.example.com",
+      PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/vapid.pem",
+      PENELOPE_APNS_KEY_ID: "KEYEXAMPLE",
+      PENELOPE_APNS_TEAM_ID: "TEAMEXAMPL",
+      PENELOPE_APNS_KEY_FILE: "/secrets/nonexistent.p8",
+    }, read, (line) => logs.push(line));
+    assert.equal(config.apns, undefined);
+    assert.ok(config.webPush);
+    assert.match(logs.join("\n"), /APNs disabled/);
+    assert.doesNotMatch(logs.join("\n"), /nonexistent\.p8/);
+  });
+
   it("has a default for everything but the secrets and the owner", () => {
     const config = loadConfig({}, read);
     assert.deepEqual(config, {
@@ -48,6 +63,7 @@ describe("the configuration", () => {
       webDir: "/app/web",
       a2a: undefined,
       webPush: undefined,
+      apns: undefined,
     });
   });
 

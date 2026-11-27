@@ -27,7 +27,9 @@ import { LoginSessions } from "./login/sessions.ts";
 import { MemoryView } from "./memory-view.ts";
 import { Memory } from "./memory.ts";
 import { ModelSettings } from "./model-settings.ts";
-import { Notifier, PushSubscriptions } from "./push/notifier.ts";
+import { ApnsChannel, ApnsClient } from "./push/apns.ts";
+import { ApnsRegistrations } from "./push/apns-registrations.ts";
+import { noticeChannel, Notifier, PushSubscriptions } from "./push/notifier.ts";
 import { vapidKeyOf, type WebPushRequest, WebPushChannel } from "./push/web-push.ts";
 import { Queue } from "./queue.ts";
 import { ActivityRecord } from "./record.ts";
@@ -90,16 +92,16 @@ export async function startBackend(
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
   const subscriptions = new PushSubscriptions(db, { now });
   const vapid = config.webPush === undefined ? undefined : vapidKeyOf(config.webPush.vapidKey);
-  const notifier =
-    config.webPush === undefined || vapid === undefined
-      ? undefined
-      : new Notifier({
-          feed,
-          subscriptions,
-          agentName: agent.name,
-          channels: { "web-push": new WebPushChannel({ vapid, subject: config.webPush.subject, now, ...(sendWebPush ? { send: sendWebPush } : {}) }) },
-          log,
-        });
+  const apnsRegistrations = new ApnsRegistrations(db, { now, ownerId: config.github?.ownerId });
+  const apns = config.apns === undefined ? undefined : new ApnsClient(config.apns, now);
+  const channels = [];
+  if (config.webPush !== undefined && vapid !== undefined) {
+    channels.push(noticeChannel("web-push", subscriptions, new WebPushChannel({ vapid, subject: config.webPush.subject, now, ...(sendWebPush ? { send: sendWebPush } : {}) })));
+  }
+  if (config.apns !== undefined && apns !== undefined) {
+    channels.push(noticeChannel("apns", apnsRegistrations, new ApnsChannel(config.apns.url, (request) => apns.send(request))));
+  }
+  const notifier = new Notifier({ feed, agentName: agent.name, channels, log });
 
   // A start that fails part way closes what it had opened, and the database.
   const opened: http.Server[] = [];
@@ -135,6 +137,7 @@ export async function startBackend(
           login,
           sessions,
           appTokens,
+          apnsRegistrations,
           modelSettings,
           ownerId: config.github?.ownerId,
           publicUrl: config.publicUrl,
@@ -159,12 +162,12 @@ export async function startBackend(
   const stopRecord = record.start();
   const stopHeartbeat =
     config.heartbeatMs === undefined ? () => {} : new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, awake, inbox, record, log }).start();
-  const stopNotifier = notifier?.start() ?? (() => {});
+  const stopNotifier = channels.length === 0 ? () => {} : notifier.start();
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
   if (config.github === undefined) log("backend: no GitHub login set up; no one can sign in to the UI");
   if (config.a2a === undefined) log("backend: no A2A senders; /a2a/ is closed");
-  if (config.webPush === undefined) log("backend: no PENELOPE_WEB_PUSH_VAPID_KEY_FILE; no notices of the replies are sent");
+  if (config.webPush === undefined) log("backend: no PENELOPE_WEB_PUSH_VAPID_KEY_FILE; no Web Push notices are sent");
   const port = (ui.address() as AddressInfo).port;
   log(`backend: intake on ${config.intakeSocket}, sandbox's API on ${config.sandboxSocket}, UI on ${config.listen.host}:${port}`);
 
@@ -175,6 +178,7 @@ export async function startBackend(
       stopRecord();
       stopHeartbeat();
       stopNotifier();
+      apns?.close();
       await Promise.all([close(intake), close(sandbox), close(ui)]);
       db.close();
     },

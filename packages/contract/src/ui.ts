@@ -168,6 +168,29 @@ export type PushSubscriptionRequest = {
 /** `POST /api/push/subscriptions/delete`: stop sending to this endpoint. */
 export type PushUnsubscribeRequest = { endpoint: string };
 
+export type ApnsEnvironment = "sandbox" | "production";
+
+/** `PUT /api/app/push`: replaces the calling app device's registration (ADR-0065). */
+export type ApnsRegistrationRequest = {
+  /** The opaque APNs device token as hex. */
+  token: string;
+  environment: ApnsEnvironment;
+  /** An uncompressed X9.63 P-256 public key, as standard padded base64. */
+  public_key: string;
+};
+
+/** The APNs alert as delivered, before the iPhone's extension opens `e`. */
+export type ApnsReplyPayload = {
+  aps: { alert: { title: string; body: string }; "mutable-content": 1; sound: "default" };
+  messageId: string;
+  kind: "reply";
+  /** Standard padded base64: X9.63 ephemeral key, 12-byte nonce, ciphertext followed by its 16-byte tag. */
+  e: { v: 1; epk: string; nonce: string; ct: string };
+};
+
+/** Inside `e`: the preview and the deployment URL to open when the notification is tapped. */
+export type ApnsReplyPreview = Pick<Notice, "text" | "expression" | "images"> & { url: string };
+
 /**
  * What one notice of a reply carries, whatever the kind it is sent by: what
  * the Web Push is, as JSON, after it is decrypted.
