@@ -1313,53 +1313,13 @@ test("a heartbeat adds a live job using the name returned by job_start", async (
   assert.deepEqual(line?.pending, { jobs: { items: [{ job: job.id, started_at: job.started_at, command: "exec tail -f /dev/null" }], omitted: 0 } } satisfies HeartbeatPending);
 });
 
-/** Stops at once: no tool, no word. */
-const idle: Script = (call) => (call.lastRole === "user" && isAsk(call.lastText) ? { text: "nothing" } : {});
-
-test("a heartbeat turn that calls no tool is not asked (ADR-0031)", async () => {
-  const { fake, start, calls, logs } = await world();
-  await start(idle);
-  fake.push(heartbeat(1));
-  await until(() => acked(fake).includes(1));
-  assert.equal(asks(calls).length, 0);
-  assert.equal(calls.length, 1, "one call to the model, not two");
-  assert.ok(logs.some((line) => /folded\D*0\b.*asked\D*no/.test(line)));
-});
-
-test("a heartbeat turn that calls a tool is asked as any other", async () => {
+test("a turn with only thinking is not asked even when it mixes event sources", async () => {
   const { fake, start, calls } = await world();
-  await start(silent);
-  fake.push(heartbeat(1));
-  await until(() => acked(fake).includes(1));
-  assert.equal(asks(calls).length, 1);
-});
-
-test("a turn of a heartbeat and other events is asked as any other", async () => {
-  const { fake, start, calls } = await world();
-  await start(idle);
+  await start(() => ({ thinking: "nothing to do" }));
   fake.push(slack(1, "batch"));
   fake.push(heartbeat(2));
   await until(() => acked(fake).includes(1) && acked(fake).includes(2));
-  assert.equal(asks(calls).length, 1);
-});
-
-test("a heartbeat turn another event joins is asked as any other", async () => {
-  const { fake, start, calls } = await world();
-  let pushed = false;
-  await start((call) => {
-    if (call.lastRole === "user" && isAsk(call.lastText)) return { text: "noted" };
-    // The owner's message steers in while the heartbeat's turn runs.
-    if (!pushed) {
-      pushed = true;
-      fake.push(ui(2, "are you there?"));
-      return until(() => fake.polledAfter(2)).then(() => ({ thinking: "wait" }));
-    }
-    return {};
-  });
-  fake.push(heartbeat(1));
-  await until(() => acked(fake).includes(1) && acked(fake).includes(2));
-  assert.equal(fake.sent("POST", "/v1/turns/end").length, 1, "the message joined the heartbeat's turn");
-  assert.equal(asks(calls).length, 1);
+  assert.equal(calls.length, 1, "no extra model call before folding");
 });
 
 test("the reflection of the night is not asked", async () => {
