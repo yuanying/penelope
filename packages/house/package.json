@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@penelope/contract": "*",
+    "@penelope/github-oauth": "*",
     "@penelope/service-account-auth": "*"
   }
 }
