@@ -6,7 +6,7 @@ import type { ControlPayload, PresenceNotes, SleepResponse, WakePayload } from "
 import { transaction } from "./db.ts";
 import type { Queue } from "./queue.ts";
 import type { Sleepiness } from "./sleepiness.ts";
-import { dayIn, iso } from "./time.ts";
+import { dayIn, deliveryTimeIn, iso } from "./time.ts";
 
 const REVIEW_MS = 7 * 86_400_000;
 const CHECK_MS = 15_000;
@@ -21,8 +21,16 @@ type SleepRow = {
 
 export type SleepLimits = { threshold: number; defaultMs: number; maxMs: number };
 
-export function latestSleep(db: DatabaseSync): SleepRow | undefined {
-  return db.prepare("SELECT * FROM sleeps ORDER BY control_seq DESC LIMIT 1").get() as SleepRow | undefined;
+export function currentSleep(db: DatabaseSync):
+  | { state: "awake"; wokenMs?: number }
+  | { state: "falling_asleep" | "asleep"; controlSeq: number; requestedMs: number; wakeMs: number } {
+  const last = db.prepare("SELECT * FROM sleeps ORDER BY control_seq DESC LIMIT 1").get() as SleepRow | undefined;
+  if (!last) return { state: "awake" };
+  if (last.woken_ms !== null) return { state: "awake", wokenMs: last.woken_ms };
+  return {
+    state: last.completed_ms === null ? "falling_asleep" : "asleep",
+    controlSeq: last.control_seq, requestedMs: last.requested_ms, wakeMs: last.wake_ms,
+  };
 }
 
 export class SleepRefusal extends Error {
@@ -47,6 +55,7 @@ export class Sleep {
   private readonly queue: Queue;
   private readonly sleepiness: Sleepiness;
   private readonly options: Options;
+  private readonly deliveryTime: (value: string) => string;
   private timer: NodeJS.Timeout | undefined;
   private running = false;
 
@@ -55,19 +64,19 @@ export class Sleep {
     this.queue = queue;
     this.sleepiness = sleepiness;
     this.options = options;
+    this.deliveryTime = deliveryTimeIn(options.timeZone);
   }
 
   request(wake: number, by: "agent" | "safety_net" = "agent"): SleepResponse {
     const now = this.options.now();
     if (!Number.isFinite(wake) || wake <= now) throw new SleepRefusal(400, "wake_at must be in the future");
     this.advanceWake(now);
-    const last = latestSleep(this.db);
-    const active = last?.woken_ms === null ? last : undefined;
-    const wakeMs = Math.min(wake, (active?.requested_ms ?? now) + this.options.limits.maxMs);
-    if (active !== undefined) {
-      if (active.completed_ms !== null) throw new SleepRefusal(409, "already asleep");
+    const current = currentSleep(this.db);
+    if (current.state === "asleep") throw new SleepRefusal(409, "already asleep");
+    const wakeMs = Math.min(wake, (current.state === "falling_asleep" ? current.requestedMs : now) + this.options.limits.maxMs);
+    if (current.state === "falling_asleep") {
       if (wakeMs <= now) throw new SleepRefusal(409, "the original request has reached the maximum duration");
-      this.db.prepare("UPDATE sleeps SET wake_ms = ? WHERE control_seq = ?").run(wakeMs, active.control_seq);
+      this.db.prepare("UPDATE sleeps SET wake_ms = ? WHERE control_seq = ?").run(wakeMs, current.controlSeq);
     } else {
       const payload: ControlPayload = { kind: "nightly" };
       const review = this.db.prepare(`
@@ -88,12 +97,18 @@ export class Sleep {
       });
     }
     this.arm();
-    return { wake_at: iso(wakeMs), clamped: wakeMs < wake };
+    return { wake_at: this.deliveryTime(iso(wakeMs)), duration_seconds: Math.ceil((wakeMs - now) / 1_000), clamped: wakeMs < wake };
   }
 
   completed(seq: number): void {
-    this.db.prepare("UPDATE sleeps SET completed_ms = ? WHERE control_seq = ? AND completed_ms IS NULL")
-      .run(this.options.now(), seq);
+    transaction(this.db, () => {
+      if (!this.db.prepare("SELECT 1 FROM sleeps WHERE control_seq = ? AND completed_ms IS NULL").get(seq)) return;
+      // All requests made before this report are satisfied by the new session.
+      const completed = this.db.prepare("UPDATE sleeps SET completed_ms = ? WHERE completed_ms IS NULL RETURNING control_seq")
+        .all(this.options.now()) as { control_seq: number }[];
+      this.queue.ack(completed.map(({ control_seq }) => control_seq));
+      if (currentSleep(this.db).state === "awake") this.sleepiness.reset();
+    });
   }
 
   // Runs on startup, at the wake deadline, and after an ordinary turn's context report.
@@ -121,10 +136,10 @@ export class Sleep {
   }
 
   private advanceWake(now: number): void {
-    const last = latestSleep(this.db);
-    if (last?.woken_ms === null && last.wake_ms <= now) {
+    const current = currentSleep(this.db);
+    if (current.state !== "awake" && current.wakeMs <= now) {
       transaction(this.db, () => {
-        this.db.prepare("UPDATE sleeps SET woken_ms = ? WHERE control_seq = ?").run(now, last.control_seq);
+        this.db.prepare("UPDATE sleeps SET woken_ms = ? WHERE control_seq = ?").run(now, current.controlSeq);
         this.sleepiness.reset();
         this.queue.releaseHeldBatch(now);
       });
@@ -152,8 +167,8 @@ export class Sleep {
   private arm(): void {
     if (!this.running) return;
     clearTimeout(this.timer);
-    const last = latestSleep(this.db);
-    const untilWake = last?.woken_ms === null ? last.wake_ms - this.options.now() : CHECK_MS;
+    const current = currentSleep(this.db);
+    const untilWake = current.state === "awake" ? CHECK_MS : current.wakeMs - this.options.now();
     this.timer = setTimeout(() => {
       this.tick();
       this.arm();

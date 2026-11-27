@@ -89,8 +89,13 @@ export function backendTools(backend: Backend, { home, turn }: { home: string; t
       wake_at: Type.String({ description: "The future wake time in RFC 3339, with a time zone." }),
     }),
     async execute(_id, params) {
-      const { wake_at, clamped } = await backend.sleep(params);
-      return text(clamped ? `Wake time clamped to ${wake_at} by the maximum sleep duration.` : `Sleep requested until ${wake_at}.`);
+      const { wake_at, duration_seconds, clamped } = await backend.sleep(params);
+      const hours = Math.floor(duration_seconds / 3600);
+      const minutes = Math.floor(duration_seconds / 60) % 60;
+      const seconds = duration_seconds % 60;
+      const duration = [hours && `${hours}h`, minutes && `${minutes}m`, seconds && `${seconds}s`].filter(Boolean).join(" ");
+      const when = `${wake_at} (${duration} from now)`;
+      return text(clamped ? `Wake time clamped to ${when} by the maximum sleep duration.` : `Sleep requested until ${when}.`);
     },
   });
 

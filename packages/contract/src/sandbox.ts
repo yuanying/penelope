@@ -127,7 +127,7 @@ export type JobEventRequest = FromAgent & { id: string; summary: string; payload
 
 /** `POST /v1/sleep`: the main session asks to sleep after its turn. */
 export type SleepRequest = FromAgent & { wake_at: string };
-export type SleepResponse = { wake_at: string; clamped: boolean };
+export type SleepResponse = { wake_at: string; duration_seconds: number; clamped: boolean };
 
 /** `POST /v1/replies`: a reply to the owner. */
 export type ReplyRequest = FromAgent & {

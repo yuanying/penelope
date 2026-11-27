@@ -10,7 +10,7 @@ test("the status keeps the awake origin, current context and sleepiness peak acr
   const file = path.join(tempDir(t), "backend.sqlite");
   const clock = new FakeClock("2026-11-16T09:00:00Z");
   const first = openDatabase(file);
-  const sleepiness = new Sleepiness(first, clock.now);
+  const sleepiness = new Sleepiness(first, clock.now, "UTC");
   sleepiness.turnEnded({ tokens: 8_000, context_window: 10_000 });
   const context = { tokens: 2_000, context_window: 10_000 };
   sleepiness.turnEnded(context);
@@ -19,5 +19,5 @@ test("the status keeps the awake origin, current context and sleepiness peak acr
   clock.advance(30);
   const second = openDatabase(file);
   t.after(() => second.close());
-  assert.deepEqual(new Sleepiness(second, clock.now).status(), { sleep: { state: "awake" }, sleepiness: 80, awake_seconds: 1_800, context });
+  assert.deepEqual(new Sleepiness(second, clock.now, "UTC").status(), { sleep: { state: "awake" }, sleepiness: 80, awake_seconds: 1_800, context });
 });

@@ -320,7 +320,6 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         if (memory_reads !== undefined && stages === undefined) throw new HttpError(400, "memory_reads comes with the night's stages");
         const steps = stages === undefined ? undefined : nightStages(stages);
         const reads = memory_reads === undefined ? undefined : readSnapshot(memory_reads);
-        if (seq !== undefined && (steps === undefined || steps.session.result === "done")) sleep.completed(seq);
         const head = steps === undefined ? undefined : await memoryView.head().catch(() => {
           log("memory: final night version could not be read");
           return undefined;
@@ -332,6 +331,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         } catch {
           log("memory: nightly snapshot could not be kept");
         }
+        if (seq !== undefined && (steps === undefined || steps.session.result === "done")) sleep.completed(seq);
         void memory.maintain(now()).catch(() => log("memory: repository maintenance failed"));
         log(`session: the nightly switch${seq === undefined ? "" : ` of ${String(seq)}`} was reported${steps === undefined ? "" : ` (${steps.reflection.result}, ${steps.verifier.result}, ${steps.curator.result}, ${steps.session.result})`}`);
         sendEmpty(response, 204);
@@ -347,7 +347,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/status", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/status", "/v1/sleep", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };

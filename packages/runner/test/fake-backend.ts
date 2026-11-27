@@ -48,6 +48,7 @@ export class FakeBackend {
   /** When set, every reply is refused with a 400 and this error, as the backend refuses an image. */
   refuseReplies: string | undefined;
   refuseMemoryRepairs = false;
+  failRotationReports = 0;
   private readonly server: Server;
 
   constructor() {
@@ -192,6 +193,10 @@ export class FakeBackend {
     }
     if (key === "POST /v1/memory/repairs") {
       return this.refuseMemoryRepairs ? answer(503, { error: "unavailable" }) : answer(204);
+    }
+    if (key === "POST /v1/sessions/rotated" && this.failRotationReports > 0) {
+      this.failRotationReports--;
+      return answer(503, { error: "unavailable" });
     }
     if (
       key === "POST /v1/agents" ||

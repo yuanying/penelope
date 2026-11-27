@@ -158,7 +158,7 @@ ${memory} is your long-term memory: Markdown files in a git repository.
 
 ${MEMORY_SHAPE(places, "your owner")}
 
-What you change in ${memory} is committed by the backend at the end of each turn. You can read its history; ${memory}/.git is read-only for you. Each night the session ends: you reflect and leave a handoff, the ${VERIFIER} checks the memory against the records, the curator reorganises it, and a new session starts from it.
+What you change in ${memory} is committed by the backend at the end of each turn. You can read its history; ${memory}/.git is read-only for you. When you sleep, the session ends: you reflect and leave a handoff, the ${VERIFIER} checks the memory against the records, the curator reorganises it, and a new session starts from it.
 
 Any memory files below are as they were when this session started.`;
   const tail = appended(files);

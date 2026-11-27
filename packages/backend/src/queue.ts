@@ -6,7 +6,7 @@ import type { DatabaseSync } from "node:sqlite";
 import { type AnswerVia, type DeliveredAttachment, type DeliveredEvent, type Delivery, type Event, isPresenceSource, type PresenceNotes } from "@penelope/contract";
 
 import { transaction } from "./db.ts";
-import { latestSleep } from "./sleep.ts";
+import { currentSleep } from "./sleep.ts";
 import type { Attachment, Sources } from "./sources.ts";
 import { deliveryTimeIn, iso } from "./time.ts";
 
@@ -132,19 +132,21 @@ export class Queue {
   take({ after, limit = DEFAULT_TAKE_LIMIT }: { after: number; limit?: number }): DeliveredEvent[] {
     return transaction(this.db, () => {
       const now = this.options.now();
-      const last = latestSleep(this.db);
-      const control = last?.woken_ms === null ? last.control_seq : undefined;
-      if (control === undefined) this.releaseBatch(now);
+      const sleep = currentSleep(this.db);
+      const gate = this.sleepGate(sleep.state === "awake");
+      if (sleep.state === "awake") this.releaseBatch(now);
       const rows = this.db
         .prepare(
           `SELECT seq, source, id, stream, occurred_at, received_ms, summary, delivery, inline, payload, answer_via, path, line, attachments
            FROM events
            WHERE acked_ms IS NULL AND due_ms IS NOT NULL AND due_ms <= ?
              AND (delivered_ms IS NULL OR seq > ? OR delivered_ms <= ?)
-             ${control === undefined ? "" : "AND seq = ?"}
-           ORDER BY seq LIMIT ?`,
+             AND (${gate.where})
+           ORDER BY (source = 'wake') DESC, seq LIMIT ?`,
         )
-        .all(now, after, now - this.options.redeliverMs, ...(control === undefined ? [] : [control]), limit) as Row[];
+        .all(now, after, now - this.options.redeliverMs, gate.seq, limit) as Row[];
+      // Reserve room for the wake notice in the first page, but deliver that page in seq order.
+      rows.sort((a, b) => a.seq - b.seq);
       const mark = this.db.prepare("UPDATE events SET delivered_ms = ? WHERE seq = ?");
       for (const row of rows) mark.run(now, row.seq);
       return rows.map((row) => delivered(row, this.deliveryTime(row.occurred_at)));
@@ -166,14 +168,14 @@ export class Queue {
    */
   nextWakeAt(): number | undefined {
     const times: number[] = [];
-    const last = latestSleep(this.db);
-    const control = last?.woken_ms === null ? last.control_seq : undefined;
-    const batchEnd = control === undefined ? this.batchEnd() : last!.wake_ms;
+    const sleep = currentSleep(this.db);
+    const gate = this.sleepGate(sleep.state === "awake");
+    const batchEnd = sleep.state === "awake" ? this.batchEnd() : sleep.wakeMs;
     if (batchEnd !== undefined) times.push(batchEnd);
     const { oldest } = this.db
       .prepare(`SELECT MIN(delivered_ms) AS oldest FROM events WHERE acked_ms IS NULL AND delivered_ms IS NOT NULL
-        ${control === undefined ? "" : "AND seq = ?"}`)
-      .get(...(control === undefined ? [] : [control])) as { oldest: number | null };
+        AND (${gate.where})`)
+      .get(gate.seq) as { oldest: number | null };
     if (oldest !== null) times.push(oldest + this.options.redeliverMs);
     return times.length === 0 ? undefined : Math.min(...times);
   }
@@ -202,6 +204,15 @@ export class Queue {
 
   private changed(): void {
     for (const listener of [...this.listeners]) listener();
+  }
+
+  private sleepGate(awake: boolean): { where: string; seq: number | null } {
+    // Never let the runner buffer a second sleep control while a switch can still satisfy both.
+    const next = this.db.prepare(`
+      SELECT MIN(s.control_seq) AS seq FROM sleeps s JOIN events e ON e.seq = s.control_seq
+      WHERE s.completed_ms IS NULL AND e.acked_ms IS NULL
+    `).get() as { seq: number | null };
+    return { where: awake ? "source <> 'control' OR seq IS ? OR seq NOT IN (SELECT control_seq FROM sleeps)" : "seq = ?", seq: next.seq };
   }
 
   private deliveryOf(event: Event, builtin: boolean): Delivery {

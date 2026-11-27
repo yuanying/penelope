@@ -65,7 +65,7 @@ export async function startBackend(
   const warmMemory = () => { void memoryView.warmLastChanges().catch(() => log("memory: last changes could not be prepared")); };
   memory.afterCommit(warmMemory);
   const modelSettings = new ModelSettings(db, now);
-  const sleepiness = new Sleepiness(db, now);
+  const sleepiness = new Sleepiness(db, now, config.timeZone);
   const queue = new Queue(db, new Sources(config.sourcesDir, config.timeZone), {
     now,
     inline: config.inline,

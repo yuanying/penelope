@@ -40,13 +40,12 @@ test("the tools", () => {
   for (const tool of tools.values()) assert.ok(tool.description.length > 0);
 });
 
-test("sleep shows the wake time the backend accepted when it clamps the request", async () => {
+test("sleep shows the accepted local wake time and duration when it clamps the request", async () => {
   const requested = "2026-11-17T09:00:00Z";
-  const accepted = "2026-11-16T21:00:00Z";
-  fake.sleepResponse = { wake_at: accepted, clamped: true };
+  const accepted = "2026-11-17T06:00:00+09:00";
+  fake.sleepResponse = { wake_at: accepted, duration_seconds: 41_400, clamped: true };
   const result = await call("sleep", { wake_at: requested });
-  assert.ok(result.includes(accepted));
-  assert.match(result, /clamped/i);
+  assert.equal(result, `Wake time clamped to ${accepted} (11h 30m from now) by the maximum sleep duration.`);
   assert.deepEqual(fake.sent("POST", "/v1/sleep"), [{ agent: "main", wake_at: requested }]);
 });
 

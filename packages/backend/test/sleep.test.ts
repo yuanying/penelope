@@ -22,7 +22,7 @@ function setup(dir: string, clock: FakeClock, log: (line: string) => void = asse
     now: clock.now, inline: new Set(["control"]), builtinDelivery: {}, timeZone,
     batch: { quietMs: 5 * minute, maxMs: 30 * minute }, redeliverMs: 5 * minute,
   });
-  const sleepiness = new Sleepiness(db, clock.now);
+  const sleepiness = new Sleepiness(db, clock.now, timeZone);
   const sleep = new Sleep(db, queue, sleepiness, {
     now: clock.now, timeZone, limits: { threshold: 90, defaultMs: 480 * minute, maxMs: 720 * minute },
     notes: () => ({}), log,
@@ -79,6 +79,24 @@ test("startup wakes an overdue persisted sleep exactly once", (t) => {
   assert.deepEqual(third.queue.take({ after: 0 }), []);
 });
 
+test("the first page after wake includes the notice without losing older queued work", (t) => {
+  const clock = new FakeClock("2026-11-16T09:00:00Z");
+  const { db, queue, sleep } = setup(tempDir(t), clock);
+  t.after(() => db.close());
+  sleep.request(clock.now() + minute);
+  const [control] = queue.take({ after: 0 });
+  sleep.completed(control!.seq);
+  for (const id of ["one", "two", "three"]) {
+    queue.accept({ source: "ui", id, occurred_at: new Date(clock.now()).toISOString(), summary: id, payload: null }, { builtin: true });
+  }
+
+  clock.advance(1);
+  sleep.tick();
+  const first = queue.take({ after: control!.seq, limit: 2 });
+  assert.deepEqual(first.map(({ id, source }) => source === "wake" ? source : id), ["one", "wake"]);
+  assert.deepEqual(queue.take({ after: first[1]!.seq, limit: 2 }).map(({ id }) => id), ["two", "three"]);
+});
+
 test("a failed wake notice write does not keep the agent asleep", (t) => {
   const dir = tempDir(t);
   const clock = new FakeClock("2026-11-16T09:00:00Z");
@@ -108,7 +126,7 @@ test("the safety net uses elapsed awake time after a backend restart without ano
   const { db, queue, sleep, sleepiness } = setup(dir, clock);
   t.after(() => db.close());
   sleep.start()();
-  assert.deepEqual(sleepiness.status().sleep, { state: "falling_asleep", wake_at: "2026-11-17T15:00:00.000Z" });
+  assert.deepEqual(sleepiness.status().sleep, { state: "falling_asleep", wake_at: "2026-11-18T00:00:00.000+09:00" });
   assert.deepEqual(queue.take({ after: 0 }).map(({ source }) => source), ["control"]);
 });
 

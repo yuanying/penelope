@@ -1009,6 +1009,20 @@ test("a nightly event that comes again after the switch only tells and acks", as
   assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated")[1], { agent: "main", seq: 1 });
 });
 
+test("a rejected switch report is retried on redelivery before the control event is acked", async () => {
+  const { fake, start, config } = await world();
+  fake.failRotationReports = 1;
+  fake.redeliverMs = 50;
+  await start(nightWrites(config));
+  fake.push(nightly(1));
+
+  await until(() => acked(fake).includes(1));
+  const writes = fake.received.filter(({ method, path }) =>
+    method === "POST" && (path === "/v1/sessions/rotated" || path === "/v1/events/ack"));
+  assert.deepEqual(writes.map(({ path }) => path), ["/v1/sessions/rotated", "/v1/sessions/rotated", "/v1/events/ack"]);
+  assert.deepEqual(writes[1]!.body, { agent: "main", seq: 1 });
+});
+
 test("a verifier's turn that fails is recorded without skipping the curator or new session", async () => {
   const { fake, start, config } = await world();
   await start((call) => isVerifier(config, call) ? { error: "the model is away" } : nightWrites(config)(call));

@@ -627,7 +627,7 @@ export class ActivityRecord {
   private missed(from: number, to: number): RecordMissedNight[] {
     const rows = this.db.prepare(`
       SELECT control_seq, requested_ms FROM sleeps s
-      WHERE requested_ms >= ? AND requested_ms < ? AND requested_ms <= ?
+      WHERE completed_ms IS NULL AND requested_ms >= ? AND requested_ms < ? AND requested_ms <= ?
         AND NOT EXISTS (SELECT 1 FROM session_rotations n WHERE n.seq = s.control_seq)
       ORDER BY requested_ms, control_seq
     `).all(Math.max(from, this.now() - RECORD_SUMMARY_DAYS * DAY_MS), to, this.now() - this.sleepReportTimeoutMs) as { control_seq: number; requested_ms: number }[];

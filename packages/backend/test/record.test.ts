@@ -226,7 +226,7 @@ describe("the activity record", () => {
 
   it("counts an unreported sleep as a failure only after the report deadline", (t) => {
     const { db, record, clock, queue } = setup(t);
-    const sleep = new Sleep(db, queue, new Sleepiness(db, clock.now), {
+    const sleep = new Sleep(db, queue, new Sleepiness(db, clock.now, "UTC"), {
       now: clock.now, timeZone: "UTC", limits: { threshold: 90, defaultMs: 60_000, maxMs: 60_000 },
       notes: () => ({}), log: () => {},
     });

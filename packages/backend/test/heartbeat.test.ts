@@ -45,7 +45,7 @@ function setup(
     now: clock.now,
     limits: { maxOpenTasks: 3, deadlineMs: 120 * 60_000 },
   });
-  const sleepiness = new Sleepiness(db, clock.now);
+  const sleepiness = new Sleepiness(db, clock.now, "UTC");
   const heartbeat = new Heartbeat(queue, conversation, { now: clock.now, quietMs, log: () => {}, inbox, record, sleepiness });
   let turns = 0;
   /** The runner's blocks of one turn: its start, or its end. */

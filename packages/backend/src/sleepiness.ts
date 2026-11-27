@@ -2,8 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 
 import type { AgentStatus, ContextUsage } from "@penelope/contract";
 
-import { latestSleep } from "./sleep.ts";
-import { iso } from "./time.ts";
+import { currentSleep } from "./sleep.ts";
+import { deliveryTimeIn, iso } from "./time.ts";
 
 const DAY_SECONDS = 86_400;
 
@@ -17,10 +17,12 @@ type State = {
 export class Sleepiness {
   private readonly db: DatabaseSync;
   private readonly now: () => number;
+  private readonly deliveryTime: (value: string) => string;
 
-  constructor(db: DatabaseSync, now: () => number) {
+  constructor(db: DatabaseSync, now: () => number, timeZone: string) {
     this.db = db;
     this.now = now;
+    this.deliveryTime = deliveryTimeIn(timeZone);
     db.prepare("INSERT OR IGNORE INTO sleepiness (singleton, awake_since_ms, peak) VALUES (1, ?, 0)").run(now());
   }
 
@@ -29,12 +31,12 @@ export class Sleepiness {
     const context = state.tokens === null || state.context_window === null
       ? undefined
       : { tokens: state.tokens, context_window: state.context_window };
-    const last = latestSleep(this.db);
-    const asleep = last?.woken_ms === null;
-    const awakeSince = (asleep ? this.lastWake() : last?.woken_ms) ?? state.awake_since_ms;
+    const sleep = currentSleep(this.db);
+    const awake = sleep.state === "awake";
+    const awakeSince = (awake ? sleep.wokenMs : this.lastWake()) ?? state.awake_since_ms;
     const status = measure(
-      state.peak, (asleep ? last.requested_ms : now) - awakeSince, context,
-      asleep ? { state: last.completed_ms === null ? "falling_asleep" : "asleep", wake_at: iso(last.wake_ms) } : { state: "awake" },
+      state.peak, (awake ? now : sleep.requestedMs) - awakeSince, context,
+      awake ? { state: "awake" } : { state: sleep.state, wake_at: this.deliveryTime(iso(sleep.wakeMs)) },
     );
     if (status.sleepiness > state.peak) {
       this.db.prepare("UPDATE sleepiness SET peak = ? WHERE singleton = 1").run(status.sleepiness);
@@ -43,10 +45,10 @@ export class Sleepiness {
   }
 
   turnEnded(context: ContextUsage | undefined): void {
-    const last = latestSleep(this.db);
-    if (last?.woken_ms === null) return;
+    const sleep = currentSleep(this.db);
+    if (sleep.state !== "awake") return;
     const state = this.state();
-    const { sleepiness } = measure(state.peak, this.now() - (last?.woken_ms ?? state.awake_since_ms), context, { state: "awake" });
+    const { sleepiness } = measure(state.peak, this.now() - (sleep.wokenMs ?? state.awake_since_ms), context, { state: "awake" });
     this.db.prepare("UPDATE sleepiness SET peak = ?, tokens = ?, context_window = ? WHERE singleton = 1")
       .run(sleepiness, context?.tokens ?? null, context?.context_window ?? null);
   }

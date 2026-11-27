@@ -51,7 +51,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - ack の無いままもう一度渡す出来事は、`seq` が `after` 以下でも返す。runner は再起動の後、`after` を省いて（0 として）取り直す。
 - まだ一度も渡していない出来事も、`seq` が `after` 以下でも返す。`batch` の出来事は、後に来た `now` の出来事より後に渡ることがあり、そのとき `seq` は runner が受け取った最大の `seq` より小さい。
 - 一定時間は backend の設定で、既定は 5 分（[backend.md](backend.md) の `PENELOPE_REDELIVER_MINUTES`）。ターンがそれより長く続くと、そのターンに入れたまま ack していない出来事も、もう一度渡る。
-- `wait` の上限は 60 秒で、それより長い値は 60 秒として扱う。一度に返すのは 100 件まで。
+- `wait` の上限は 60 秒で、それより長い値は 60 秒として扱う。一度に返すのは 100 件まで。起きた直後は、待っている出来事がこの上限を超えていても、最初の応答に `wake` を入れる。
 - 応答は `{events: [...]}`。1 件ごとに `seq`・`source`・`id`・`stream`・`occurred_at`・`received_at`・`summary`・`delivery`・足された場所（`appended`: `path` と `lines` の 1 始まり・両端を含む範囲）・添付（`attachments`）を持つ。inline の出来事だけが `inline: true` と `payload` を持つ。封筒に `answer_via` があれば、inline かどうかにかかわらず同じ値を返す。無ければ省く。
 - `heartbeat` と `wake` は常に `inline: false` で、`payload` の代わりに `status` と、残っている仕事があれば `pending` を渡す。どちらも列に入れた時点の値で、以前の版で入れられた出来事には `status` が無いことがある。runner はこれらを該当する出来事の行に直接載せる。backend が採る `pending` の欄は `a2a_tasks` と `failures`。`jobs` と `subagents` は runner 側の欄で、この応答には含まれない（[events.md](events.md) の「heartbeat と起きたときの `pending`」）。
 - `occurred_at` は全受信元について、同じ瞬間を backend の `PENELOPE_TIME_ZONE`（[backend.md](backend.md) の「設定」）で表した RFC 3339 で返す。UTC オフセット（UTC なら `+00:00`）は発生時点のものを使う。たとえば `Asia/Tokyo` では `2026-11-18T23:00:00Z` は `2026-11-19T08:00:00+09:00` になる。変換できない保存済みの値はそのまま返す。SQLite と `/sources` に保存した値や `received_at` は変えない。
@@ -314,14 +314,14 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 `POST /v1/sleep` の body は `{agent: "main", wake_at}`（`SleepRequest`）。`wake_at` は未来の RFC 3339 の時刻。形が違う場合、過去または現在の時刻、サブエージェントの名乗りは `400`。切り替えが済んでまだ寝ていれば `409`。
 
-成功は `200` と `{wake_at, clamped}`（`SleepResponse`）。`wake_at` は受け付けた UTC の時刻。最初に眠りを求めた時刻からの最長時間に合わせて早めた場合、`clamped` は `true`。寝つく間にもう一度求めると、起きる時刻だけを置き直し、切り替えは増やさない。
+成功は `200` と `{wake_at, duration_seconds, clamped}`（`SleepResponse`）。`wake_at` は受け付けた時刻を配置の時間帯に直した RFC 3339 の値。`duration_seconds` は今回の要求からその時刻までの秒数（端数は切り上げ）。最初に眠りを求めた時刻からの最長時間に合わせて早めた場合、`clamped` は `true`。寝つく間にもう一度求めると、起きる時刻だけを置き直し、切り替えは増やさない。
 
-runner は本体にだけ `sleep` ツールを渡す。ツールは受け付けた時刻を返す。切り替えは今のターンを終えてから始まる。眠りの間の配送は [出来事を渡す条件](events.md#いつ渡すか) に従う。
+runner は本体にだけ `sleep` ツールを渡す。ツールは受け付けた時刻と、そこまでの長さを返す。切り替えは今のターンを終えてから始まる。眠りの間の配送は [出来事を渡す条件](events.md#いつ渡すか) に従う。
 
 ## セッションの切り替えの知らせ
 
 - 夜の切り替え（制御の出来事、[events.md](events.md) の「制御の出来事」）の手順を 1 回回し終えたら、runner が送る。body は `{agent, seq?, stages?, memory_reads?}`（型は `SessionRotatedRequest`）。`agent` は `main` だけで、ほかは `400`。
-- 新しいセッションが動き出したら、そのあと runner は、制御の出来事を ack する。
+- 新しいセッションが動き出したという知らせで、backend はその時点までの未完了の眠りを切り替え済みにし、対応する制御の出来事を ack する。runner も成功した知らせの後で制御の出来事を ack する。知らせが失敗したら ack せず、渡し直されたときに送り直す。
 - `seq` はその夜の制御の出来事の `seq`、`stages` は段ごとの結果 `{reflection, verifier, curator, session}` で、1 つの段は `{result, reason?, turn_id?}`（型は `NightTurnReport`。`session` は `turn_id` の無い `NightStage`）である（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。
   - `result` は `done`（済んだ）・`failed`（失敗した）・`skipped`（行われなかった）。`reason` は `failed` のときの理由の 1 行。
   - `reflection`、`verifier`、`curator` は対応するターンの結果を渡す。ターンを始められなかった場合や、runner の停止でターンを中断した場合も、その段は `failed` にする。`verifier` の無い旧 runner からの通知は、`verifier` を `skipped` として受ける。
@@ -369,7 +369,7 @@ runner は本体にだけ `sleep` ツールを渡す。ツールは受け付け�
 
 | 欄 | 中身 |
 | --- | --- |
-| `sleep` | 起きていれば `{state: "awake"}`。寝つく間は `{state: "falling_asleep", wake_at}`、寝ていれば `{state: "asleep", wake_at}`。 `wake_at` は RFC 3339 の予定時刻 |
+| `sleep` | 起きていれば `{state: "awake"}`。寝つく間は `{state: "falling_asleep", wake_at}`、寝ていれば `{state: "asleep", wake_at}`。 `wake_at` は配置の時間帯での RFC 3339 の予定時刻 |
 | `sleepiness` | backend が計算した眠気。0〜100 の整数 |
 | `awake_seconds` | 実際に起きた時刻からの秒数。眠りの間は増えない |
 | `context` | 直近の本体の通常のターンのコンテキストを表す `{tokens, context_window}`。報告がなければ欄ごと省く |

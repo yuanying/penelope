@@ -129,7 +129,7 @@ async function setup(
       appTokens: new AppTokens(db, { now }),
       apnsRegistrations,
       modelSettings,
-      sleepiness: new Sleepiness(db, now),
+      sleepiness: new Sleepiness(db, now, "UTC"),
       ownerId: settings?.ownerId,
       publicUrl,
       agent: () => agent,
