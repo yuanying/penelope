@@ -4,8 +4,7 @@ import type { ServerResponse } from "node:http";
 import type { HouseEvent, HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
 
 import type { Person } from "./config.ts";
-import { Conflict, House, NotFound } from "./house.ts";
-import type { PersonSession } from "./login.ts";
+import { Conflict, House, NotFound, type PersonSession } from "./house.ts";
 
 const GRACE_MS = 30_000;
 const KEEPALIVE_MS = 25_000;
@@ -82,12 +81,12 @@ export class People {
 
   requireConnection(session: PersonSession, connection: string | undefined): void {
     const stream = connection ? this.streams.get(connection) : undefined;
-    if (!stream || stream.session !== session || !this.active(stream)) throw new Conflict("connection-required");
+    if (!stream || stream.session.tokenHash !== session.tokenHash || !this.active(stream)) throw new Conflict("connection-required");
   }
 
-  revoke(session: PersonSession): void {
+  revoke(tokenHash: string): void {
     for (const [id, stream] of this.streams) {
-      if (stream.session !== session) continue;
+      if (stream.session.tokenHash !== tokenHash) continue;
       stream.response.destroy();
       this.disconnect(id);
     }

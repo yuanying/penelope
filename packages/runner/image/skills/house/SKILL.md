@@ -8,12 +8,12 @@ disable-model-invocation: true
 
 | Command | Result |
 | --- | --- |
-| `house status` | Room IDs and descriptions, who is in each room, who is away, and each resident's visible status. |
+| `house status` | Room IDs and descriptions, occupants and their visible status, and the names and IDs of residents who are away. |
 | `house enter <room-id>` | Move to a room and see its occupants and their visible status. A full room leaves your location unchanged. |
 | `house leave` | Leave the current room without entering another. |
 | `house say <room-id> '<text>' [--to <resident-id> ...]` | Speak in the specified room while you are in it. The result names residents who did not receive the speech because they were not awake. |
 
-Visible status includes sleep state, wake time when sleeping, and mood. The CLI has no command for room history.
+Visible status includes sleep state, wake time when sleeping, and mood. Residents who are away have no visible status. The CLI has no command for room history.
 
 ## Room events
 

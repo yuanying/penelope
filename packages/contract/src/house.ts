@@ -36,16 +36,18 @@ export type HouseDelivery = {
   answer_via?: { command: "house say" };
 };
 
+export type HouseAgentIdentity = HouseActor & { kind: "agent"; avatar_url?: string; chat_url?: string };
 export type HousePersonIdentity = HouseActor & { kind: "person"; avatar_url?: string };
+export type HousePublicIdentity = HouseAgentIdentity | HousePersonIdentity;
 export type HousePersonOccupant = (
-  | (HouseActor & { kind: "agent"; status: HouseAgentStatus | null; avatar_url?: string; chat_url?: string })
+  | (HouseAgentIdentity & { status: HouseAgentStatus | null })
   | HousePersonIdentity
 ) & { connected: boolean };
 export type HouseSpeechPreview = Pick<Extract<HouseEvent, { kind: "speech" }>, "id" | "actor" | "text" | "occurred_at">;
 export type HousePersonFloor = {
   name: string;
   rooms: (HouseRoom & { occupants: HousePersonOccupant[]; last_speech: HouseSpeechPreview | null })[];
-  away: HouseActor[];
+  away: HousePublicIdentity[];
 };
 export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity };
 export type HouseHistory = { events: HouseEvent[]; before?: string };

@@ -2,8 +2,9 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
-  HouseActor, HouseAgentStatus, HouseDelivery, HouseEvent, HouseHistory, HousePersonFloor, HousePersonIdentity,
-  HousePersonOccupant, HouseResident, HouseRoom, HouseSpeech, HouseSpeechResult, HouseSync, HouseSyncResult, HouseView,
+  HouseActor, HouseAgentIdentity, HouseAgentStatus, HouseDelivery, HouseEvent, HouseHistory, HousePersonFloor,
+  HousePersonIdentity, HousePersonOccupant, HouseResident, HouseRoom, HouseSpeech, HouseSpeechResult,
+  HouseSync, HouseSyncResult, HouseView,
 } from "@penelope/contract";
 
 import type { Agent, HouseConfig, Person, Resident } from "./config.ts";
@@ -51,7 +52,24 @@ const PEOPLE_SCHEMA = `
   PRAGMA user_version = 2;
 `;
 
+const SESSION_SCHEMA = `
+  ALTER TABLE person_profile ADD COLUMN github_user_id INTEGER;
+  CREATE TABLE person_sessions (
+    token_hash TEXT PRIMARY KEY NOT NULL,
+    subject TEXT NOT NULL REFERENCES person_profile(subject),
+    expires_ms INTEGER NOT NULL
+  );
+  CREATE INDEX person_sessions_by_subject ON person_sessions (subject);
+  PRAGMA user_version = 3;
+`;
+
 const HISTORY_LIMIT = 50;
+
+export type PersonSession = { person: Person; tokenHash: string; expires: number };
+
+function agentIdentity({ actor, avatar_url, chat_url }: Agent): HouseAgentIdentity {
+  return { ...actor, avatar_url, chat_url };
+}
 
 export class Conflict extends Error {}
 export class NotFound extends Error {}
@@ -80,10 +98,11 @@ export class House {
     try {
       this.db.exec("PRAGMA journal_mode = WAL");
       const version = this.db.prepare("PRAGMA user_version").get()?.user_version;
-      if (version !== 0 && version !== 1 && version !== 2) throw new Error("unknown house database version");
+      if (version !== 0 && version !== 1 && version !== 2 && version !== 3) throw new Error("unknown house database version");
       this.transaction(() => {
         if (version === 0) this.db.exec(SCHEMA);
-        if (version !== 2) this.db.exec(PEOPLE_SCHEMA);
+        if (version < 2) this.db.exec(PEOPLE_SCHEMA);
+        if (version < 3) this.db.exec(SESSION_SCHEMA);
         this.reconcileConfig(now);
       });
     } catch (error) {
@@ -108,11 +127,30 @@ export class House {
     return this.rooms.has(id);
   }
 
-  setAvatar(person: Person, url: string | null): void {
-    this.db.prepare(`
-      INSERT INTO person_profile (subject, avatar_url) VALUES (?, ?)
-      ON CONFLICT (subject) DO UPDATE SET avatar_url = excluded.avatar_url
-    `).run(person.subject, url);
+  createPersonSession({ person, tokenHash, expires }: PersonSession, profile: { id: number; avatar: string | null }, now: number): boolean {
+    return this.transaction(() => {
+      const pinned = this.db.prepare(`
+        INSERT INTO person_profile (subject, github_user_id, avatar_url) VALUES (?, ?, ?)
+        ON CONFLICT (subject) DO UPDATE SET github_user_id = excluded.github_user_id, avatar_url = excluded.avatar_url
+        WHERE person_profile.github_user_id IS NULL OR person_profile.github_user_id = excluded.github_user_id
+      `).run(person.subject, profile.id, profile.avatar);
+      if (pinned.changes === 0) return false;
+      this.db.prepare("DELETE FROM person_sessions WHERE expires_ms <= ?").run(now);
+      this.db.prepare("INSERT INTO person_sessions (token_hash, subject, expires_ms) VALUES (?, ?, ?)").run(tokenHash, person.subject, expires);
+      return true;
+    });
+  }
+
+  personSession(tokenHash: string, now: number): PersonSession | undefined {
+    const row = this.db.prepare("SELECT subject, expires_ms FROM person_sessions WHERE token_hash = ? AND expires_ms > ?")
+      .get(tokenHash, now) as { subject: string; expires_ms: number } | undefined;
+    if (!row) return;
+    const person = this.people.get(row.subject);
+    if (person) return { person, tokenHash, expires: row.expires_ms };
+  }
+
+  revokePersonSession(tokenHash: string): void {
+    this.db.prepare("DELETE FROM person_sessions WHERE token_hash = ?").run(tokenHash);
   }
 
   identity(person: Person): HousePersonIdentity {
@@ -122,7 +160,7 @@ export class House {
 
   view(agent: Agent, now: number): HouseView {
     const rooms = [...this.rooms.values()].map((room) => ({ ...room, occupants: this.visibleIn(room.id, now) }));
-    return { name: this.name, you: agent.actor.id, rooms, away: this.away(rooms) };
+    return { name: this.name, you: agent.actor.id, rooms, away: this.away(rooms).map(({ actor }) => actor) };
   }
 
   personFloor(now: number, connectedPeople: ReadonlySet<string>): HousePersonFloor {
@@ -131,9 +169,8 @@ export class House {
       const occupants = this.inRoom(room.id).map(({ resident, status, avatar }): HousePersonOccupant => {
         const agent = this.agents.get(resident.subject);
         if (agent) {
-          const { actor, avatar_url, chat_url } = agent;
           const connected = this.agentConnected(agent, now);
-          return { ...actor, connected, status: connected ? status : null, avatar_url, chat_url };
+          return { ...agentIdentity(agent), connected, status: connected ? status : null };
         }
         return { ...resident.actor, kind: "person", connected: connectedPeople.has(resident.subject), ...(avatar ? { avatar_url: avatar } : {}) };
       });
@@ -147,7 +184,11 @@ export class House {
       }
       return { ...room, occupants, last_speech };
     });
-    return { name: this.name, rooms, away: this.away(rooms) };
+    const away = this.away(rooms).map(({ subject }) => {
+      const agent = this.agents.get(subject);
+      return agent ? agentIdentity(agent) : this.identity(this.people.get(subject)!);
+    });
+    return { name: this.name, rooms, away };
   }
 
   history(roomId: string, before: string | null): HouseHistory {
@@ -176,7 +217,12 @@ export class House {
       const events: HouseEvent[] = [];
       if (current !== undefined) events.push(this.exit(resident, this.room(current), now));
       this.db.prepare("INSERT INTO room_members (subject, room) VALUES (?, ?)").run(resident.subject, roomId);
-      if (resident.actor.kind === "person") this.db.prepare("UPDATE person_profile SET return_room = ? WHERE subject = ?").run(roomId, resident.subject);
+      if (resident.actor.kind === "person") {
+        this.db.prepare(`
+          INSERT INTO person_profile (subject, return_room) VALUES (?, ?)
+          ON CONFLICT (subject) DO UPDATE SET return_room = excluded.return_room
+        `).run(resident.subject, roomId);
+      }
       events.push(this.record(room, resident, { kind: "enter" }, before, now));
       return events;
     });
@@ -240,11 +286,14 @@ export class House {
       if (person && location) this.exit(person, location, now);
     }
     for (const { subject, return_room } of this.db.prepare("SELECT subject, return_room FROM person_profile").all()) {
-      if (!this.people.has(subject as string)) this.db.prepare("DELETE FROM person_profile WHERE subject = ?").run(subject!);
-      else if (return_room !== null && !this.hasRoom(return_room as string)) {
+      if (!this.people.has(subject as string)) {
+        this.db.prepare("DELETE FROM person_sessions WHERE subject = ?").run(subject!);
+        this.db.prepare("UPDATE person_profile SET avatar_url = NULL, return_room = NULL WHERE subject = ?").run(subject!);
+      } else if (return_room !== null && !this.hasRoom(return_room as string)) {
         this.db.prepare("UPDATE person_profile SET return_room = NULL WHERE subject = ?").run(subject!);
       }
     }
+    this.db.prepare("DELETE FROM person_sessions WHERE expires_ms <= ?").run(now);
     const removePending = this.db.prepare("DELETE FROM pending WHERE recipient = ?");
     for (const { recipient } of this.db.prepare("SELECT DISTINCT recipient FROM pending").all()) {
       if (!this.agents.has(recipient as string)) removePending.run(recipient!);
@@ -270,9 +319,9 @@ export class House {
     return this.db.prepare("SELECT room FROM room_members WHERE subject = ?").get(resident.subject)?.room as string | undefined;
   }
 
-  private away(rooms: { occupants: HouseActor[] }[]): HouseActor[] {
+  private away(rooms: { occupants: HouseActor[] }[]): Resident[] {
     const present = new Set(rooms.flatMap(({ occupants }) => occupants.map(({ id }) => id)));
-    return [...this.residents.values()].map(({ actor }) => actor).filter(({ id }) => !present.has(id));
+    return [...this.residents.values()].filter(({ actor }) => !present.has(actor.id));
   }
 
   private inRoom(room: string): Occupant[] {

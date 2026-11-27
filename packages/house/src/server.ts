@@ -123,14 +123,18 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     }
     if (method === "GET" && path === CALLBACK_PATH) {
       const result = await login.callback(request, query);
-      if (result.kind === "refused") return send(response, result.status, { error: result.code });
+      if (result.kind === "refused") {
+        log(`house: login refused: ${result.code}`);
+        return send(response, result.status, { error: result.code });
+      }
+      log("house: a resident signed in");
       people.publish();
       return redirect(response, "/", result.cookie);
     }
     if (method === "POST" && path === "/auth/logout") {
       const result = login.logout(request);
       if (result.kind === "refused") return send(response, result.status, { error: result.code });
-      if (result.session) people.revoke(result.session);
+      if (result.tokenHash) people.revoke(result.tokenHash);
       response.setHeader("set-cookie", result.cookie);
       return send(response, 204);
     }
