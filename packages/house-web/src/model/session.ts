@@ -53,6 +53,8 @@ export type SessionOptions = {
 /** EventSource.CLOSED: the browser gave up, as it does when the answer is not 200. */
 const CLOSED = 2;
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000];
+/** How long the floor that follows an entering is waited for. */
+const ARRIVAL_MS = 5_000;
 const backoff = (tries: number) => BACKOFF_MS[Math.min(tries, BACKOFF_MS.length - 1)]!;
 
 const INITIAL: Snapshot = {
@@ -140,7 +142,12 @@ export class Session {
     if (room !== undefined && this.snapshot.signedIn === true && this.snapshot.line.kind !== "refused") this.connect();
   }
 
-  /** Enters a room; false when the person is not in it afterwards. */
+  /**
+   * Enters a room. True once the floor shows the person in it. The stream may
+   * bring that floor after the house's answer, so it is waited for a while.
+   * False when the house refused, or the floor never showed the room: the
+   * person went on elsewhere.
+   */
   async enter(room: string): Promise<boolean> {
     const { line } = this.snapshot;
     if (line.kind !== "open") return false;
@@ -152,9 +159,10 @@ export class Session {
       this.set({ notice: undefined });
     } catch (error) {
       if (error instanceof Refused && error.code === "room is full") this.set({ notice: { kind: "full", room } });
-      else this.failed(error);
+      else this.failed(error, line.connection);
+      return false;
     }
-    return myRoom(this.snapshot) === room;
+    return this.arrives(room);
   }
 
   async leave(): Promise<void> {
@@ -163,7 +171,7 @@ export class Session {
     try {
       await this.api.leave(line.connection);
     } catch (error) {
-      this.failed(error);
+      this.failed(error, line.connection);
     }
   }
 
@@ -177,8 +185,9 @@ export class Session {
       return "sent";
     } catch (error) {
       if (error instanceof Unauthorized) this.signedOut();
-      else if (error instanceof Refused && error.code === "connection-required") this.connect();
-      return error instanceof Refused ? "refused" : "unknown";
+      else this.connectionLost(error, line.connection);
+      // The house refuses with a 4xx before it records anything. Any other answer, or none, may follow a recording.
+      return error instanceof Refused && error.status < 500 ? "refused" : "unknown";
     }
   }
 
@@ -317,7 +326,9 @@ export class Session {
     for (let tries = 0; ; tries += 1) {
       const log = this.snapshot.logs.get(room);
       if (log?.due !== due || this.snapshot.line.kind !== "open") return;
-      const anchor = log.events.at(-1)?.id;
+      // Down to the newest event with nothing missing before it. When there is none, down to the first event the
+      // stream brought: what it brought is then all among what was read, or newer than it.
+      const reach = log.events.at(-1)?.id ?? log.heard[0]?.id;
       const fetched: HouseEvent[] = [];
       let before: string | undefined;
       try {
@@ -325,7 +336,7 @@ export class Session {
           const page = await this.api.history(room, before);
           fetched.push(...page.events);
           before = page.before;
-        } while (anchor !== undefined && before !== undefined && !fetched.some(({ id }) => id === anchor));
+        } while (reach !== undefined && before !== undefined && !fetched.some(({ id }) => id === reach));
         this.updateLog(room, (now) => (now.due === due ? caughtUp(now, fetched, before) : now));
         if (!log.read && room === myRoom(this.snapshot)) this.see();
         return;
@@ -363,11 +374,37 @@ export class Session {
     if (changed !== log) this.set({ logs: new Map(this.snapshot.logs).set(room, changed) });
   }
 
-  private failed(error: unknown): void {
+  private failed(error: unknown, connection?: string): void {
     if (error instanceof Unauthorized) this.signedOut();
-    // The house no longer knows the connection: the stream is opened again.
-    else if (error instanceof Refused && error.code === "connection-required") this.connect();
-    else this.set({ notice: { kind: "failed" } });
+    else if (!this.connectionLost(error, connection)) this.set({ notice: { kind: "failed" } });
+  }
+
+  /**
+   * Whether the house refused because it no longer knows the connection the
+   * request carried. The stream is opened again only if that connection is
+   * still the one in use: a line that dropped or was refused since is being
+   * seen to already.
+   */
+  private connectionLost(error: unknown, connection: string | undefined): boolean {
+    if (!(error instanceof Refused) || error.code !== "connection-required") return false;
+    const { line } = this.snapshot;
+    if (line.kind === "open" && line.connection === connection) this.connect();
+    return true;
+  }
+
+  private arrives(room: string): Promise<boolean> {
+    if (myRoom(this.snapshot) === room) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      const stop = this.subscribe(() => {
+        if (myRoom(this.snapshot) !== room) return;
+        stop();
+        resolve(true);
+      });
+      void this.wait(ARRIVAL_MS).then(() => {
+        stop();
+        resolve(false);
+      });
+    });
   }
 
   private signedOut(): void {

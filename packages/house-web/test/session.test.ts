@@ -77,6 +77,22 @@ describe("the line to the house", () => {
     assert.deepEqual(livingLog(session), ["one"]);
   });
 
+  // The newest page of a record that was never read may not reach back to what the stream brought first.
+  it("puts what the stream brought before the first reading succeeded where the record has it", async () => {
+    const house = new FakeHouse();
+    house.failures.history = 1;
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+    for (let line = 1; line <= 51; line += 1) house.happen(speech(LIVING, IVY, String(line)));
+
+    house.drop();
+    house.ready();
+    await settle();
+
+    assert.deepEqual(livingLog(session), Array.from({ length: 51 }, (_, index) => String(index + 1)));
+  });
+
   // An answer about a room that was closed and looked into again is about another showing of it.
   it("drops the record's late answer for a room that was closed and looked into again", async () => {
     const house = new FakeHouse();
@@ -116,6 +132,38 @@ describe("the line to the house", () => {
     await entering;
 
     assert.equal(myRoom(session.getSnapshot()), BATH.id);
+  });
+
+  // The stream tells of floors in their order, but the answer to entering comes on a way of its own:
+  // a floor that came before it may still be the one from before the entering.
+  it("has entered once the floor shows the room, when an older floor came before the answer", async () => {
+    const house = new FakeHouse();
+    house.house = house.withLeeIn(undefined);
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+    const olderFloor = house.house;
+    const answer = house.hold("enter");
+    const entering = session.enter(LIVING.id);
+    await settle();
+
+    house.floor(olderFloor);
+    answer.give();
+    await settle();
+    house.floor(house.withLeeIn(LIVING.id));
+
+    assert.equal(await entering, true);
+  });
+
+  // docs/house.md: a 5xx may come from in front of the house, after the house recorded the speech.
+  it("does not take a speech for unsaid when the answer is an error of the server", async () => {
+    const house = new FakeHouse();
+    const session = start(house);
+    house.ready();
+    await settle();
+    house.failures.say = 1;
+
+    assert.equal(await session.say(LIVING.id, "did this arrive?", []), "unknown");
   });
 
   it("asks the house to say nothing in a room the person is no longer in", async () => {
@@ -217,6 +265,26 @@ describe("the line to the house", () => {
     pause.over();
     await settle();
     assert.equal(session.getSnapshot().signedIn, true);
+    assert.equal(house.sources.length, 1);
+  });
+
+  it("opens no stream for a late refusal of an old connection while the house is asked about the session", async () => {
+    const house = new FakeHouse();
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+    house.refusals.say = "connection-required";
+    const late = house.hold("say");
+    const saying = session.say(LIVING.id, "hello", []);
+    await settle();
+
+    house.hold("house");
+    house.refuseStream();
+    await settle();
+    late.give();
+    await saying;
+    await settle();
+
     assert.equal(house.sources.length, 1);
   });
 });

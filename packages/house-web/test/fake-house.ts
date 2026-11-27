@@ -80,6 +80,8 @@ export class FakeHouse {
   notDelivered: HouseSpeechResult["not_delivered"] = [];
   /** How many of the next requests of a kind the house answers with 503, after doing nothing. */
   readonly failures: Partial<Record<Kind, number>> = {};
+  /** The `error` the house refuses the next request of a kind with, as a 409, after doing nothing. */
+  readonly refusals: Partial<Record<Kind, string>> = {};
   /** Every request but the reads, as `METHOD path`. */
   readonly writes: string[] = [];
   readonly said: Array<{ room: string; speech: HouseSpeech; connection: string | null }> = [];
@@ -112,6 +114,13 @@ export class FakeHouse {
     this.source.readyState = 1;
     this.source.emit("ready", { connection, house: this.house, ...more });
     return connection;
+  }
+
+  /** The house answered the browser's next try with something other than 200: the browser gives up. */
+  refuseStream(): void {
+    const { source } = this;
+    source.readyState = 2;
+    source.emit("error");
   }
 
   /** The line dropped: the browser connects again by itself. */
@@ -164,7 +173,9 @@ export class FakeHouse {
       this.failures[kind]! -= 1;
       return Response.json({ error: "unavailable" }, { status: 503 });
     }
-    const answer = this.answer(url, method, init, room);
+    const refusal = kind === undefined ? undefined : this.refusals[kind];
+    if (refusal !== undefined) delete this.refusals[kind!];
+    const answer = refusal === undefined ? this.answer(url, method, init, room) : Response.json({ error: refusal }, { status: 409 });
     const held = kind === undefined ? undefined : this.held.get(kind);
     if (held !== undefined) {
       this.held.delete(kind!);

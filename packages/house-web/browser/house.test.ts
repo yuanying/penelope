@@ -301,4 +301,65 @@ describe("the house's screen in a browser", () => {
 
     await page.getByRole("button", { name: "居間の会話を開く（まだ読んでいない発言 1 件）" }).waitFor();
   });
+
+  it("says of a candidate that is on the screen that they woke", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await field(page, "居間").click();
+    await page.keyboard.type("@あき");
+    const candidate = page.getByRole("option", { name: /アキ/ });
+    await candidate.getByText("寝ている・届かない").waitFor();
+
+    await house.agent("aki").sync({ mood: null, sleepiness: 5, sleep: { state: "awake" } });
+
+    await candidate.getByText("寝ている・届かない").waitFor({ state: "detached" });
+  });
+
+  /** Says it in the living room; the house records it, and its answer is lost on the way. */
+  async function sayUnanswered(page: Page): Promise<void> {
+    await page.route("**/api/rooms/living/say", async (route) => {
+      await route.fetch();
+      await route.abort();
+    }, { times: 1 });
+    await page.getByRole("button", { name: "送信" }).click();
+    await page.getByRole("group", { name: "送れたか確かめられなかった発言" }).waitFor();
+  }
+
+  // ADR-0075, 7: whom a speech is addressed to decides who is asked to answer. Sending it again must not change that unseen.
+  it("offers to send a speech again without one who left only in so many words", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await field(page, "居間").click();
+    await page.keyboard.type("@ぺね");
+    await page.getByRole("option", { name: /ペネロペ/ }).waitFor();
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("聞こえる?");
+    await sayUnanswered(page);
+    const unsent = page.getByRole("group", { name: "送れたか確かめられなかった発言" });
+
+    await house.agent("penelope").leave();
+    await page.getByText("ペネロペが居間を出た").waitFor();
+
+    assert.ok(await unsent.getByText("@ペネロペ").isVisible());
+    assert.equal(await unsent.getByRole("button", { name: "もう一度送る" }).count(), 0);
+    assert.ok(await unsent.getByRole("button", { name: "ペネロペを宛先から外して送る" }).isVisible());
+  });
+
+  it("leaves the record to be read on a phone beside a long speech that got no answer", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await field(page, "居間").click();
+    for (let line = 1; line <= 60; line += 1) {
+      await page.keyboard.type(`${line} 行目`);
+      await page.keyboard.press("Enter");
+    }
+    await sayUnanswered(page);
+
+    const record = (await page.locator(".room-talk .astryx-chat-layout").boundingBox())!;
+    const bottom = (await page.locator(".room-bottom").boundingBox())!;
+    assert.ok(bottom.y - record.y >= PHONE.height / 3, `only ${Math.round(bottom.y - record.y)}px of the record are left above what stands over it`);
+  });
 });

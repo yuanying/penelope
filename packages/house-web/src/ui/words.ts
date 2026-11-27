@@ -80,8 +80,12 @@ export const words = {
   enterHint: "Enter で送る・Shift+Enter で改行",
   unsentRefused: "送れなかった発言",
   unsentUnknown: "送れたか確かめられなかった発言",
-  unsentUnknownHint: "会話に出ていれば届いています。出ていなければ、もう一度送れます。",
+  unsentUnknownHint: "会話に出ていれば記録されています。出ていなくても、もう一度送ると重なることがあります。",
   resend: "もう一度送る",
+  resendWithout: (gone: readonly string[]) => `${gone.join("・")}を宛先から外して送る`,
+  goneFromRoom: (gone: readonly string[]) => `${spaced(gone.join("・"))}は、いまこの部屋にいません。`,
+  showAll: "全文を開く",
+  showLess: "畳む",
   backToField: "入力欄に戻す",
   discard: "捨てる",
 

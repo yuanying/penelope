@@ -7,7 +7,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { type ChatComposerTrigger, ChatComposer, ChatComposerInput, ChatSendButton } from "@astryxdesign/core/Chat";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import { type KeyboardEvent, useMemo } from "react";
+import { type KeyboardEvent, useMemo, useRef, useState } from "react";
 
 import type { HousePersonOccupant } from "@penelope/contract";
 
@@ -16,8 +16,12 @@ import { isAsleep, ResidentAvatar } from "./residents.tsx";
 import { words } from "./words.ts";
 
 export type Draft = { text: string; to: readonly string[] };
-/** A speech the house did not take (`refused`) or did not answer (`unknown`). */
-export type Unsent = Draft & { said: Exclude<Said, "sent"> };
+/**
+ * A speech the house did not take (`refused`) or did not answer (`unknown`).
+ * Whom it was addressed to is kept by name: one who left the room since is
+ * still shown, and is left out only on the person's word.
+ */
+export type Unsent = { text: string; to: readonly { id: string; name: string }[]; said: Exclude<Said, "sent"> };
 /** What is written for one room. It stays that room's when the person moves. */
 export type Writing = { draft: Draft; unsent: readonly Unsent[] };
 
@@ -42,27 +46,30 @@ const folded = (text: string) => text.replace(/[ぁ-ゖ]/g, (char) => String.fro
 
 export function Speak({ room, others, online, touch, writing, onWriting, onSay }: SpeakProps) {
   const { draft, unsent } = writing;
-  const present = (ids: readonly string[]) => others.filter(({ id }) => ids.includes(id));
-  const to = present(draft.to);
+  const to = others.filter(({ id }) => draft.to.includes(id));
+  const isPresent = (id: string) => others.some((resident) => resident.id === id);
   const candidates = others.filter(({ id }) => !draft.to.includes(id));
   const canSend = online && draft.text.trim() !== "";
 
   const onDraft = (change: (draft: Draft) => Draft) => onWriting((now) => ({ ...now, draft: change(now.draft) }));
   const address = (id: string) => onDraft((now) => (now.to.includes(id) ? now : { ...now, to: [...now.to, id] }));
-  const say = async (text: string, addressed: readonly string[]) => {
-    const said = await onSay(text, addressed);
+  const say = async (text: string, addressed: Unsent["to"]) => {
+    const said = await onSay(text, addressed.map(({ id }) => id));
     if (said !== "sent") onWriting((now) => ({ ...now, unsent: [...now.unsent, { text, to: addressed, said }] }));
   };
   const send = (written: string) => {
     const text = written.trim();
     if (!online || text === "") return;
     onDraft(() => EMPTY_DRAFT);
-    void say(text, to.map(({ id }) => id));
+    void say(text, to.map(({ id, name }) => ({ id, name })));
   };
   const without = (speech: Unsent) => onWriting((now) => ({ ...now, unsent: now.unsent.filter((each) => each !== speech) }));
 
-  // The residents' state is in the key: a candidate says whether it sleeps now.
-  const candidateKey = candidates.map((resident) => `${resident.id}:${isAsleep(resident)}`).join(" ");
+  // Astryx keeps the trigger and the candidates of a menu that is open, so what a candidate shows of the
+  // resident is read at each drawing from here, not from what the menu was opened with.
+  const othersNow = useRef(others);
+  othersNow.current = others;
+  const candidateKey = candidates.map(({ id }) => id).join(" ");
   const triggers = useMemo(() => {
     const items = candidates.map((resident) => ({ id: resident.id, label: resident.name, auxiliaryData: resident }));
     const trigger = (character: string): ChatComposerTrigger => ({
@@ -71,7 +78,7 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
         bootstrap: () => items,
         search: (query) => items.filter(({ id, label }) => folded(label).includes(folded(query)) || id.startsWith(query.toLowerCase())),
       },
-      renderItem: (item) => <Candidate resident={item.auxiliaryData as HousePersonOccupant} />,
+      renderItem: (item) => <Candidate resident={othersNow.current.find(({ id }) => id === item.id) ?? (item.auxiliaryData as HousePersonOccupant)} />,
       // Astryx puts what this returns in the place of the `@` and what was typed after it.
       onSelect: (item) => {
         address(item.id);
@@ -86,45 +93,26 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
 
   return (
     <>
-      {unsent.map((speech, index) => {
-        const addressed = present(speech.to);
-        return (
-          <div key={index} className="speak-unsent" role="group" aria-label={speech.said === "unknown" ? words.unsentUnknown : words.unsentRefused}>
-            <p className="speak-unsent-why">
-              <b>{speech.said === "unknown" ? words.unsentUnknown : words.unsentRefused}</b>
-              {speech.said === "unknown" ? ` ${words.unsentUnknownHint}` : null}
-            </p>
-            <p className="speak-unsent-text">
-              {addressed.map((resident) => (
-                <span key={resident.id} className="speech-to" translate="no">
-                  @{resident.name}{" "}
-                </span>
-              ))}
-              {speech.text}
-            </p>
-            <div className="speak-unsent-actions">
-              <Button
-                label={words.resend}
-                variant="secondary"
-                size={touch ? "lg" : "sm"}
-                isDisabled={!online}
-                onClick={() => {
-                  without(speech);
-                  void say(speech.text, addressed.map(({ id }) => id));
-                }}
-              />
-              <Button
-                label={words.backToField}
-                variant="secondary"
-                size={touch ? "lg" : "sm"}
-                isDisabled={draft.text !== "" || draft.to.length > 0}
-                onClick={() => onWriting((now) => ({ draft: { text: speech.text, to: speech.to }, unsent: now.unsent.filter((each) => each !== speech) }))}
-              />
-              <Button label={words.discard} variant="ghost" size={touch ? "lg" : "sm"} onClick={() => without(speech)} />
-            </div>
-          </div>
-        );
-      })}
+      {unsent.length > 0 ? (
+        <div className="speak-unsent-list">
+          {unsent.map((speech, index) => (
+            <UnsentSpeech
+              key={index}
+              speech={speech}
+              isPresent={isPresent}
+              online={online}
+              touch={touch}
+              fieldEmpty={draft.text === "" && draft.to.length === 0}
+              onResend={(addressed) => {
+                without(speech);
+                void say(speech.text, addressed);
+              }}
+              onBackToField={() => onWriting((now) => ({ draft: { text: speech.text, to: speech.to.map(({ id }) => id) }, unsent: now.unsent.filter((each) => each !== speech) }))}
+              onDiscard={() => without(speech)}
+            />
+          ))}
+        </div>
+      ) : null}
       <ChatComposer
         value={draft.text}
         onChange={(text) => onDraft((now) => ({ ...now, text }))}
@@ -188,6 +176,52 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
         sendButton={<ChatSendButton isDisabled={!canSend} onSend={() => send(draft.text)} />}
       />
     </>
+  );
+}
+
+function UnsentSpeech({ speech, isPresent, online, touch, fieldEmpty, onResend, onBackToField, onDiscard }: {
+  speech: Unsent;
+  isPresent: (id: string) => boolean;
+  online: boolean;
+  touch: boolean;
+  fieldEmpty: boolean;
+  onResend: (to: Unsent["to"]) => void;
+  onBackToField: () => void;
+  onDiscard: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const stillHere = speech.to.filter(({ id }) => isPresent(id));
+  const gone = speech.to.filter(({ id }) => !isPresent(id));
+  const title = speech.said === "unknown" ? words.unsentUnknown : words.unsentRefused;
+  const size = touch ? "lg" : "sm";
+  return (
+    <div className="speak-unsent" role="group" aria-label={title}>
+      <p>
+        <b>{title}</b>
+        {speech.said === "unknown" ? ` ${words.unsentUnknownHint}` : null}
+      </p>
+      <p className={open ? "speak-unsent-text" : "speak-unsent-text speak-unsent-text-short"}>
+        {speech.to.map(({ id, name }) => (
+          <span key={id} className="speech-to" translate="no">
+            @{name}{" "}
+          </span>
+        ))}
+        {speech.text}
+      </p>
+      {gone.length > 0 ? <p>{words.goneFromRoom(gone.map(({ name }) => name))}</p> : null}
+      <div className="speak-unsent-actions">
+        <Button
+          label={gone.length > 0 ? words.resendWithout(gone.map(({ name }) => name)) : words.resend}
+          variant="secondary"
+          size={size}
+          isDisabled={!online}
+          onClick={() => onResend(stillHere)}
+        />
+        <Button label={words.backToField} variant="secondary" size={size} isDisabled={!fieldEmpty} onClick={onBackToField} />
+        <Button label={open ? words.showLess : words.showAll} aria-expanded={open} variant="ghost" size={size} onClick={() => setOpen(!open)} />
+        <Button label={words.discard} variant="ghost" size={size} onClick={onDiscard} />
+      </div>
+    </div>
   );
 }
 

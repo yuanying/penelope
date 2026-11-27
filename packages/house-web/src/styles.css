@@ -921,6 +921,14 @@ button.plan-dock:hover {
   height: 32px;
 }
 /* A speech that was not said, or is not known to have been: above the field, apart from what is written. */
+/* However many and however long, they leave the record above them to be read. */
+.speak-unsent-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(38dvh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
 .speak-unsent {
   display: grid;
   gap: 6px;
@@ -935,6 +943,12 @@ button.plan-dock:hover {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   color: var(--color-text-primary);
+}
+.speak-unsent-text-short {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 .speak-unsent-actions {
   display: flex;
