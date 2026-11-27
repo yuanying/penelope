@@ -2,11 +2,11 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
-  HouseActor, HouseAgentStatus, HouseDelivery, HouseEnterResult, HouseEvent, HouseResident, HouseRoom,
-  HouseSpeech, HouseSpeechResult, HouseSync, HouseSyncResult, HouseView,
+  HouseActor, HouseAgentStatus, HouseDelivery, HouseEvent, HouseHistory, HousePersonFloor, HousePersonIdentity,
+  HousePersonOccupant, HouseResident, HouseRoom, HouseSpeech, HouseSpeechResult, HouseSync, HouseSyncResult, HouseView,
 } from "@penelope/contract";
 
-import type { Agent, HouseConfig } from "./config.ts";
+import type { Agent, HouseConfig, Person, Resident } from "./config.ts";
 import { InvalidInput, PENDING_LIMIT } from "./input.ts";
 
 const STATUS_LEASE_MS = 15_000;
@@ -41,17 +41,31 @@ const SCHEMA = `
   PRAGMA user_version = 1;
 `;
 
+const PEOPLE_SCHEMA = `
+  CREATE TABLE person_profile (
+    subject TEXT PRIMARY KEY NOT NULL,
+    avatar_url TEXT,
+    return_room TEXT
+  );
+  CREATE INDEX latest_speech_by_room ON room_events (room, seq DESC) WHERE json_extract(body, '$.kind') = 'speech';
+  PRAGMA user_version = 2;
+`;
+
+const HISTORY_LIMIT = 50;
+
 export class Conflict extends Error {}
 export class NotFound extends Error {}
 
 type Activity = { kind: "enter" | "leave" } | ({ kind: "speech" } & Required<HouseSpeech>);
-type Occupant = { agent: Agent; status: HouseAgentStatus | null };
+type Occupant = { resident: Resident; status: HouseAgentStatus | null; avatar: string | null };
 
 export class House {
   private readonly db: DatabaseSync;
   private readonly name: string;
   private readonly rooms: Map<string, HouseRoom>;
   private readonly agents: Map<string, Agent>;
+  private readonly people: Map<string, Person>;
+  private readonly residents: Map<string, Resident>;
   private readonly ids: Set<string>;
   private readonly seen = new Map<string, number>();
 
@@ -59,14 +73,19 @@ export class House {
     this.name = config.name;
     this.rooms = new Map(config.rooms.map((room) => [room.id, room]));
     this.agents = new Map(config.agents.map((agent) => [agent.subject, agent]));
-    this.ids = new Set(config.agents.map(({ actor }) => actor.id));
+    this.people = new Map(config.people.map((person) => [person.subject, person]));
+    this.residents = new Map<string, Resident>([...this.agents, ...this.people]);
+    this.ids = new Set([...this.residents.values()].map(({ actor }) => actor.id));
     this.db = new DatabaseSync(config.database);
     try {
       this.db.exec("PRAGMA journal_mode = WAL");
       const version = this.db.prepare("PRAGMA user_version").get()?.user_version;
-      if (version === 0) this.transaction(() => this.db.exec(SCHEMA));
-      else if (version !== 1) throw new Error("unknown house database version");
-      this.transaction(() => this.reconcileConfig(now));
+      if (version !== 0 && version !== 1 && version !== 2) throw new Error("unknown house database version");
+      this.transaction(() => {
+        if (version === 0) this.db.exec(SCHEMA);
+        if (version !== 2) this.db.exec(PEOPLE_SCHEMA);
+        this.reconcileConfig(now);
+      });
     } catch (error) {
       this.db.close();
       throw error;
@@ -81,53 +100,109 @@ export class House {
     return this.agents.get(subject);
   }
 
-  view(agent: Agent, now: number): HouseView {
-    const membership = new Map(this.db.prepare("SELECT subject, room FROM room_members").all().map((row) => [row.subject as string, row.room as string]));
-    const rooms = new Map([...this.rooms.values()].map((room) => [room.id, { ...room, occupants: [] as HouseResident[] }]));
-    const statuses = new Map(this.db.prepare("SELECT subject, body FROM agent_status").all().map((row) => [row.subject as string, row.body as string]));
-    const away: HouseResident[] = [];
-    for (const each of this.agents.values()) {
-      const room = rooms.get(membership.get(each.subject) ?? "");
-      const status = statuses.get(each.subject);
-      (room?.occupants ?? away).push(this.visible(each, status === undefined ? null : JSON.parse(status) as HouseAgentStatus, now));
-    }
-    return { name: this.name, you: agent.actor.id, rooms: [...rooms.values()], away };
+  person(login: string): Person | undefined {
+    return this.people.get(`github:${login.toLowerCase()}`);
   }
 
-  enter(agent: Agent, roomId: string, now: number): HouseEnterResult {
+  hasRoom(id: string): boolean {
+    return this.rooms.has(id);
+  }
+
+  setAvatar(person: Person, url: string | null): void {
+    this.db.prepare(`
+      INSERT INTO person_profile (subject, avatar_url) VALUES (?, ?)
+      ON CONFLICT (subject) DO UPDATE SET avatar_url = excluded.avatar_url
+    `).run(person.subject, url);
+  }
+
+  identity(person: Person): HousePersonIdentity {
+    const avatar = this.db.prepare("SELECT avatar_url FROM person_profile WHERE subject = ?").get(person.subject)?.avatar_url as string | null | undefined;
+    return { ...person.actor, ...(avatar ? { avatar_url: avatar } : {}) };
+  }
+
+  view(agent: Agent, now: number): HouseView {
+    const rooms = [...this.rooms.values()].map((room) => ({ ...room, occupants: this.visibleIn(room.id, now) }));
+    return { name: this.name, you: agent.actor.id, rooms, away: this.away(rooms) };
+  }
+
+  personFloor(now: number, connectedPeople: ReadonlySet<string>): HousePersonFloor {
+    const latest = this.db.prepare("SELECT body FROM room_events WHERE room = ? AND json_extract(body, '$.kind') = 'speech' ORDER BY seq DESC LIMIT 1");
+    const rooms = [...this.rooms.values()].map((room) => {
+      const occupants = this.inRoom(room.id).map(({ resident, status, avatar }): HousePersonOccupant => {
+        const agent = this.agents.get(resident.subject);
+        if (agent) {
+          const { actor, avatar_url, chat_url } = agent;
+          const connected = this.agentConnected(agent, now);
+          return { ...actor, connected, status: connected ? status : null, avatar_url, chat_url };
+        }
+        return { ...resident.actor, kind: "person", connected: connectedPeople.has(resident.subject), ...(avatar ? { avatar_url: avatar } : {}) };
+      });
+      const row = latest.get(room.id);
+      let last_speech = null;
+      if (row) {
+        const { id, actor, occurred_at, text } = JSON.parse(row.body as string) as Extract<HouseEvent, { kind: "speech" }>;
+        const chars = [...text.trim().split(/\r?\n/, 1)[0]!];
+        const preview = chars.length <= 200 ? chars.join("") : `${chars.slice(0, 199).join("")}…`;
+        last_speech = { id, actor, occurred_at, text: preview };
+      }
+      return { ...room, occupants, last_speech };
+    });
+    return { name: this.name, rooms, away: this.away(rooms) };
+  }
+
+  history(roomId: string, before: string | null): HouseHistory {
+    this.room(roomId);
+    const limit = before === null ? undefined : this.db.prepare("SELECT seq FROM room_events WHERE room = ? AND id = ?").get(roomId, before)?.seq;
+    if (before !== null && limit === undefined) throw new InvalidInput("unknown history cursor");
+    const rows = limit === undefined
+      ? this.db.prepare("SELECT body FROM room_events WHERE room = ? ORDER BY seq DESC LIMIT ?").all(roomId, HISTORY_LIMIT + 1)
+      : this.db.prepare("SELECT body FROM room_events WHERE room = ? AND seq < ? ORDER BY seq DESC LIMIT ?").all(roomId, limit, HISTORY_LIMIT + 1);
+    const events = rows.slice(0, HISTORY_LIMIT).map(({ body }) => JSON.parse(body as string) as HouseEvent);
+    return { events, before: rows.length > HISTORY_LIMIT ? events.at(-1)?.id : undefined };
+  }
+
+  returnRoom(person: Person): string | undefined {
+    const room = this.db.prepare("SELECT return_room FROM person_profile WHERE subject = ?").get(person.subject)?.return_room;
+    return typeof room === "string" ? room : undefined;
+  }
+
+  enter(resident: Resident, roomId: string, now: number): HouseEvent[] {
     const room = this.room(roomId);
     return this.transaction(() => {
-      const current = this.roomOf(agent);
-      if (current === roomId) return { occupants: this.visibleIn(roomId, now) };
+      const current = this.roomOf(resident);
+      if (current === roomId) return [];
       const before = this.inRoom(roomId);
       if (room.capacity !== null && before.length >= room.capacity) throw new Conflict("room is full");
-      if (current !== undefined) this.exit(agent, this.room(current), now);
-      this.db.prepare("INSERT INTO room_members (subject, room) VALUES (?, ?)").run(agent.subject, roomId);
-      this.record(room, agent, { kind: "enter" }, before, now);
-      return { occupants: this.visibleIn(roomId, now) };
+      const events: HouseEvent[] = [];
+      if (current !== undefined) events.push(this.exit(resident, this.room(current), now));
+      this.db.prepare("INSERT INTO room_members (subject, room) VALUES (?, ?)").run(resident.subject, roomId);
+      if (resident.actor.kind === "person") this.db.prepare("UPDATE person_profile SET return_room = ? WHERE subject = ?").run(roomId, resident.subject);
+      events.push(this.record(room, resident, { kind: "enter" }, before, now));
+      return events;
     });
   }
 
-  leave(agent: Agent, now: number): void {
-    this.transaction(() => {
-      const roomId = this.roomOf(agent);
-      if (roomId !== undefined) this.exit(agent, this.room(roomId), now);
+  leave(resident: Resident, now: number, forget = false): HouseEvent[] {
+    return this.transaction(() => {
+      if (forget) this.db.prepare("UPDATE person_profile SET return_room = NULL WHERE subject = ?").run(resident.subject);
+      const roomId = this.roomOf(resident);
+      return roomId === undefined ? [] : [this.exit(resident, this.room(roomId), now)];
     });
   }
 
-  say(agent: Agent, roomId: string, speech: Required<HouseSpeech>, now: number): HouseSpeechResult {
+  say(resident: Resident, roomId: string, speech: Required<HouseSpeech>, now: number): { result: HouseSpeechResult; event: HouseEvent } {
     const room = this.room(roomId);
     if (speech.to.some((id) => !this.ids.has(id))) throw new InvalidInput("to contains an unknown resident ID");
     return this.transaction(() => {
-      if (this.roomOf(agent) !== roomId) throw new Conflict("you are not in that room");
+      if (this.roomOf(resident) !== roomId) throw new Conflict("you are not in that room");
       const listeners: Occupant[] = [];
       const not_delivered: HouseActor[] = [];
       for (const member of this.inRoom(roomId)) {
-        if (member.status && member.status.sleep.state !== "awake") not_delivered.push(member.agent.actor);
+        if (member.status && member.status.sleep.state !== "awake") not_delivered.push(member.resident.actor);
         else listeners.push(member);
       }
-      const id = this.record(room, agent, { kind: "speech", ...speech }, listeners, now);
-      return { id, not_delivered };
+      const event = this.record(room, resident, { kind: "speech", ...speech }, listeners, now);
+      return { result: { id: event.id, not_delivered }, event };
     });
   }
 
@@ -155,8 +230,20 @@ export class House {
 
   private reconcileConfig(now: number): void {
     const removeMember = this.db.prepare("DELETE FROM room_members WHERE subject = ?");
-    for (const { subject, room } of this.db.prepare("SELECT subject, room FROM room_members").all()) {
-      if (!this.agents.has(subject as string) || !this.rooms.has(room as string)) removeMember.run(subject!);
+    const members = this.db.prepare("SELECT subject, room FROM room_members").all();
+    for (const { subject, room } of members) {
+      if (!this.residents.has(subject as string) || !this.rooms.has(room as string)) removeMember.run(subject!);
+    }
+    for (const { subject, room } of members) {
+      const person = this.people.get(subject as string);
+      const location = this.rooms.get(room as string);
+      if (person && location) this.exit(person, location, now);
+    }
+    for (const { subject, return_room } of this.db.prepare("SELECT subject, return_room FROM person_profile").all()) {
+      if (!this.people.has(subject as string)) this.db.prepare("DELETE FROM person_profile WHERE subject = ?").run(subject!);
+      else if (return_room !== null && !this.hasRoom(return_room as string)) {
+        this.db.prepare("UPDATE person_profile SET return_room = NULL WHERE subject = ?").run(subject!);
+      }
     }
     const removePending = this.db.prepare("DELETE FROM pending WHERE recipient = ?");
     for (const { recipient } of this.db.prepare("SELECT DISTINCT recipient FROM pending").all()) {
@@ -179,48 +266,57 @@ export class House {
     return room;
   }
 
-  private roomOf(agent: Agent): string | undefined {
-    return this.db.prepare("SELECT room FROM room_members WHERE subject = ?").get(agent.subject)?.room as string | undefined;
+  roomOf(resident: Resident): string | undefined {
+    return this.db.prepare("SELECT room FROM room_members WHERE subject = ?").get(resident.subject)?.room as string | undefined;
+  }
+
+  private away(rooms: { occupants: HouseActor[] }[]): HouseActor[] {
+    const present = new Set(rooms.flatMap(({ occupants }) => occupants.map(({ id }) => id)));
+    return [...this.residents.values()].map(({ actor }) => actor).filter(({ id }) => !present.has(id));
   }
 
   private inRoom(room: string): Occupant[] {
     return this.db.prepare(`
-      SELECT m.subject, s.body FROM room_members m LEFT JOIN agent_status s USING (subject) WHERE m.room = ? ORDER BY m.rowid
-    `).all(room).map(({ subject, body }) => ({
-      agent: this.agents.get(subject as string)!,
+      SELECT m.subject, s.body, p.avatar_url FROM room_members m
+      LEFT JOIN agent_status s USING (subject) LEFT JOIN person_profile p USING (subject)
+      WHERE m.room = ? ORDER BY m.rowid
+    `).all(room).map(({ subject, body, avatar_url }) => ({
+      resident: this.residents.get(subject as string)!,
       status: body === null ? null : JSON.parse(body as string) as HouseAgentStatus,
+      avatar: avatar_url as string | null,
     }));
   }
 
-  private visible(agent: Agent, status: HouseAgentStatus | null, now: number): HouseResident {
-    const seen = this.seen.get(agent.subject);
-    return {
-      ...agent.actor,
-      status: status && seen !== undefined && now - seen < STATUS_LEASE_MS ? { mood: status.mood, sleep: status.sleep } : null,
-    };
+  private agentConnected(resident: Resident, now: number): boolean {
+    const seen = this.seen.get(resident.subject);
+    return seen !== undefined && now - seen < STATUS_LEASE_MS;
   }
 
-  private visibleIn(room: string, now: number): HouseResident[] {
-    return this.inRoom(room).map(({ agent, status }) => this.visible(agent, status, now));
+  visibleIn(room: string, now: number): HouseResident[] {
+    return this.inRoom(room).map(({ resident, status }) => ({
+      ...resident.actor,
+      status: status && this.agentConnected(resident, now) ? { mood: status.mood, sleep: status.sleep } : null,
+    }));
   }
 
-  private exit(agent: Agent, room: HouseRoom, now: number): void {
-    this.db.prepare("DELETE FROM room_members WHERE subject = ?").run(agent.subject);
-    this.record(room, agent, { kind: "leave" }, this.inRoom(room.id), now);
+  private exit(resident: Resident, room: HouseRoom, now: number): HouseEvent {
+    this.db.prepare("DELETE FROM room_members WHERE subject = ?").run(resident.subject);
+    return this.record(room, resident, { kind: "leave" }, this.inRoom(room.id), now);
   }
 
-  private record(room: HouseRoom, agent: Agent, activity: Activity, recipients: Occupant[], now: number): string {
+  private record(room: HouseRoom, resident: Resident, activity: Activity, recipients: Occupant[], now: number): HouseEvent {
     const id = randomUUID();
-    const event: HouseEvent = { id, occurred_at: new Date(now).toISOString(), room: { id: room.id, name: room.name }, actor: agent.actor, ...activity };
+    const event: HouseEvent = { id, occurred_at: new Date(now).toISOString(), room: { id: room.id, name: room.name }, actor: resident.actor, ...activity };
     const { lastInsertRowid } = this.db.prepare("INSERT INTO room_events (id, room, body) VALUES (?, ?, ?)").run(id, room.id, JSON.stringify(event));
     const deliver = this.db.prepare("INSERT INTO pending (recipient, event_seq, expires_ms, delivery, answer) VALUES (?, ?, ?, ?, ?)");
-    for (const { agent: listener } of recipients) {
-      const own = listener.subject === agent.subject;
+    for (const { resident: listener } of recipients) {
+      if (listener.actor.kind !== "agent") continue;
+      const own = listener.subject === resident.subject;
       const mode = event.kind === "leave" || own ? "batch" : "now";
       const answer = event.kind === "speech" && !own && event.to.includes(listener.actor.id);
       deliver.run(listener.subject, lastInsertRowid, now + DELIVERY_TTL_MS, mode, Number(answer));
     }
-    return id;
+    return event;
   }
 
   private transaction<T>(run: () => T): T {

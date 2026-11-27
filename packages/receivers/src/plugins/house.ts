@@ -93,7 +93,8 @@ async function poll(io: ConnectionIO, endpoint: URL, token: () => string, ownerI
 
 function heartbeatView(view: HouseView) {
   const fits = (note: unknown) => Buffer.byteLength(JSON.stringify(note)) <= HEARTBEAT_BYTES;
-  if (fits(view)) return view;
+  const note = { ...view, away: view.away.map(({ id, name, kind }) => ({ id, name, kind })) };
+  if (fits(note)) return note;
   const shortenMood = (resident: HouseResident): HouseResident => {
     const { status } = resident;
     if (!status?.mood) return resident;
@@ -103,8 +104,7 @@ function heartbeatView(view: HouseView) {
     return { ...resident, status: { ...status, mood } };
   };
   const shorter = {
-    ...view,
-    away: view.away.map(shortenMood),
+    ...note,
     rooms: view.rooms.map((room) => ({ ...room, occupants: room.occupants.map(shortenMood) })),
   };
   if (fits(shorter)) return shorter;

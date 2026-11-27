@@ -56,7 +56,7 @@ function describe({ name, you, rooms, away }: HouseView): string {
       `${line(room.name)} (${line(room.id)})${room.capacity === null ? "" : ` [${room.occupants.length}/${room.capacity}]`}: ${line(room.description)}`,
       ...residents(room.occupants),
     ]),
-    "Away:", ...residents(away),
+    "Away:", ...(away.length ? away.map((resident) => `  ${residentLabel(resident)}`) : ["  (none)"]),
   ].join("\n");
 }
 

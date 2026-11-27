@@ -1,14 +1,19 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { EVENT_PATH_SEGMENT, type HouseActor, type HouseRoom } from "@penelope/contract";
+import { CALLBACK_PATH, type GitHubOAuthSettings } from "@penelope/github-oauth";
 import { audienceOf, type GatedSettings, type KubernetesSettings } from "@penelope/service-account-auth";
 
 import { array, InvalidInput, object, residentId, string } from "./input.ts";
 
-export type Agent = { subject: string; actor: HouseActor & { kind: "agent" } };
+export type Agent = { subject: string; actor: HouseActor & { kind: "agent" }; avatar_url?: string; chat_url?: string };
+export type Person = { subject: string; actor: HouseActor & { kind: "person" } };
+export type Resident = Agent | Person;
 type Auth = {
   gated?: GatedSettings;
   tokenReview?: { kubernetes: KubernetesSettings; audiences: string[] };
+  github?: GitHubOAuthSettings & { origin: string };
 };
 export type HouseConfig = {
   name: string;
@@ -16,7 +21,9 @@ export type HouseConfig = {
   listen: { host: string; port: number };
   rooms: HouseRoom[];
   agents: Agent[];
+  people: Person[];
   auth: Auth;
+  webDir: string;
 };
 
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -47,8 +54,8 @@ function httpUrl(value: unknown, label: string): string {
   return raw;
 }
 
-function authOf(value: unknown, hasAgents: boolean): Auth {
-  const { gated_assertion, tokenreview } = object(value === undefined ? {} : value, "auth", ["gated_assertion", "tokenreview"]);
+function authOf(value: unknown, hasAgents: boolean, hasPeople: boolean): Auth {
+  const { gated_assertion, tokenreview, github } = object(value === undefined ? {} : value, "auth", ["gated_assertion", "tokenreview", "github"]);
   const auth: Auth = {};
   if (gated_assertion !== undefined) {
     const { issuer, jwks_url, public_url } = object(gated_assertion, "auth.gated_assertion", ["issuer", "jwks_url", "public_url"]);
@@ -76,7 +83,24 @@ function authOf(value: unknown, hasAgents: boolean): Auth {
       audiences: requested,
     };
   }
+  if (github !== undefined) {
+    const path = "auth.github";
+    const { public_url, client_id, client_secret_file } = object(github, path, ["public_url", "client_id", "client_secret_file"]);
+    const url = new URL(httpUrl(public_url, `${path}.public_url`));
+    const loopback = ["127.0.0.1", "[::1]", "localhost"].includes(url.hostname);
+    if (url.pathname !== "/" || url.search || (url.protocol !== "https:" && !loopback)) {
+      throw new InvalidInput(`${path}.public_url must be an HTTPS origin (HTTP is allowed on loopback)`);
+    }
+    const secretFile = string(client_secret_file, `${path}.client_secret_file`);
+    auth.github = {
+      clientId: string(client_id, `${path}.client_id`),
+      clientSecret: readNonempty(secretFile, `${path}.client_secret_file`),
+      callbackUrl: new URL(CALLBACK_PATH, url).href,
+      origin: url.origin,
+    };
+  }
   if (hasAgents && !auth.gated && !auth.tokenReview) throw new InvalidInput("auth is required with a nonempty agents list");
+  if (hasPeople && !auth.github) throw new InvalidInput("auth.github is required with a nonempty people list");
   return auth;
 }
 
@@ -92,7 +116,7 @@ function readNonempty(path: string, label: string): string {
 }
 
 export function parseConfig(value: unknown): HouseConfig {
-  const { name, database, listen, rooms, agents, auth } = object(value, "house", ["name", "database", "listen", "rooms", "agents", "auth"]);
+  const { name, database, listen, rooms, agents, people, auth, web_dir } = object(value, "house", ["name", "database", "listen", "rooms", "agents", "people", "auth", "web_dir"]);
   const bind = object(listen === undefined ? {} : listen, "listen", ["host", "port"]);
   const port = bind.port === undefined ? 8080 : bind.port;
   if (typeof port !== "number" || !Number.isInteger(port) || port < 0 || port > 65535) throw new InvalidInput("listen.port must be an integer from 0 to 65535");
@@ -110,13 +134,22 @@ export function parseConfig(value: unknown): HouseConfig {
   unique(parsedRooms.map(({ id }) => id), "rooms");
   const parsedAgents = array(agents, "agents").map((item, i): Agent => {
     const label = `agents[${i}]`;
-    const agent = object(item, label, ["id", "name", "service_account"]);
+    const agent = object(item, label, ["id", "name", "service_account", "avatar_url", "chat_url"]);
     return {
       subject: subjectOf(agent.service_account, `${label}.service_account`),
       actor: { kind: "agent", id: residentId(agent.id, `${label}.id`), name: string(agent.name, `${label}.name`, 128) },
+      ...(agent.avatar_url === undefined ? {} : { avatar_url: httpUrl(agent.avatar_url, `${label}.avatar_url`) }),
+      ...(agent.chat_url === undefined ? {} : { chat_url: httpUrl(agent.chat_url, `${label}.chat_url`) }),
     };
   });
-  unique(parsedAgents.map(({ actor }) => actor.id), "agent IDs");
+  const parsedPeople = array(people === undefined ? [] : people, "people").map((item, i): Person => {
+    const label = `people[${i}]`;
+    const { login, name } = object(item, label, ["login", "name"]);
+    const id = string(login, `${label}.login`, 39).toLowerCase();
+    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) throw new InvalidInput(`${label}.login must be a GitHub login`);
+    return { subject: `github:${id}`, actor: { kind: "person", id, name: string(name, `${label}.name`, 128) } };
+  });
+  unique([...parsedAgents, ...parsedPeople].map(({ actor }) => actor.id), "resident IDs");
   unique(parsedAgents.map(({ subject }) => subject), "agent ServiceAccounts");
   return {
     name: string(name, "name", 128),
@@ -124,6 +157,8 @@ export function parseConfig(value: unknown): HouseConfig {
     listen: { host: bind.host === undefined ? "0.0.0.0" : string(bind.host, "listen.host"), port },
     rooms: parsedRooms,
     agents: parsedAgents,
-    auth: authOf(auth, parsedAgents.length > 0),
+    people: parsedPeople,
+    auth: authOf(auth, parsedAgents.length > 0, parsedPeople.length > 0),
+    webDir: web_dir === undefined ? fileURLToPath(new URL("../web/", import.meta.url)) : string(web_dir, "web_dir"),
   };
 }

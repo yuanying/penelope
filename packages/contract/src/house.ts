@@ -18,7 +18,7 @@ export type HouseView = {
   name: string;
   you: string;
   rooms: (HouseRoom & { occupants: HouseResident[] })[];
-  away: HouseResident[];
+  away: HouseActor[];
 };
 
 export type HouseSpeech = { text: string; to?: string[] };
@@ -35,6 +35,22 @@ export type HouseDelivery = {
   delivery: Delivery;
   answer_via?: { command: "house say" };
 };
+
+export type HousePersonIdentity = HouseActor & { kind: "person"; avatar_url?: string };
+export type HousePersonOccupant = (
+  | (HouseActor & { kind: "agent"; status: HouseAgentStatus | null; avatar_url?: string; chat_url?: string })
+  | HousePersonIdentity
+) & { connected: boolean };
+export type HouseSpeechPreview = Pick<Extract<HouseEvent, { kind: "speech" }>, "id" | "actor" | "text" | "occurred_at">;
+export type HousePersonFloor = {
+  name: string;
+  rooms: (HouseRoom & { occupants: HousePersonOccupant[]; last_speech: HouseSpeechPreview | null })[];
+  away: HouseActor[];
+};
+export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity };
+export type HouseHistory = { events: HouseEvent[]; before?: string };
+export type HouseStreamReady = { connection: string; house: HousePersonView; return_failed?: string };
+export type HouseStreamEvents = { ready: HouseStreamReady; house: HousePersonView; room: HouseEvent };
 
 export type HouseSync = { status: HouseAgentStatus; ack?: string[] };
 export type HouseSyncResult = { house: HouseView; pending: HouseDelivery[] };

@@ -158,6 +158,15 @@ test("house withdraws the heartbeat view on disconnection and publishes a fresh 
   assert.equal(note, undefined);
 });
 
+test("the heartbeat omits away status even when an older house still sends it", async (t) => {
+  const away = { id: "fern", name: "Fern", kind: "agent", status: { mood: "Private", sleep: awake.sleep } };
+  let note: unknown;
+  connect(t, { setHeartbeatNote: async (value) => { note = value; return true; } }, () =>
+    Response.json({ house: { ...house, away: [away] }, pending: [] }));
+  await setImmediate();
+  assert.deepEqual(note, { ...house, away: [{ id: "fern", name: "Fern", kind: "agent" }] });
+});
+
 test("house shortens moods before dropping room descriptions from the heartbeat view", async (t) => {
   const description = "場".repeat(1_024);
   const mood = "眠".repeat(160);

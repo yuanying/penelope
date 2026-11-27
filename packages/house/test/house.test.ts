@@ -144,6 +144,17 @@ test("the room view hides sleepiness and stops showing a disconnected resident's
   assert.deepEqual((await house.view("plant")).rooms[0]?.occupants, [{ id: "fern", name: "Fern", kind: "agent", status: null }]);
 });
 
+test("an away resident's status is private even while their sync is current", async (t) => {
+  const house = await open(t);
+  await house.enter("fern");
+  await house.sync("fern", sleeping);
+  await house.request("fern", "/room", "DELETE");
+
+  assert.deepEqual((await house.sync("plant")).house.away.find(({ id }) => id === "fern"), {
+    id: "fern", name: "Fern", kind: "agent",
+  });
+});
+
 test("unacked delivery survives restart with the same id and only the recipient's ack clears it", async (t) => {
   const dir = mkdtempSync(join(tmpdir(), "penelope-house-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

@@ -32,10 +32,10 @@ test("house say names residents who did not receive the speech", async () => {
 test("house status shows which room people occupy and who is away", async () => {
   const house: HouseView = { name: "Example house", you: "ivy", rooms: [
     { id: "living", name: "居間", description: "話す場所", capacity: null, occupants: [fern] },
-  ], away: [{ id: "ivy", name: "アイビー", kind: "agent", status: null }] };
+  ], away: [{ id: "ivy", name: "アイビー", kind: "agent" }] };
   const result = await runHouse(["status"], env, async () => Response.json(house));
   assert.equal(result.code, 0, result.stderr);
-  assert.match(result.stdout, /居間 \(living\).*話す場所[\s\S]*ファーン \(fern\)[\s\S]*Away:[\s\S]*アイビー \(ivy\)/);
+  assert.match(result.stdout, /居間 \(living\).*話す場所[\s\S]*ファーン \(fern\)[\s\S]*Away:\n  アイビー \(ivy\)\n$/);
 });
 
 test("house enter shows the occupants with their visible status", async () => {
