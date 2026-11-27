@@ -1,25 +1,12 @@
-# Once a day, a backup of the two PVCs (penelope, penelope-memory) into the
-# volume backup (README.md, "Backup"), without stopping the Pod.
-#
-# 1. sqlite (init container, the backend's image, UID 1001): a consistent
-#    copy of the backend's SQLite into /staging (sqlite-backup.mjs). The
-#    same Node as the backend's opens it, so their SQLite versions agree.
-# 2. archive (the sandbox's image, root): the copy and a tar of each PVC,
-#    kept KEEP_DAYS days (archive.sh). Root, to read what is 0700 to the
-#    sandbox and the backend and keep the owners.
-#
-# The PVCs are ReadWriteOnce, so the Job runs on the node of the agent's Pod.
-# When that Pod is not running, the Job stays Pending until its deadline.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: penelope-backup
 spec:
-  # A fixed backup time in the CronJob's time zone, independent of when the agent sleeps.
-  schedule: "30 5 * * *"
-  timeZone: Asia/Tokyo
+  schedule: "*/15 * * * *"
+  timeZone: Etc/UTC
   concurrencyPolicy: Forbid
-  startingDeadlineSeconds: 3600
+  startingDeadlineSeconds: 900
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 1
   jobTemplate:
@@ -47,14 +34,49 @@ spec:
             seccompProfile:
               type: RuntimeDefault
           initContainers:
-          - name: sqlite
+          - name: select-backup
             image: ghcr.io/yuanying/penelope-backend
             command:
             - node
-            - --no-warnings
-            - /etc/penelope-backup/sqlite-backup.mjs
-            - /var/lib/penelope/backend.sqlite
-            - /staging/backend.sqlite
+            - /etc/penelope-backup/select-backup.mjs
+            env:
+            - name: BACKUP_METRICS_URL
+              value: http://penelope-metrics:9100/metrics
+            securityContext:
+              runAsUser: 0
+              runAsGroup: 0
+              runAsNonRoot: false
+              readOnlyRootFilesystem: true
+              allowPrivilegeEscalation: false
+              capabilities:
+                drop:
+                - ALL
+                add:
+                - DAC_READ_SEARCH
+            resources:
+              requests:
+                cpu: 10m
+                memory: 32Mi
+              limits:
+                memory: 256Mi
+            volumeMounts:
+            - name: backup
+              mountPath: /backup
+              readOnly: true
+            - name: staging
+              mountPath: /staging
+            - name: scripts
+              mountPath: /etc/penelope-backup
+              readOnly: true
+          - name: sqlite
+            image: ghcr.io/yuanying/penelope-backend
+            command:
+            - sh
+            - -ec
+            - |
+              if [ -f /staging/backup-stamp ]; then
+                exec node --no-warnings /etc/penelope-backup/sqlite-backup.mjs /var/lib/penelope/backend.sqlite /staging/backend.sqlite
+              fi
             securityContext:
               runAsUser: 1001
               runAsGroup: 1001

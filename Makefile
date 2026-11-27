@@ -127,12 +127,12 @@ test-release: ## Check which bot changes the release without a person releases, 
 
 # The Kubernetes example (deploy/kubernetes/) has to stay buildable by
 # kustomize; go test ./... checks that its settings agree with each other.
-# The migrate Pod and its tool for natsumi's schedules are checked here too.
+# The backup decision and the tool to migrate natsumi's schedules are checked here too.
 .PHONY: test-deploy
-test-deploy: ## Build the Kubernetes example and the migrate Pod with kustomize, and test the migrate tool.
+test-deploy: ## Build the Kubernetes example and migrate Pod, and test the backup and migrate tools.
 	$(GO) tool kustomize build deploy/kubernetes/example > /dev/null
 	$(GO) tool kustomize build deploy/kubernetes/migrate > /dev/null
-	node --test deploy/kubernetes/migrate/move-schedules.test.mjs
+	node --test deploy/kubernetes/migrate/move-schedules.test.mjs deploy/kubernetes/components/backup/select-backup.test.mjs
 
 .PHONY: test-go
 test-go: ## Unit tests of the Go module.

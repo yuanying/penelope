@@ -1,0 +1,15 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: penelope
+spec:
+  template:
+    spec:
+      containers:
+      - name: backend
+        env:
+        - name: PENELOPE_METRICS_LISTEN
+          value: "[::]:9100"
+        ports:
+        - name: metrics
+          containerPort: 9100

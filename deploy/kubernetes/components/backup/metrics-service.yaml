@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: penelope-metrics
+spec:
+  selector:
+    app.kubernetes.io/name: penelope
+    app.kubernetes.io/component: agent
+  ports:
+  - name: metrics
+    port: 9100
+    targetPort: metrics

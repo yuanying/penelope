@@ -13,7 +13,7 @@ penelope の Pod（[docs/pod.md](../../docs/pod.md)）を Kubernetes で動か�
 | 場所 | 中身 |
 | --- | --- |
 | `base/` | 誰にも同じもの。StatefulSet（4 つのコンテナと init container）、init の台本（`init/`）、PVC 2 つ、Service、ServiceAccount |
-| `components/backup/` | 任意の部品。1 日 1 回の backup の CronJob（下の「backup」） |
+| `components/backup/` | 任意の部品。睡眠完了後、または前回から 24 時間たったら写す CronJob（下の「backup」） |
 | `example/` | 1 人分の overlay の例。設定の ConfigMap、Ingress、名前空間、image の版、Slack・A2A・sd-webui・X 検索・自分のアバターの例 |
 | `migrate/` | natsumi から移すときに 1 回だけ使う、作業用の Pod と予約を移す道具（[natsumi からの移行の手引き](../../docs/migrate-from-natsumi.md)） |
 | `example_test.go` | `example/` の設定どうしが合っていることの確かめ（`make test`） |
@@ -285,18 +285,24 @@ init container `redirect` は NET_ADMIN で iptables（nft）の規則を張る�
 
 ## backup
 
-`components/backup/` は、1 日 1 回（既定は 05:30、夜の切り替えの後）、Pod を止めずに 2 つの PVC を写す。
+`components/backup/` の CronJob は 15 分ごとに、Pod を止めずに 2 つの PVC を写す必要があるか確かめる。判定には、[metrics](../../docs/backend.md#metrics) の `penelope_sleep_last_completed_timestamp_seconds` と、最後に成功した backup の開始時刻を使う。
+
+- 眠りの 4 段が済んだ時刻が前回の backup の開始より新しければ写す。backup がまだ無いか、前回の開始から 24 時間以上たっていれば、眠りの有無や metrics を読めるかどうかに関係なく写す。
+- component は backend の `PENELOPE_METRICS_LISTEN` を `[::]:9100` に設定する。CronJob はクラスタ内の Service `penelope-metrics` の `GET /metrics` を読む。Service は Ingress に載せない。metrics 未対応の backend image では 24 時間の条件だけで動く。
+- 時刻は完成した backup のディレクトリ名から読む。作業中・失敗した `.partial` は数えない。開始時刻を使うため、backup の途中で眠りが済んだ場合は次の回で写す。
 
 - backend の SQLite は、そのまま写すと書きかけや WAL の分を落とし得るので、SQLite の online backup（`sqlite3` の `.backup` と同じ仕組み）で整合したコピーを取る（`sqlite-backup.mjs`。backend の image の Node で動く）。
 - `penelope` は SQLite の本体と作り直せるキャッシュ（`~/.cache`・`~/go/pkg/mod`・`~/.npm`・`node_modules`・`~/.kube/cache`）を除いて tar に、`penelope-memory` はそのまま tar にする。持ち主と権限は数値のまま残る。
-- 置き場は `<UTC の時刻>/`（`backend.sqlite`・`state.tar.gz`・`memory.tar.gz`）で、14 日分を残す（`KEEP_DAYS`）。
+- 置き場は `<UTC の開始時刻>/`（`backend.sqlite`・`state.tar.gz`・`memory.tar.gz`）で、14 日分を残す（`KEEP_DAYS`）。
 - 置き場の volume は、見本では同じクラスタの PVC `penelope-backup` である。同じストレージの故障では一緒に失うので、patch で NFS などの別の場所に向ける。
 - PVC は ReadWriteOnce なので、Job は agent の Pod と同じノードで動く。Pod を止めている間は Pending のまま期限で終わる。
 
-手で取るとき（版を上げる前など）:
+手で取るとき（版を上げる前など）は、実行中の backup がないことを確かめてから `FORCE_BACKUP=1` を渡す。
 
 ```sh
-kubectl -n penelope create job --from=cronjob/penelope-backup penelope-backup-manual
+kubectl -n penelope create job --from=cronjob/penelope-backup penelope-backup-manual --dry-run=client -o yaml |
+  kubectl set env --local -f - --containers=select-backup FORCE_BACKUP=1 -o yaml |
+  kubectl -n penelope create -f -
 kubectl -n penelope wait --for=condition=complete job/penelope-backup-manual --timeout=1h
 ```
 

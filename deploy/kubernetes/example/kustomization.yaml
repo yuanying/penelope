@@ -13,7 +13,7 @@ resources:
 - ingress.yaml
 
 components:
-# The daily backup (optional; README.md, "Backup").
+# Back up after sleep or once a day (optional; README.md, "Backup").
 - ../components/backup
 
 # The four images of one release, always the same version.
