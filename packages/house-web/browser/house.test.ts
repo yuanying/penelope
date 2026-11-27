@@ -139,17 +139,89 @@ describe("the house's screen in a browser", () => {
     assert.equal(await focused(page), "いまはどの部屋にもいません");
   });
 
-  it("opens the conversation of a room entered from looking into it on a phone, with the focus on its name", async (t) => {
+  it("opens the room on a phone and focuses its name before the house handles entry", async (t) => {
     const house = await evening(t);
     const page = await open(t, house, PHONE);
     await page.getByRole("button", { name: "ミャオの部屋を覗く" }).click();
+    let enter!: () => void;
+    const pending = new Promise<void>((resolve) => (enter = resolve));
+    await page.route("**/api/rooms/myao-room/enter", async (route) => {
+      await pending;
+      await route.continue();
+    });
+    t.after(enter);
 
     await page.getByRole("button", { name: "ここに入る" }).click();
-
-    await field(page, "ミャオの部屋").waitFor();
-    await page.waitForFunction(() => document.activeElement?.tagName === "H2");
-    assert.equal(await focused(page), "ミャオの部屋");
+    const conversation = page.getByRole("region", { name: "自分のいる部屋" });
+    await conversation.getByRole("heading", { name: "ミャオの部屋", exact: true }).waitFor({ timeout: 2_000 });
     assert.equal(await page.evaluate(() => window.location.hash), "#/talk");
+    assert.equal(await focused(page), "ミャオの部屋");
+    assert.equal(await field(page, "ミャオの部屋").count(), 0);
+
+    enter();
+    await field(page, "ミャオの部屋").waitFor();
+    assert.equal(await focused(page), "ミャオの部屋");
+  });
+
+  it("leaves the peek and its focus alone when Forward overtakes a pending entry", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    await page.route((url) => url.pathname === "/api/stream" && url.searchParams.has("peek"), async (route) => {
+      await blocked;
+      await route.abort();
+    });
+    t.after(release);
+    await page.getByRole("button", { name: "居間を覗く" }).click();
+    await page.getByRole("button", { name: "風呂を覗く" }).click();
+    await page.goBack();
+    await page.setViewportSize(PHONE);
+    let enter!: () => void;
+    const pending = new Promise<void>((resolve) => (enter = resolve));
+    await page.route("**/api/rooms/living/enter", async (route) => {
+      await pending;
+      await route.continue();
+    });
+    t.after(enter);
+
+    await page.getByRole("button", { name: "ここに入る" }).click();
+    await page.goForward();
+    const heading = page.getByRole("region", { name: "覗いている部屋" }).getByRole("heading", { name: /^風呂/ });
+    await heading.focus();
+    const response = page.waitForResponse("**/api/rooms/living/enter");
+    enter();
+    assert.equal((await response).status(), 200);
+    await page.getByRole("button", { name: "居間に戻る" }).waitFor({ timeout: 2_000 });
+
+    assert.equal(await page.evaluate(() => window.location.hash), "#/peek/bath");
+    assert.match(await focused(page), /^風呂/);
+  });
+
+  it("keeps every speech between peeking and entering even when a peek request cannot connect", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    let release!: () => void;
+    const blocked = new Promise<void>((resolve) => (release = resolve));
+    await page.route((url) => url.pathname === "/api/stream" && url.searchParams.has("peek"), async (route) => {
+      await blocked;
+      await route.continue();
+    });
+    t.after(release);
+    await house.agent("penelope").say("living", "覗く前の発言");
+    await page.getByRole("button", { name: "居間を覗く" }).click();
+    await page.getByText("覗く前の発言", { exact: true }).waitFor();
+
+    const texts = Array.from({ length: 60 }, (_, index) => `入る前の発言 ${index + 1}`);
+    for (const text of texts) await house.agent("penelope").say("living", text);
+    await page.getByRole("button", { name: "ここに入る" }).click();
+    await page.getByText("Lee が居間に来た").waitFor();
+    release();
+    await field(page, "居間").waitFor();
+    await page.getByText(texts.at(-1)!, { exact: true }).waitFor();
+
+    const between = page.locator(".speech-text").filter({ hasText: /^入る前の発言 / });
+    assert.deepEqual(await between.allTextContents(), texts);
   });
 
   it("keeps the focus inside the sheet of the room's residents on a phone, and gives it back on closing", async (t) => {

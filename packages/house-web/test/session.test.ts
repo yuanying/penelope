@@ -189,8 +189,27 @@ describe("the line to the house", () => {
     assert.equal(livingLog(session).at(-1), "60");
   });
 
-  // An answer about a room that was closed and looked into again is about another showing of it.
-  it("drops the record's late answer for a room that was closed and looked into again", async () => {
+  it("fills a gap in a room that was hidden while the stream reconnected", async () => {
+    const house = new FakeHouse();
+    house.pageSize = 2;
+    house.happen(speech(BATH, FERN, "before"), { heard: false });
+    const session = start(house);
+    house.ready();
+    session.peek(BATH.id);
+    house.ready();
+    await settle();
+    session.peek(undefined);
+    house.drop();
+    for (const text of ["one", "two", "three"]) house.happen(speech(BATH, FERN, text), { heard: false });
+    house.ready();
+    house.happen(speech(BATH, FERN, "after"));
+    session.peek(BATH.id);
+    await settle();
+
+    assert.deepEqual(texts(session, BATH.id), ["before", "one", "two", "three", "after"]);
+  });
+
+  it("drops a late page from before reconnecting when the room is looked into again", async () => {
     const house = new FakeHouse();
     house.happen(speech(BATH, FERN, "1"), { heard: false });
     const session = start(house);
@@ -200,6 +219,7 @@ describe("the line to the house", () => {
     session.peek(BATH.id);
     await settle();
 
+    house.drop();
     session.peek(undefined);
     for (let line = 2; line <= 53; line += 1) house.happen(speech(BATH, FERN, String(line)), { heard: false });
     session.peek(BATH.id);

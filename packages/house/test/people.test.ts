@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-import type { HouseHistory, HousePersonView, HouseSpeechResult, HouseStreamReady } from "@penelope/contract";
+import type { HouseHistory, HousePersonEvent, HousePersonView, HouseSpeechResult, HouseStreamReady } from "@penelope/contract";
 import type { SenderCheck } from "@penelope/service-account-auth";
 
 import { parseConfig } from "../src/config.ts";
@@ -80,8 +80,8 @@ async function open(t: TestContext, database = ":memory:", people = [{ login: "L
       call,
       cookie,
       view: async () => await (await call("/api/house")).json() as HousePersonView,
-      stream: async (peek?: string) => {
-        const response = await request(`/api/stream${peek ? `?peek=${peek}` : ""}`, { cookie, accept: "text/event-stream" });
+      stream: async () => {
+        const response = await request("/api/stream", { cookie, accept: "text/event-stream" });
         assert.equal(response.status, 200);
         const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
@@ -225,7 +225,7 @@ test("peeking and reading history do not join the room or record an entry", asyn
   const house = await open(t);
   await house.agent("/rooms/living/enter", "POST");
   const lee = await house.signIn();
-  const peek = await lee.stream("living");
+  const peek = await lee.stream();
   const history = await (await lee.call("/api/rooms/living/history")).json() as HouseHistory;
   assert.ok(peek.ready.house.away.some(({ id }) => id === "lee"));
   assert.deepEqual(history.events.map(({ kind, actor }) => [kind, actor.id]), [["enter", "fern"]]);
@@ -235,7 +235,7 @@ test("the floor stream shows connected in-room status but hides the status of a 
   const house = await open(t);
   await house.agent("/rooms/bath/enter", "POST");
   const lee = await house.signIn();
-  const stream = await lee.stream("bath");
+  const stream = await lee.stream();
   const status = { mood: "Quiet", sleepiness: 74, sleep: { state: "awake" } };
   await house.agent("/sync", "POST", { status });
   const updated = await stream.next<HousePersonView>("house");
@@ -291,17 +291,21 @@ test("logout revokes the current session and closes its stream", async (t) => {
   assert.equal((await lee.call("/api/house")).status, 401);
 });
 
-test("live room events include the person's room and the tab's peek room", async (t) => {
+test("the same tab receives entries and speech in every room without asking for a room", async (t) => {
   const house = await open(t);
-  await house.agent("/rooms/bath/enter", "POST");
   const lee = await house.signIn();
-  const stream = await lee.stream("bath");
+  const stream = await lee.stream();
+  await house.agent("/rooms/bath/enter", "POST");
+  await house.agent("/rooms/bath/say", "POST", { text: "Elsewhere" });
   await stream.enter("living");
-  await stream.next("room");
-  await house.agent("/rooms/bath/say", "POST", { text: "Peek" });
-  assert.equal((await stream.next<{ text: string }>("room")).text, "Peek");
-  await lee.call("/api/rooms/living/say", "POST", stream.ready.connection, { text: "Home" });
-  assert.equal((await stream.next<{ text: string }>("room")).text, "Home");
+
+  const events = [];
+  for (let i = 0; i < 3; i += 1) {
+    const event = await stream.next<HousePersonEvent>("room");
+    events.push([event.room.id, event.kind]);
+    if (event.room.id === "living") break;
+  }
+  assert.deepEqual(events, [["bath", "enter"], ["bath", "speech"], ["living", "enter"]]);
 });
 
 test("speaking without a tab connection is rejected even while the resident is in the room", async (t) => {
@@ -320,7 +324,7 @@ test("speaking on a closed tab is rejected during the grace period", async (t) =
   const tab = await lee.stream();
   await tab.enter("living");
   const sam = await house.signIn("sam");
-  const observer = await sam.stream("living");
+  const observer = await sam.stream();
   await tab.close();
   await observer.next("house");
 
@@ -404,7 +408,7 @@ test("reconnecting during grace does not record a departure or a new entry", asy
   const tab = await lee.stream();
   await tab.enter("living");
   const sam = await house.signIn("sam");
-  const observer = await sam.stream("living");
+  const observer = await sam.stream();
   await tab.close();
   const grace = await observer.next<HousePersonView>("house");
   assert.deepEqual(grace.rooms[0]?.occupants.map(({ id, connected }) => [id, connected]), [["lee", false]]);
@@ -425,7 +429,7 @@ test("reconnecting after grace returns the resident to their previous room", asy
   const tab = await lee.stream();
   await tab.enter("living");
   const sam = await house.signIn("sam");
-  const observer = await sam.stream("living");
+  const observer = await sam.stream();
   await tab.close();
   await observer.next("house");
 
@@ -441,7 +445,7 @@ test("a full previous room prevents auto-return", async (t) => {
   const house = await open(t);
   const lee = await house.signIn();
   const sam = await house.signIn("sam");
-  const observer = await sam.stream("bath");
+  const observer = await sam.stream();
   const tab = await lee.stream();
   await tab.enter("bath");
   await observer.next("room");
