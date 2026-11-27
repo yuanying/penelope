@@ -31,7 +31,7 @@
 | Sentinel の管理口の socket（emptyDir） | — | 読み書き | 読み書き | — |
 | 鍵の Secret・CA の鍵 | — | — | 読み取り | — |
 | Sentinel の CA の公開の証明書（`/etc/penelope/ca/`） | 読み取り | — | — | — |
-| projected の ServiceAccount の token | — | 読み取り | 読み取り | — |
+| projected の ServiceAccount の token | — | 読み取り | 読み取り | 読み取り（家を有効にした配置のみ） |
 | 受信の鍵の Secret | — | — | — | 読み取り |
 | オーナーの skill（例 `/skills`、配置が置く） | 読み取り | — | — | — |
 | オーナーの Pi 拡張（例 `/etc/penelope/extensions`、任意） | 読み取り | — | — | — |
@@ -48,6 +48,7 @@
 | 3 | `/opt/penelope/skills/`（sandbox の image の中。リポジトリの `packages/runner/image/skills/`）。配置は `PENELOPE_IMAGE_SKILLS` で一覧に載せるものを選べる | このリポジトリ |
 
 - sandbox の `PENELOPE_IMAGE_SKILLS` が未設定なら、image の skill はすべて一覧の対象になる。設定する場合は `goals,self-portrait` のように名前（`SKILL.md` が入っているディレクトリ名）をカンマで区切る。名前の前後の空白と空の項目は無視し、空の値なら image の skill を 1 つも載せない。image にない名前は runner のログに出して飛ばす。
+- `disable-model-invocation: true` の skill は設定にかかわらずプロンプトの一覧には出ない。`house` はこの印を持ち、家を有効にした配置のコネクタ文書が `/opt/penelope/skills/house/SKILL.md` を指す。
 - この選択は本人・サブエージェントのセッションに適用し、拡張の読み直し後も保つ。照合係・整理係は skill を読み込まない。オーナーと記憶の skill は絞らない。一覧に載らない skill も image の中に残り、ファイルは読める（[ADR-0042](adr/0042-select-image-skills-per-deployment.md)）。
 - image の skill は、image の道具の使い方（`slack`・`sd-webui`・`a2a`・`github`・`x-search` など）と、どの配置にも同じ skill（`self-portrait`・`goals`）である。配置の値は持たず、それは配置のコネクタの文書にある。image の skill とコネクタは名前で突き合わせない。
 - コネクタの文書は `<名前>.md` の並びで、runner は `PENELOPE_CONNECTORS_DIR` が指す場所から読み、一覧をシステムプロンプトに出す（[sentinel-config.md](sentinel-config.md) の「コネクタの文書」）。読み取りで mount する。設定が無いか、場所が無ければ、コネクタの一覧は無い。
@@ -155,8 +156,9 @@ Pod の中のコンテナは網の名前空間を共有するので、TCP の待
 ## ServiceAccount の token
 
 - Pod は `automountServiceAccountToken: false`。
-- projected の token は Sentinel と backend のコンテナにだけ明示して mount する。Sentinel はそれを鍵の出どころにし、backend は A2A の送り手を TokenReview で確かめるときに使う（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)、[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)。gated の assertion だけで確かめる配置では使わない）。
-- sandbox には、サロゲートを持つ kubeconfig だけを置く。
+- projected の token は必要なコンテナに明示して mount する。Sentinel はそれを鍵の出どころにし、backend は A2A の送り手を TokenReview で確かめるときに使う（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)、[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)。gated の assertion だけで確かめる配置では使わない）。
+- [家を有効にした配置](../deploy/kubernetes/README.md#家を有効にする)では、gated 用の audience を持つ projected token を receivers と Sentinel に mount する。receivers は家の `sync` に、Sentinel は CLI のサロゲートの差し替えに使う。
+- sandbox に projected token は mount しない。kubeconfig や CLI はサロゲートを使う。
 
 ## CA
 

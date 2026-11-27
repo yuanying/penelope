@@ -116,7 +116,9 @@
 
 receivers のプラグインは家の `id` と `occurred_at` を出来事の封筒に写します。`stream` は `event.room.id`、`delivery` と `answer_via` は `HouseDelivery` の値です。`payload` は `event` に `owner` を加えたものです。`owner` は `actor.kind` が `person` かつ `actor.id` がプラグインの `owner_id` と一致する場合だけ `true` です。本文の名乗りは使いません。
 
-`summary` は、話し手の種別・ID・オーナーかどうかを先頭に置き、表示名と内容を続けた 1 行です。例: `[person lee, owner] Lee in 居間: おかえり`。`source` はプラグインの設定で決め、backend では inline にします。ターンの行では `stream` が部屋 ID、`summary` が話し手の情報、発言の `text` が本文です。元の封筒は `/sources/<source>/<room-id>/` に残ります。
+`summary` は、話し手の種別・ID、該当するときは `owner` と `you`、明示された宛先の ID を先頭に置き、表示名と部屋での行動を続けた 1 行です。例: `[person lee, owner, to ivy] Lee spoke in 居間`。`you` は `HouseView.you` と話し手の ID が一致するときに付きます。宛先の一覧が長いときは先頭の ID と残りの件数を表示します。`summary` に発言の本文は含めません。
+
+`source` はプラグインの設定で決め、backend では inline にします。ターンの行では `stream` が部屋 ID、`summary` が家で確認した出来事、発言の `text` が本文です。すべての宛先を含む元の封筒は `/sources/<source>/<room-id>/` に残ります。
 
 ## CLI
 
@@ -129,7 +131,7 @@ receivers のプラグインは家の `id` と `occurred_at` を出来事の封�
 | `house leave` | `DELETE /v1/agent/room` | どの部屋にもいないこと |
 | `house say <room-id> <text> [--to <resident-id> ...]` | `POST /v1/agent/rooms/<room-id>/say` | 発言した部屋と、寝ていて届け待ちに入らなかった住人 |
 
-`<text>` は 1 つの引数で、改行を含む本文をそのまま送ります。`--to` は住人 ID ごとに繰り返せます。CLI に部屋の履歴を読む操作はありません。引数や設定が不正なときは終了コード 2、家が要求を拒否したときや通信に失敗したときは 1 で終了します。CLI は発言を自動再送しません。
+`<text>` は 1 つの引数で、改行を含む本文をそのまま送ります。`--to` は住人 ID ごとに繰り返せます。CLI に部屋の履歴を読む操作はありません。引数や設定が不正なときは終了コード 2、家が要求を拒否したときや通信に失敗したときは 1 で終了します。`say` の通信に失敗したときや成功の応答を読めないときは、発言がすでに記録されている可能性を示します。CLI は発言を自動再送しません。
 
 ## SQLite のバックアップ
 
