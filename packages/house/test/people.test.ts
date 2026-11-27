@@ -342,6 +342,30 @@ test("a person's speech names the asleep residents who did not receive it", asyn
   assert.deepEqual(result.not_delivered, [{ id: "fern", kind: "agent", name: "Fern" }]);
 });
 
+// A screen joins what the stream brings to what it reads of the record: both name an event's place in the record.
+test("the stream and the record give an event the same place in the record, later events a later one", async (t) => {
+  const house = await open(t);
+  const lee = await house.signIn();
+  const tab = await lee.stream();
+  await tab.enter("living");
+  const entered = await tab.next<{ id: string; seq: number }>("room");
+  await lee.call("/api/rooms/living/say", "POST", tab.ready.connection, { text: "Hello" });
+  const said = await tab.next<{ id: string; seq: number }>("room");
+
+  const history = await (await lee.call("/api/rooms/living/history")).json() as { events: { id: string; seq: number }[] };
+  assert.deepEqual(history.events.map(({ id, seq }) => [id, seq]), [[said.id, said.seq], [entered.id, entered.seq]]);
+  assert.ok(said.seq > entered.seq);
+});
+
+test("an agent is given an event without its place in the record", async (t) => {
+  const house = await open(t);
+  await house.agent("/rooms/living/enter", "POST");
+  await house.agent("/rooms/living/say", "POST", { text: "To myself" });
+  const sync = await house.agent("/sync", "POST", { status: { mood: null, sleepiness: 0, sleep: { state: "awake" } } });
+  const { pending } = await sync.json() as { pending: { event: object }[] };
+  assert.ok(pending.length > 0 && pending.every(({ event }) => !("seq" in event)));
+});
+
 test("an addressed agent receives a person's speech with the authenticated actor and reply hint", async (t) => {
   const house = await open(t);
   await house.agent("/rooms/living/enter", "POST");

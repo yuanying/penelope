@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 
-import type { HouseEvent, HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
+import type { HousePersonEvent, HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
 
 import type { Person } from "./config.ts";
 import { Conflict, House, NotFound, type PersonSession } from "./house.ts";
@@ -93,7 +93,7 @@ export class People {
     this.publish();
   }
 
-  publish(events: HouseEvent[] = []): void {
+  publish(events: HousePersonEvent[] = []): void {
     if (this.streams.size === 0) return;
     const floor = this.floor();
     for (const stream of this.streams.values()) {
@@ -140,8 +140,8 @@ export class People {
     return this.house.personFloor(this.now(), connected);
   }
 
-  private expireDepartures(now: number): HouseEvent[] {
-    const events: HouseEvent[] = [];
+  private expireDepartures(now: number): HousePersonEvent[] {
+    const events: HousePersonEvent[] = [];
     for (const [person, at] of this.departures) {
       if (now < at) continue;
       events.push(...this.house.leave(person, now));

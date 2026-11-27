@@ -50,9 +50,11 @@ export type HousePersonFloor = {
   away: HousePublicIdentity[];
 };
 export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity };
-export type HouseHistory = { events: HouseEvent[]; before?: string };
+/** An event as people are given it. `seq` is its place in the house's record: a later event has a greater one. */
+export type HousePersonEvent = HouseEvent & { seq: number };
+export type HouseHistory = { events: HousePersonEvent[]; before?: string };
 export type HouseStreamReady = { connection: string; house: HousePersonView; return_failed?: string };
-export type HouseStreamEvents = { ready: HouseStreamReady; house: HousePersonView; room: HouseEvent };
+export type HouseStreamEvents = { ready: HouseStreamReady; house: HousePersonView; room: HousePersonEvent };
 
 export type HouseSync = { status: HouseAgentStatus; ack?: string[] };
 export type HouseSyncResult = { house: HouseView; pending: HouseDelivery[] };

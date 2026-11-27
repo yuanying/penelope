@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 import type {
-  HouseActor, HouseAgentIdentity, HouseAgentStatus, HouseDelivery, HouseEvent, HouseHistory, HousePersonFloor,
+  HouseActor, HouseAgentIdentity, HouseAgentStatus, HouseDelivery, HouseEvent, HouseHistory, HousePersonEvent, HousePersonFloor,
   HousePersonIdentity, HousePersonOccupant, HouseResident, HouseRoom, HouseSpeech, HouseSpeechResult,
   HouseSync, HouseSyncResult, HouseView,
 } from "@penelope/contract";
@@ -196,9 +196,9 @@ export class House {
     const limit = before === null ? undefined : this.db.prepare("SELECT seq FROM room_events WHERE room = ? AND id = ?").get(roomId, before)?.seq;
     if (before !== null && limit === undefined) throw new InvalidInput("unknown history cursor");
     const rows = limit === undefined
-      ? this.db.prepare("SELECT body FROM room_events WHERE room = ? ORDER BY seq DESC LIMIT ?").all(roomId, HISTORY_LIMIT + 1)
-      : this.db.prepare("SELECT body FROM room_events WHERE room = ? AND seq < ? ORDER BY seq DESC LIMIT ?").all(roomId, limit, HISTORY_LIMIT + 1);
-    const events = rows.slice(0, HISTORY_LIMIT).map(({ body }) => JSON.parse(body as string) as HouseEvent);
+      ? this.db.prepare("SELECT seq, body FROM room_events WHERE room = ? ORDER BY seq DESC LIMIT ?").all(roomId, HISTORY_LIMIT + 1)
+      : this.db.prepare("SELECT seq, body FROM room_events WHERE room = ? AND seq < ? ORDER BY seq DESC LIMIT ?").all(roomId, limit, HISTORY_LIMIT + 1);
+    const events = rows.slice(0, HISTORY_LIMIT).map(({ seq, body }): HousePersonEvent => ({ ...(JSON.parse(body as string) as HouseEvent), seq: seq as number }));
     return { events, before: rows.length > HISTORY_LIMIT ? events.at(-1)?.id : undefined };
   }
 
@@ -207,14 +207,14 @@ export class House {
     return typeof room === "string" ? room : undefined;
   }
 
-  enter(resident: Resident, roomId: string, now: number): HouseEvent[] {
+  enter(resident: Resident, roomId: string, now: number): HousePersonEvent[] {
     const room = this.room(roomId);
     return this.transaction(() => {
       const current = this.roomOf(resident);
       if (current === roomId) return [];
       const before = this.inRoom(roomId);
       if (room.capacity !== null && before.length >= room.capacity) throw new Conflict("room is full");
-      const events: HouseEvent[] = [];
+      const events: HousePersonEvent[] = [];
       if (current !== undefined) events.push(this.exit(resident, this.room(current), now));
       this.db.prepare("INSERT INTO room_members (subject, room) VALUES (?, ?)").run(resident.subject, roomId);
       if (resident.actor.kind === "person") {
@@ -228,7 +228,7 @@ export class House {
     });
   }
 
-  leave(resident: Resident, now: number, forget = false): HouseEvent[] {
+  leave(resident: Resident, now: number, forget = false): HousePersonEvent[] {
     return this.transaction(() => {
       if (forget) this.db.prepare("UPDATE person_profile SET return_room = NULL WHERE subject = ?").run(resident.subject);
       const roomId = this.roomOf(resident);
@@ -236,7 +236,7 @@ export class House {
     });
   }
 
-  say(resident: Resident, roomId: string, speech: Required<HouseSpeech>, now: number): { result: HouseSpeechResult; event: HouseEvent } {
+  say(resident: Resident, roomId: string, speech: Required<HouseSpeech>, now: number): { result: HouseSpeechResult; event: HousePersonEvent } {
     const room = this.room(roomId);
     if (speech.to.some((id) => !this.ids.has(id))) throw new InvalidInput("to contains an unknown resident ID");
     return this.transaction(() => {
@@ -348,12 +348,13 @@ export class House {
     }));
   }
 
-  private exit(resident: Resident, room: HouseRoom, now: number): HouseEvent {
+  private exit(resident: Resident, room: HouseRoom, now: number): HousePersonEvent {
     this.db.prepare("DELETE FROM room_members WHERE subject = ?").run(resident.subject);
     return this.record(room, resident, { kind: "leave" }, this.inRoom(room.id), now);
   }
 
-  private record(room: HouseRoom, resident: Resident, activity: Activity, recipients: Occupant[], now: number): HouseEvent {
+  /** The body kept, and what agents are given, has no `seq`: the row's own number is the event's place in the record. */
+  private record(room: HouseRoom, resident: Resident, activity: Activity, recipients: Occupant[], now: number): HousePersonEvent {
     const id = randomUUID();
     const event: HouseEvent = { id, occurred_at: new Date(now).toISOString(), room: { id: room.id, name: room.name }, actor: resident.actor, ...activity };
     const { lastInsertRowid } = this.db.prepare("INSERT INTO room_events (id, room, body) VALUES (?, ?, ?)").run(id, room.id, JSON.stringify(event));
@@ -365,7 +366,7 @@ export class House {
       const answer = event.kind === "speech" && !own && event.to.includes(listener.actor.id);
       deliver.run(listener.subject, lastInsertRowid, now + DELIVERY_TTL_MS, mode, Number(answer));
     }
-    return event;
+    return { ...event, seq: Number(lastInsertRowid) };
   }
 
   private transaction<T>(run: () => T): T {
