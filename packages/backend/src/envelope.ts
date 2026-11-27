@@ -1,14 +1,9 @@
 // Checking an envelope that a source sent to the intake (docs/events.md).
-import type { AnswerVia, Event } from "@penelope/contract";
+import { EVENT_PATH_SEGMENT, type AnswerVia, type Event } from "@penelope/contract";
 
 export type Parsed<T> = { ok: true; event: T } | { ok: false; error: string };
 
-/**
- * A `source` or a `stream` is a path segment under /sources: lower-case
- * letters, digits, `.`, `_` and `-`, not starting with `.`. So neither can
- * point outside /sources or into another source's place.
- */
-export const SEGMENT = /^[a-z0-9_-][a-z0-9._-]{0,127}$/;
+export const SEGMENT = EVENT_PATH_SEGMENT;
 
 /** RFC 3339 with a time and an offset (`Z` or `±hh:mm`). */
 const RFC3339 = /^\d{4}-\d{2}-\d{2}[Tt ]\d{2}:\d{2}:\d{2}(\.\d+)?([Zz]|[+-]\d{2}:\d{2})$/;
