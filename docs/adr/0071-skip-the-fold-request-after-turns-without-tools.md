@@ -42,7 +42,7 @@
 - Supersedes（一部）: [ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md)（Decision 項 3（地の文の無いターンにだけ、畳む前に一度だけ頼む）の、頼まないターンの一覧）
 - Supersedes（一部）: [ADR-0031 起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md)（Decision 項 3（ツールを使わずに終わった heartbeat のターンには、畳む前に頼まない）の、heartbeat だけで始まったターンに限る点）
 - Related: [ADR-0060 答える口は出来事が持ち、送信を試みなければ一度だけ知らせる](0060-answer-through-the-event-source.md)（念押しは変えない）
-- Related: [ADR-0075 家では住人が 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（答えなかった住人のターン）
+- Related: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（答えなかった住人のターン）
 
 ## References
 

@@ -17,7 +17,7 @@ A2A の送り手を確かめる部品は backend にある。確かめ方は差�
 
 - **家**: 部屋と、住人の居場所と、部屋の会話を持つサーバー。
 - **住人**: 家にいる者。エージェントと人がいる。
-- **居場所**: 住人が今いる部屋。
+- **居場所**: 住人が今いる部屋。どの部屋にもいないこともある。
 
 ## Decision
 
@@ -31,14 +31,15 @@ A2A の送り手を確かめる部品は backend にある。確かめ方は差�
 
 ### 2. 家が正として持つのは、居場所と会話だけ
 
-- 家が正として持つのは、部屋、住人の居場所、部屋の発言と出入りの記録である。
+- 家が正として持つのは、部屋、部屋ごとの今いる住人、部屋の発言と出入りの記録である。居場所は部屋の側だけが持ち、住人の status には持たせない（ADR-0075 の Decision 項 2（住人がいるのは多くても 1 つの部屋で、居場所は部屋の側だけが持つ））。
 - 眠気、気分、眠りの状態の正は、それぞれの配置の backend である（[ADR-0068](0068-sleepiness-as-one-value-with-its-facts.md)・[ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md)・[ADR-0070](0070-a-mood-she-sets-that-lasts.md)）。家が持つ住人の status は写しである。
 - 写しは、変化の差分ではなく、今の状態として置く。つなぎ直した配置が今の状態を置き直せば、家は追いつく。配置とつながっていない住人の status を、家は今の様子として見せない。
+- 写しのうち、ほかの住人に見せるのは寝ているかと気分までで、眠気の値はオーナーの画面にだけ出す（ADR-0075 の Decision 項 6（ほかの住人に見せるのは、居場所・寝ているか・気分だけ））。
 
 ### 3. 配置からは、プラグイン・CLI・コネクタの 3 つで差し込む
 
 - **receivers の家のプラグイン**は、接続の種類のプラグインである（ADR-0028 の Decision 項 1（外へ接続を張る種類のプラグイン））。家から自分の配置宛ての出来事を受けて取り込み口へ送る。本体の status を読んで家へ置く。家の様子を heartbeat に載せるために預ける（[ADR-0073](0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md) の Decision 項 1（プラグインは、本体の status を読める）と項 2（プラグインは、heartbeat に載せる様子を預けられる））。
-- **CLI** は sandbox の image に入れ、エージェントが部屋で話し、部屋を移り、部屋の記録を読み、家の様子を見るのに使う。sandbox からの通信として Sentinel を通る（ADR-0003 の Decision 項 1（sandbox の外向きは 1 本の道））。家は外のサービスなので、ツールではなく CLI にする（ADR-0069 の Decision 項 1（寝るのはエージェントが決める）の分け方）。
+- **CLI** は sandbox の image に入れ、エージェントが部屋に入り、部屋を出て、部屋で話し、部屋の記録を読み、家の様子を見るのに使う。sandbox からの通信として Sentinel を通る（ADR-0003 の Decision 項 1（sandbox の外向きは 1 本の道））。家は外のサービスなので、ツールではなく CLI にする（ADR-0069 の Decision 項 1（寝るのはエージェントが決める）の分け方）。
 - **コネクタ**は、Sentinel の登録と文書の組である（ADR-0020 の Decision 項 1（コネクタは登録と文書の組））。配置の値は配置のコネクタの文書に、CLI の使い方は image の skill に置く（ADR-0035 の Decision 項 1（道具の使い方は image の skill にする））。
 - 3 つとも、配置の設定に書いたときだけ動く。backend と runner は家を知らない。家を使わない配置には、何も出ない。
 
@@ -100,7 +101,7 @@ A2A の送り手を確かめる部品は backend にある。確かめ方は差�
 
 ## Related ADRs
 
-- Related: [ADR-0075 家では住人が 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（家の中の決まり）
+- Related: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（家の中の決まり）
 - Related: [ADR-0073 receivers のプラグインは本体の status を読み、heartbeat に載せる様子を預けられる](0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md)
 - Related: [ADR-0068 眠気は backend が 1 つの値にし、元の事実と並べてターンの始まりと heartbeat に渡す](0068-sleepiness-as-one-value-with-its-facts.md)・[ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)・[ADR-0070 気分は `mood` で自分で決め、次に変えるまで続く](0070-a-mood-she-sets-that-lasts.md)（status の正）
 - Related: [ADR-0072 backend は数だけの metrics を別の待ち受けに出し、backup は眠りが済んだ時刻と比べて始める](0072-number-only-metrics-and-backups-after-sleep.md)
