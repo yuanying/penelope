@@ -73,6 +73,12 @@ images: ## Build every image for this machine's platform, as penelope-<target>:$
 web-dev: node_modules/.package-lock.json ## Serve the Web UI over a mock backend at 127.0.0.1:5173 (PORT=), rebuilt on change. Pick a scene with ?scene=<name>.
 	$(NPM) run dev --workspace=@penelope/web
 
+# The house's screen over the real house server with made-up residents
+# (packages/house-web/dev.ts). Nothing in CI calls it.
+.PHONY: house-web-dev
+house-web-dev: node_modules/.package-lock.json ## Serve the house's screen over a made-up house at 127.0.0.1:5174 (PORT=), rebuilt on change.
+	$(NPM) run dev --workspace=@penelope/house-web
+
 ##@ Check
 
 # gofmt is given the module's package directories rather than `.`, so that it
@@ -153,13 +159,15 @@ test-netns: ## Go tests that redirect with iptables. Need root (through sudo); r
 	done
 	$(SUDO) unshare --net sh -eu -c 'ip link set lo up; for pkg in $(NETNS_PKGS); do t="bin/netns/$${pkg##*/}.test"; echo "== $$t"; "$$t" -test.count=1; done'
 
-# The widths of the Web UI, measured in Chromium over a stub of the backend:
-# happy-dom lays nothing out (packages/web/browser/). It needs a Chromium or
-# Chrome, given as CHROMIUM, so `make test` never runs it.
+# What only a browser can tell of the two screens: the widths of the Web UI
+# over a stub of the backend (packages/web/browser/), and the focus, the
+# layout and the comings and goings of the house's screen over the real house
+# server (packages/house-web/browser/). happy-dom lays nothing out. It needs a
+# Chromium or Chrome, given as CHROMIUM, so `make test` never runs it.
 .PHONY: test-browser
-test-browser: node_modules/.package-lock.json ## Measure the Web UI's layout in Chromium. Needs CHROMIUM=<path to chrome>.
-	$(NPM) run build --workspace=@penelope/web
-	CHROMIUM="$(CHROMIUM)" $(NPM) run test-browser --workspace=@penelope/web
+test-browser: node_modules/.package-lock.json ## Check the Web UI and the house's screen in Chromium. Needs CHROMIUM=<path to chrome>.
+	$(NPM) run build --workspace=@penelope/web --workspace=@penelope/house-web
+	CHROMIUM="$(CHROMIUM)" $(NPM) run test-browser --workspace=@penelope/web --workspace=@penelope/house-web
 
 # The end-to-end test lays the four containers of the Pod out with Docker
 # Compose, with fakes for the model and GitHub, and drives them from the UI's

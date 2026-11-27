@@ -102,7 +102,7 @@ ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
 COPY --from=ts-build /src/packages/house/package.json ./
 COPY --from=ts-build /src/packages/house/dist ./dist
-COPY --from=ts-build /src/packages/house/web ./web
+COPY --from=ts-build /src/packages/house-web/dist ./web
 COPY --from=ts-build /src/packages/github-oauth/package.json ./node_modules/@penelope/github-oauth/
 COPY --from=ts-build /src/packages/github-oauth/dist ./node_modules/@penelope/github-oauth/dist
 COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/

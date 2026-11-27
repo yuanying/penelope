@@ -1,0 +1,943 @@
+/* Astryx's layers in their order, then what the house's screen adds. The
+   theme is neutral, as the agents' own screens; the one override is the
+   Japanese faces after its Figtree, which has no Japanese glyphs. The theme
+   sets its faces again on the element it wraps the app in, so the override
+   is made there too. */
+@import "@astryxdesign/core/reset.css";
+@import "@astryxdesign/core/astryx.css";
+@import "@astryxdesign/theme-neutral/theme.css";
+@import "@astryxdesign/theme-neutral/fonts.css";
+
+:root,
+[data-astryx-theme] {
+  --font-family-body: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  --font-family-heading: Figtree, -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Noto Sans JP", sans-serif;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--color-background-body);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-body);
+  /* Astryx's reset thins the strokes, which makes Japanese text of this size
+     hard to read on a Mac; the browser's own is kept. */
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+}
+
+/* A PC's page does not pull past its ends; a phone keeps its pull to reload. */
+@media (pointer: fine) {
+  html {
+    overscroll-behavior: none;
+  }
+}
+
+.muted {
+  margin: 0;
+  color: var(--color-text-secondary);
+}
+
+time,
+.plan-count,
+.resident-number,
+.unread {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Login, and the word while the house is not reached yet */
+.login,
+.opening {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+.login h1 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+}
+.login img {
+  border-radius: 16px;
+}
+.opening p {
+  margin: 0;
+}
+
+/* The house */
+.house {
+  position: relative;
+  height: 100dvh;
+  overflow: clip;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.house h1,
+.house h2,
+.house h3,
+.house p {
+  margin: 0;
+}
+.house h1,
+.house h2,
+.house h3 {
+  text-wrap: balance;
+}
+/* A heading that is given the focus when its screen opens draws no ring of its own. */
+.house h1:focus,
+.house h2:focus {
+  outline: none;
+}
+.house h1:focus-visible,
+.house h2:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+.house button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.house-pc {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 440px;
+  grid-template-rows: minmax(0, 1fr);
+}
+/* A room looked into stands between the floor and the person's own room. */
+.house-pc.house-side {
+  grid-template-columns: minmax(0, 1fr) 360px 420px;
+}
+.house-pc > .room {
+  border-inline-start: 1px solid var(--color-border);
+}
+.house-plan {
+  min-width: 0;
+  min-height: 0;
+}
+
+.house-phone {
+  font-size: 16px;
+}
+.house-phone .house-plan,
+.house-layer {
+  position: absolute;
+  inset: 0;
+}
+.house-layer {
+  z-index: 5;
+  background: var(--color-background-body);
+  animation: layer-in 220ms ease;
+}
+.house-layer > .room {
+  height: 100%;
+}
+@keyframes layer-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .house-layer {
+    animation: none;
+  }
+}
+
+/* The way past the floor to the conversation, on the screen only while it has the focus. */
+.skip-link {
+  position: absolute;
+  z-index: 40;
+  top: 8px;
+  left: 8px;
+  padding: 8px 14px;
+  border-radius: var(--radius-element);
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+.skip-link:focus-visible {
+  transform: none;
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 2px;
+}
+
+/* What the house has to tell: in the middle, under the heads of the floor and the rooms. */
+.house-notices {
+  position: absolute;
+  z-index: 30;
+  top: calc(env(safe-area-inset-top) + 64px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: max-content;
+  max-width: calc(100% - 24px);
+}
+.house-notices:empty {
+  display: none;
+}
+
+/* On a phone, what is pressed is at least 44px high. */
+.house-phone .tile-foot .astryx-button,
+.house-phone .peek-actions .astryx-button,
+.house-phone .room-sheet .astryx-button,
+.house-phone .room-nowhere .astryx-button,
+.house-phone .timeline-older .astryx-button,
+.house-phone .room-head .astryx-button {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+/* The count of what was said and not yet read. */
+.unread {
+  flex: none;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  background: var(--color-accent);
+  color: var(--color-on-accent);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+}
+
+/* A resident */
+.resident-avatar {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+}
+.resident-avatar-down {
+  opacity: 0.45;
+}
+/* Asleep: a moon over the same picture; the words beside it say so too. */
+.resident-moon {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  display: flex;
+  padding: 2px;
+  border-radius: 9999px;
+  background: var(--color-background-surface);
+  color: var(--color-text-info);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+.resident-stack {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+.resident-stack .resident-avatar {
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--color-background-body);
+}
+.resident-stack .resident-avatar + .resident-avatar {
+  margin-inline-start: -6px;
+}
+.residents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+.resident {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+.resident-away {
+  align-items: center;
+}
+.resident-body {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.resident-name {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.resident-name-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.resident-self {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: 0.86em;
+  font-weight: 400;
+}
+.resident-chat {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: auto;
+  padding: 2px 8px;
+  border-radius: 9999px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  text-decoration: none;
+}
+.resident-chat:hover {
+  background: var(--color-neutral);
+  color: var(--color-text-primary);
+}
+.resident-chat:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 1px;
+}
+.resident-state {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.resident-state-asleep {
+  color: var(--color-text-info);
+}
+.resident-state-down {
+  color: var(--color-text-warning);
+}
+.resident-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--color-text-primary);
+}
+.resident-mood {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.resident-sleepiness {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.resident-bar {
+  flex: 1;
+  max-width: 120px;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--color-neutral);
+}
+.resident-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--color-text-secondary);
+}
+.resident-number {
+  min-width: 2ch;
+  color: var(--color-text-primary);
+  text-align: right;
+}
+.house-phone .resident-state,
+.house-phone .resident-sleepiness {
+  font-size: 13px;
+}
+.house-phone .resident-mood {
+  font-size: 14px;
+}
+.house-phone .resident-chat {
+  min-height: 32px;
+  padding-inline: 12px;
+  font-size: 13px;
+}
+
+/* The floor */
+.plan {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.plan-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: 16px;
+}
+.plan-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 0;
+}
+.plan-head h1 {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.plan-sub {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.plan-me {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: none;
+  cursor: pointer;
+}
+.plan-me:hover {
+  background: var(--color-neutral);
+}
+.plan-me:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 2px;
+}
+.plan-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  align-items: start;
+  gap: 12px;
+  padding: 12px 20px 8px;
+}
+.tile {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 14px;
+  border-radius: var(--radius-container);
+  background: var(--color-background-surface);
+  box-shadow: 0 0 0 1px var(--color-border);
+}
+/* Where the person is, and where they look: a heavier frame, and a word in the tile says which. */
+.tile-here {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+.tile-peeked {
+  box-shadow: 0 0 0 2px var(--color-text-info);
+}
+.tile-away {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed var(--color-border-emphasized, var(--color-text-secondary));
+  outline-offset: -1px;
+}
+.tile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.tile-head h2 {
+  overflow: hidden;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.3;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.plan-count {
+  flex: none;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.plan-count-full {
+  padding: 0 8px;
+  border-radius: 9999px;
+  background: var(--color-neutral);
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.tile-about {
+  margin-top: -6px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.tile-last {
+  overflow: hidden;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tile-last b {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.tile-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.tile-tag {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.tile-tag-here {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.house-phone .plan-head {
+  padding: calc(env(safe-area-inset-top) + 14px) 16px 0;
+}
+.house-phone .plan-sub,
+.house-phone .tile-about,
+.house-phone .tile-last,
+.house-phone .tile-tag,
+.house-phone .plan-count {
+  font-size: 13px;
+}
+.house-phone .plan-tiles {
+  grid-template-columns: minmax(0, 1fr);
+  padding: 8px 12px;
+}
+/* The strip under the floor on a phone: where the person is, and the way to its conversation. */
+.plan-dock-stack {
+  flex: none;
+  display: grid;
+  gap: 8px;
+  padding: 0 12px calc(env(safe-area-inset-bottom) + 8px);
+}
+.plan-dock {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 60px;
+  margin: 0;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: 18px;
+  background: var(--color-background-surface);
+  box-shadow: 0 2px 4px rgb(0 0 0 / 8%), 0 4px 12px rgb(0 0 0 / 12%), 0 0 0 1px var(--color-border);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.plan-dock:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 2px;
+}
+.plan-dock-off {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: default;
+}
+.plan-dock-words {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  line-height: 1.4;
+}
+.plan-dock-last {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A room */
+.room {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--color-background-body);
+}
+.room-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+.house-phone .room-head {
+  gap: 4px;
+  padding: calc(env(safe-area-inset-top) + 4px) 8px 4px;
+}
+.room-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+}
+.room-title h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.room-title h2,
+.room-title-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.room-title p {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.house-phone .room-title h2 {
+  font-size: 17px;
+}
+.house-phone .room-title p {
+  font-size: 13px;
+}
+.room-people {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 2px 6px;
+  border: 0;
+  border-radius: var(--radius-element);
+  background: none;
+  cursor: pointer;
+}
+.room-people:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 2px;
+}
+.room-strip {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  list-style: none;
+}
+.room-strip li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.room-strip b {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.house-phone .room-strip {
+  font-size: 13px;
+}
+.room-talk {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.room-reading {
+  padding: 48px 0;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+/* Opaque: the record scrolls under it, and a field that cannot be written in is faint. */
+.room-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-radius: var(--radius-chat, 28px);
+  background: var(--color-background-body);
+}
+.house-phone .room-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+.room-nowhere {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px 32px;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+.room-nowhere > p {
+  max-width: 34em;
+}
+.room-sheet {
+  display: grid;
+  gap: 16px;
+}
+.room-sheet-head h3 {
+  font-size: 17px;
+  font-weight: 700;
+}
+.room-sheet-head p {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+/* In the place of the field while a room is only looked into. */
+.peek-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 12px 14px;
+  border-radius: var(--radius-container);
+  background: var(--color-info-muted);
+  color: var(--color-on-info-muted);
+}
+.peek-note {
+  flex: 1 1 240px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.peek-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.peek-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.peek-full {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The record */
+/* The lines of the conversation are set apart as the agents' screens draw
+   them: the theme's leading is close for Japanese. */
+.astryx-chat-message-bubble {
+  --text-body-leading: 1.7;
+  line-height: 1.7;
+}
+.astryx-chat-message-bubble[data-density] {
+  border-radius: 16px;
+}
+/* A long record: its older rows are not laid out until they are scrolled to. */
+.timeline-far {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 48px;
+}
+.timeline-older {
+  display: flex;
+  justify-content: center;
+}
+.timeline-move {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 6px;
+}
+.speech-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.speech-to {
+  color: var(--color-text-info);
+  font-weight: 600;
+}
+.speech-to-you {
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--color-info-muted);
+  color: var(--color-on-info-muted);
+}
+/* The record keeps close to the sides of its column: Astryx's room at the
+   sides is for a page of its own. Its data attributes are the theming hook. */
+.room-talk .astryx-chat-message-list > div {
+  padding: 16px 4px;
+}
+/* The others' speech has no bubble, so it needs none of a bubble's room at
+   its sides: the name and the text start where the picture ends, and the
+   picture stands at the name's height. */
+.astryx-chat-message:has(.speech-avatar) {
+  gap: 8px;
+}
+.astryx-chat-message > div:has(> .speech-avatar) {
+  margin-top: 2px;
+}
+.speech-avatar {
+  display: flex;
+  width: 36px;
+}
+.astryx-chat-message-bubble.speech-plain {
+  max-width: 100%;
+  padding: 0;
+}
+.astryx-chat-message div:has(> .speech-who) {
+  height: auto;
+  margin-bottom: 0;
+  padding-inline: 0;
+}
+/* The same speaker again: close under what they said before. */
+.astryx-chat-message.speech-continued {
+  margin-top: -10px;
+}
+.speech-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.speech-name {
+  font-weight: 600;
+}
+.speech-who time {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 400;
+}
+/* Under the person's own speech: its time, and whom it did not reach. */
+.astryx-chat-message div:has(> .speech-meta) {
+  padding-inline: 0;
+}
+.speech-meta {
+  display: grid;
+  justify-items: end;
+  gap: 2px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.speech-undelivered {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 5px;
+  color: var(--color-text-info);
+  text-align: right;
+}
+.speech-undelivered svg {
+  flex: none;
+  margin-top: 3px;
+}
+
+/* The field */
+.speak-to {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.speak-to-label {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.speak-to-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding-inline-start: 10px;
+  border-radius: 9999px;
+  background: var(--color-info-muted);
+  color: var(--color-on-info-muted);
+  font-weight: 600;
+  line-height: 1.9;
+}
+.speak-to-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+.speak-to-chip button:hover {
+  background: var(--color-neutral);
+}
+.speak-to-chip button:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 1px;
+}
+.house-phone .speak-to-chip button {
+  width: 32px;
+  height: 32px;
+}
+.speak-hint {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.speak-pick-head {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+.speak-candidate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.speak-candidate-name {
+  font-weight: 600;
+}
+.speak-candidate-asleep {
+  margin-inline-start: auto;
+  color: var(--color-text-info);
+  font-size: 12px;
+  white-space: nowrap;
+}

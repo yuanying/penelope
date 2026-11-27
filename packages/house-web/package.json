@@ -1,0 +1,31 @@
+{
+  "name": "@penelope/house-web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "node --disable-warning=ExperimentalWarning --conditions=penelope-source --import ./test/setup.ts --test \"test/**/*.test.ts\" \"test/**/*.test.tsx\"",
+    "test-browser": "node --disable-warning=ExperimentalWarning --conditions=penelope-source --test \"browser/**/*.test.ts\"",
+    "build": "node build.ts",
+    "dev": "node --disable-warning=ExperimentalWarning --conditions=penelope-source dev.ts"
+  },
+  "dependencies": {
+    "@astryxdesign/core": "0.7.16",
+    "@astryxdesign/theme-neutral": "0.7.16",
+    "@stylexjs/stylex": "0.19.2",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@happy-dom/global-registrator": "21.0.4",
+    "@penelope/contract": "*",
+    "@penelope/house": "*",
+    "@testing-library/dom": "10.4.2",
+    "@testing-library/react": "16.3.3",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "playwright-core": "1.65.1"
+  }
+}

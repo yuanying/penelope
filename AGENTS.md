@@ -46,6 +46,7 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 | receivers | TypeScript | `packages/receivers` | `ghcr.io/yuanying/penelope-receivers` (`receivers`) |
 | house | TypeScript | `packages/house` | `ghcr.io/yuanying/penelope-house` (`house`) |
 | Web UI | TypeScript | `packages/web` | served by the backend |
+| house's screen | TypeScript | `packages/house-web` | served by the house |
 | shared types | TypeScript | `packages/contract` | — |
 | iPhone app | Swift | `apple/` | — (built by Xcode) |
 
@@ -71,6 +72,14 @@ port with `PORT=`) over a mock of the backend's API, and rebuilds and reloads th
 start): open `/?scene=<name>` to pick one, which the browser keeps in a cookie and which starts over each time it is
 picked. What is changed through the UI (a message, a removed schedule) lasts until then. The fixtures are typed with
 `packages/contract`, so a change to the API fails the type check until they follow it.
+
+### The house's screen over a made-up house
+
+`make house-web-dev` (or `npm run dev -w @penelope/house-web`) builds the house's screen and serves it at
+`http://127.0.0.1:5174/` (another port with `PORT=`), rebuilt and reloaded when a file under `src/` or `public/`
+changes. The server behind it is the real house (`packages/house`) with made-up rooms and residents
+(`packages/house-web/dev/house.ts`): only GitHub and the agents' deployments are stood in for. It prints the addresses
+that sign in as each person. A resident addressed with `@` answers.
 
 ### Tests
 
