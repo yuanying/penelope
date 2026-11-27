@@ -10,13 +10,13 @@ import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } fro
 
 import type { HouseActor, HousePersonView } from "@penelope/contract";
 
-import type { RoomLog } from "../model/log.ts";
+import { type RoomLog, shownOf } from "../model/log.ts";
 import type { Line, Said } from "../model/session.ts";
 import { BackIcon, EnterIcon, EyeIcon, ReconnectIcon } from "./icons.tsx";
 import { isAsleep, keyOf, ResidentAvatar, ResidentCard, ResidentStack, type Shown } from "./residents.tsx";
-import { type Draft, Speak } from "./Speak.tsx";
+import { Speak, type Writing } from "./Speak.tsx";
 import { Timeline } from "./Timeline.tsx";
-import { timeOf, words } from "./words.ts";
+import { timeOf, withUnread, words } from "./words.ts";
 
 type Room = HousePersonView["rooms"][number];
 
@@ -46,7 +46,7 @@ type Shared = {
   heading: RefObject<HTMLHeadingElement | null>;
 };
 
-function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog; room: Room; scroller: RefObject<HTMLDivElement | null>; bottom: ReactNode } & Pick<Shared, "you" | "residents" | "undelivered" | "narrow"> & { onOlder: () => Promise<void> }) {
+function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | undefined; room: Room; scroller: RefObject<HTMLDivElement | null>; bottom: ReactNode } & Pick<Shared, "you" | "residents" | "undelivered" | "narrow"> & { onOlder: () => Promise<void> }) {
   return (
     <div className="room-talk">
       <ChatLayout
@@ -54,9 +54,9 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog; ro
         density="spacious"
         aria-label={words.roomLog(room.name)}
         composer={bottom}
-        emptyState={log.read ? <EmptyState title={words.emptyRoom} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
+        emptyState={log?.read ? <EmptyState title={words.emptyRoom} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
       >
-        {log.events.length > 0 ? <Timeline log={log} scroller={scroller} {...timeline} /> : null}
+        {log !== undefined && shownOf(log).length > 0 ? <Timeline log={log} scroller={scroller} {...timeline} /> : null}
       </ChatLayout>
     </div>
   );
@@ -66,19 +66,20 @@ export type MyRoomProps = Shared & {
   room: Room | undefined;
   log: RoomLog | undefined;
   touch: boolean;
-  draft: Draft;
-  onDraft: (change: (draft: Draft) => Draft) => void;
+  /** What is written for this room, and a way to change it that still means this room after the person left it. */
+  writing: Writing;
+  onWriting: (change: (writing: Writing) => Writing) => void;
   onSay: (text: string, to: readonly string[]) => Promise<Said>;
   onOlder: () => Promise<void>;
   onLeave: () => void;
   onBack: () => void;
 };
 
-export function MyRoom({ room, log, touch, draft, onDraft, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
+export function MyRoom({ room, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState(false);
   // Astryx keeps the record's end in view as the record grows, not as what stands over the end grows.
-  const dockRows = `${draft.to.length > 0} ${line.kind}`;
+  const dockRows = `${writing.draft.to.length > 0} ${writing.unsent.length} ${line.kind}`;
   useLayoutEffect(() => {
     const element = scroller.current;
     if (element && element.scrollHeight - element.scrollTop - element.clientHeight < 160) element.scrollTop = element.scrollHeight;
@@ -126,7 +127,7 @@ export function MyRoom({ room, log, touch, draft, onDraft, onSay, onOlder, onLea
         )}
       </header>
       <Record
-        log={log ?? { events: [], before: undefined, read: false }}
+        log={log}
         room={room}
         scroller={scroller}
         onOlder={onOlder}
@@ -134,7 +135,7 @@ export function MyRoom({ room, log, touch, draft, onDraft, onSay, onOlder, onLea
         bottom={
           <div className="room-bottom">
             <LineNotice line={line} onRetry={onRetry} />
-            <Speak room={room} others={others} online={line.kind === "open"} touch={touch} draft={draft} onDraft={onDraft} onSay={onSay} />
+            <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
           </div>
         }
       />
@@ -215,7 +216,7 @@ export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, o
         })}
       </ul>
       <Record
-        log={log ?? { events: [], before: undefined, read: false }}
+        log={log}
         room={room}
         scroller={scroller}
         onOlder={onOlder}
@@ -246,11 +247,12 @@ export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, o
                     label={words.backTo(mine.name)}
                     variant="secondary"
                     size={phone ? "lg" : "md"}
+                    aria-label={withUnread(words.backTo(mine.name), unread)}
                     onClick={onBackToMine}
                     {...(unread > 0
                       ? {
                           endContent: (
-                            <span className="unread" aria-label={words.unreadCount(unread)}>
+                            <span className="unread" aria-hidden>
                               {unread > 99 ? "99+" : unread}
                             </span>
                           ),

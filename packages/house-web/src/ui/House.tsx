@@ -1,14 +1,16 @@
 import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import type { HousePersonView } from "@penelope/contract";
 
+import { shownOf } from "../model/log.ts";
 import { myRoom, type Session, type Snapshot, unread } from "../model/session.ts";
 import { Plan } from "./Plan.tsx";
 import { residentsOf } from "./residents.tsx";
 import { LineNotice, MyRoom, PeekRoom } from "./Room.tsx";
 import { useRoute } from "./route.ts";
-import { type Draft, EMPTY_DRAFT } from "./Speak.tsx";
+import { NOTHING_WRITTEN, type Writing } from "./Speak.tsx";
 import { words } from "./words.ts";
 
 const PHONE = "(max-width: 767px)";
@@ -24,7 +26,16 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const wide = useMediaQuery(WIDE);
   const touch = useMediaQuery(TOUCH) || phone;
   const [route, go] = useRoute();
-  const [draft, setDraft] = useState<Draft>(EMPTY_DRAFT);
+  const [writings, setWritings] = useState<ReadonlyMap<string, Writing>>(new Map());
+  const writers = useRef(new Map<string, (change: (writing: Writing) => Writing) => void>());
+  /** The way to change what is written for one room: the same function for the same room, whoever calls it later. */
+  const writerOf = (room: string) => {
+    const held = writers.current.get(room);
+    if (held) return held;
+    const writer = (change: (writing: Writing) => Writing) => setWritings((now) => new Map(now).set(room, change(now.get(room) ?? NOTHING_WRITTEN)));
+    writers.current.set(room, writer);
+    return writer;
+  };
 
   const mine = house.rooms.find(({ id }) => id === myRoom(snapshot));
   const peeked = route.at === "peek" ? house.rooms.find(({ id }) => id === route.room && id !== mine?.id) : undefined;
@@ -41,7 +52,8 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   }, [route, peeked, mine?.id, go]);
   useEffect(() => session.peek(peeked?.id), [session, peeked?.id]);
   // A tab in the background has shown nothing.
-  const newest = (mine === undefined ? undefined : snapshot.logs.get(mine.id))?.events.at(-1)?.id;
+  const myLog = mine === undefined ? undefined : snapshot.logs.get(mine.id);
+  const newest = myLog === undefined ? undefined : shownOf(myLog).at(-1)?.id;
   useEffect(() => {
     const see = () => {
       if (talkShown && document.visibilityState === "visible") session.see();
@@ -53,6 +65,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
 
   const root = useRef<HTMLElement>(null);
   const planHeading = useRef<HTMLHeadingElement>(null);
+  const dock = useRef<HTMLButtonElement>(null);
   const roomHeading = useRef<HTMLHeadingElement>(null);
   const peekHeading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<Element | null>(null);
@@ -107,19 +120,41 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const shared = { you: house.you, residents, undelivered: snapshot.undelivered, phone, line: snapshot.line, onRetry: () => session.retry() };
   const notice = snapshot.notice;
   const nameOf = (room: string) => house.rooms.find(({ id }) => id === room)?.name ?? room;
+  const noticeTitle =
+    notice === undefined ? undefined
+    : "room" in notice ? (notice.kind === "full" ? words.enterFull : words.returnFailed)(nameOf(notice.room))
+    : notice.kind === "failed" ? words.failed
+    : words.logoutUnconfirmed;
   const notices = (
     <div className="house-notices" role="status" aria-live="polite">
       {notice ? (
         <Banner
-          status={notice.kind === "failed" ? "error" : "warning"}
-          title={notice.kind === "failed" ? words.failed : notice.kind === "full" ? words.enterFull(nameOf(notice.room)) : words.returnFailed(nameOf(notice.room))}
+          status={notice.kind === "failed" || notice.kind === "logout-unconfirmed" ? "error" : "warning"}
+          title={noticeTitle}
           elevation="med"
           isDismissable
           dismissLabel={words.dismiss}
           onDismiss={() => session.dismiss()}
+          {...(notice.kind === "logout-unconfirmed"
+            ? { endContent: <Button label={words.logoutAgain} variant="secondary" size="sm" onClick={() => void session.logout()} /> }
+            : {})}
         />
       ) : null}
     </div>
+  );
+  // Past what stands before the conversation on the screen now. On a phone's floor that is the way into it.
+  const skip = (
+    <a
+      className="skip-link"
+      href="#conversation"
+      onClick={(event) => {
+        event.preventDefault();
+        const target = peeked !== undefined && swapped ? peekHeading.current : phone && route.at !== "talk" ? (dock.current ?? planHeading.current) : roomHeading.current;
+        target?.focus();
+      }}
+    >
+      {words.skip}
+    </a>
   );
   const plan = (
     <Plan
@@ -131,6 +166,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       unread={count}
       lineNotice={<LineNotice line={snapshot.line} onRetry={() => session.retry()} />}
       heading={planHeading}
+      dock={dock}
       onPeek={peek}
       onEnter={(room) => void enter(room)}
       onOpenTalk={openTalk}
@@ -144,9 +180,9 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       room={mine}
       log={mine === undefined ? undefined : snapshot.logs.get(mine.id)}
       touch={touch}
-      draft={draft}
-      onDraft={setDraft}
-      onSay={(text, to) => session.say(text, to)}
+      writing={(mine === undefined ? undefined : writings.get(mine.id)) ?? NOTHING_WRITTEN}
+      onWriting={writerOf(mine?.id ?? "")}
+      onSay={(text, to) => (mine === undefined ? Promise.resolve("refused") : session.say(mine.id, text, to))}
       onOlder={() => (mine === undefined ? Promise.resolve() : older(mine.id))}
       onLeave={() => void leave()}
       onBack={toPlan}
@@ -175,6 +211,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     const covered = route.at === "talk" || peeked !== undefined;
     return (
       <main ref={root} className="house house-phone">
+        {skip}
         {notices}
         <div className="house-plan" inert={covered}>
           {plan}
@@ -185,16 +222,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   }
   return (
     <main ref={root} className={peeked !== undefined && !swapped ? "house house-pc house-side" : "house house-pc"}>
-      <a
-        className="skip-link"
-        href="#conversation"
-        onClick={(event) => {
-          event.preventDefault();
-          roomHeading.current?.focus();
-        }}
-      >
-        {words.skip}
-      </a>
+      {skip}
       {notices}
       <div className="house-plan">{plan}</div>
       {peekPane}

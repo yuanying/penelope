@@ -5,20 +5,13 @@ import { Fragment, type RefObject, useLayoutEffect, useRef, useState } from "rea
 
 import type { HouseActor, HouseEvent, HousePersonView } from "@penelope/contract";
 
-import type { RoomLog } from "../model/log.ts";
+import { type RoomLog, shownOf } from "../model/log.ts";
 import { EnterIcon, LeaveIcon, MoonIcon } from "./icons.tsx";
 import { keyOf, ResidentAvatar, type Shown, speakerOf } from "./residents.tsx";
 import { dayOf, timeOf, words } from "./words.ts";
 
 type Speech = Extract<HouseEvent, { kind: "speech" }>;
 
-/**
- * The older rows are laid out when they are scrolled to (`content-visibility`).
- * The newest are kept out of that: Astryx follows the end of the record by
- * its height, and loses the end when the rows there change their height as
- * they are first drawn.
- */
-const ALWAYS_LAID_OUT = 30;
 
 export type TimelineProps = {
   log: RoomLog;
@@ -35,7 +28,8 @@ export function Timeline({ log, you, residents, undelivered, narrow, scroller, o
   const [reading, setReading] = useState(false);
   // An older page is put before what is on the screen: the distance from the end is what stays the same.
   const fromEnd = useRef<number | undefined>(undefined);
-  const oldest = log.events[0]?.id;
+  const events = shownOf(log);
+  const oldest = events[0]?.id;
   useLayoutEffect(() => {
     const element = scroller.current;
     if (element && fromEnd.current !== undefined) element.scrollTop = element.scrollHeight - fromEnd.current;
@@ -62,8 +56,11 @@ export function Timeline({ log, you, residents, undelivered, narrow, scroller, o
           <Button label={words.older} variant="secondary" size="sm" isLoading={reading} onClick={() => void older()} />
         </div>
       ) : null}
-      {log.events.map((event, index) => {
-        const far = index < log.events.length - ALWAYS_LAID_OUT;
+      {events.map((event, index) => {
+        // Only the rows of older pages are laid out late (`content-visibility`). Astryx follows the end of the
+        // record by its height, and gives the end up when rows change their height while it follows: a row that
+        // was there when the record was opened, or came since, never does.
+        const far = index < log.paged;
         const day = dayOf(event.occurred_at);
         const divider = day !== lastDay ? <ChatSystemMessage variant="divider">{day}</ChatSystemMessage> : null;
         if (divider) lastSpeaker = undefined;

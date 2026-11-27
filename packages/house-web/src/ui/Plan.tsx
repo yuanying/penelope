@@ -10,7 +10,7 @@ import type { HousePersonView } from "@penelope/contract";
 
 import { EyeIcon, ForwardIcon } from "./icons.tsx";
 import { AwayResident, keyOf, ResidentAvatar, ResidentCard, ResidentStack } from "./residents.tsx";
-import { timeOf, words } from "./words.ts";
+import { timeOf, withUnread, words } from "./words.ts";
 
 type Room = HousePersonView["rooms"][number];
 
@@ -24,6 +24,8 @@ export type PlanProps = {
   unread: number;
   lineNotice?: ReactNode;
   heading: RefObject<HTMLHeadingElement | null>;
+  /** The way to the conversation on a phone. */
+  dock: RefObject<HTMLButtonElement | null>;
   onPeek: (room: string) => void;
   onEnter: (room: string) => void;
   onOpenTalk: () => void;
@@ -42,7 +44,7 @@ function Capacity({ room }: { room: Room }) {
   );
 }
 
-export function Plan({ house, mine, peek, online, phone, unread, lineNotice, heading, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
+export function Plan({ house, mine, peek, online, phone, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
   const myRoom = house.rooms.find(({ id }) => id === mine);
   return (
     <div className="plan">
@@ -146,7 +148,7 @@ export function Plan({ house, mine, peek, online, phone, unread, lineNotice, hea
           {myRoom === undefined ? (
             <p className="plan-dock plan-dock-off">{words.nowhereDock}</p>
           ) : (
-            <button type="button" className="plan-dock" aria-label={words.openTalkOf(myRoom.name)} onClick={onOpenTalk}>
+            <button ref={dock} type="button" className="plan-dock" aria-label={withUnread(words.openTalkOf(myRoom.name), unread)} onClick={onOpenTalk}>
               <ResidentStack residents={myRoom.occupants} size={32} max={3} />
               <span className="plan-dock-words">
                 <b>{words.inRoom(myRoom.name)}</b>
@@ -161,7 +163,7 @@ export function Plan({ house, mine, peek, online, phone, unread, lineNotice, hea
                 </span>
               </span>
               {unread > 0 ? (
-                <span className="unread" aria-label={words.unreadCount(unread)}>
+                <span className="unread" aria-hidden>
                   {unread > 99 ? "99+" : unread}
                 </span>
               ) : null}

@@ -78,8 +78,12 @@ export const words = {
   asleepNoReach: "寝ている・届かない",
   removeTo: (name: string) => `${name}を宛先から外す`,
   enterHint: "Enter で送る・Shift+Enter で改行",
-  sayRefused: "送れませんでした。いまいる部屋を確かめてください。",
-  sayUnknown: "送れたか確かめられませんでした。会話に出ていなければ、もう一度送ってください。",
+  unsentRefused: "送れなかった発言",
+  unsentUnknown: "送れたか確かめられなかった発言",
+  unsentUnknownHint: "会話に出ていれば届いています。出ていなければ、もう一度送れます。",
+  resend: "もう一度送る",
+  backToField: "入力欄に戻す",
+  discard: "捨てる",
 
   down: "接続が切れました。つなぎ直しています。",
   downBody: "つながるまで話せません。しばらく戻らないと、部屋を出たことになります。",
@@ -88,11 +92,16 @@ export const words = {
   returnFailed: (room: string) => `${room}は満員なので、どの部屋にもいません。空いたら、間取りから入れます。`,
   enterFull: (room: string) => `${room}は満員で入れませんでした。`,
   failed: "うまくいきませんでした。もう一度試してください。",
+  logoutUnconfirmed: "ログアウトを確かめられませんでした。まだログインしたままです。",
+  logoutAgain: "もう一度ログアウトする",
   dismiss: "知らせを閉じる",
 
   today: "今日",
   yesterday: "昨日",
 } as const;
+
+/** A button's name with the count its badge shows: the badge alone names nothing. */
+export const withUnread = (label: string, count: number) => (count > 0 ? `${label}（${words.unreadCount(count)}）` : label);
 
 const time = new Intl.DateTimeFormat("ja-JP", { hour: "numeric", minute: "2-digit" });
 const date = new Intl.DateTimeFormat("ja-JP", { month: "long", day: "numeric", weekday: "short" });

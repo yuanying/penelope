@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createApi } from "../src/model/api.ts";
+import { shownOf } from "../src/model/log.ts";
 import { myRoom, Session } from "../src/model/session.ts";
-import { FakeHouse, IVY, LIVING, speech } from "./fake-house.ts";
+import { BATH, FakeHouse, FERN, IVY, LIVING, speech } from "./fake-house.ts";
 
 /** Lets what was started settle: the fake answers at once. */
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -14,7 +15,14 @@ function start(house: FakeHouse, wait: (ms: number) => Promise<void> = async () 
   return session;
 }
 
-const livingLog = (session: Session) => session.getSnapshot().logs.get(LIVING.id)!.events.map((event) => (event.kind === "speech" ? event.text : event.kind));
+const texts = (session: Session, room: string) => shownOf(session.getSnapshot().logs.get(room)!).map((event) => (event.kind === "speech" ? event.text : event.kind));
+const livingLog = (session: Session) => texts(session, LIVING.id);
+/** A wait that is over when the test says so. */
+function waiting() {
+  let over!: () => void;
+  const wait = () => new Promise<void>((resolve) => (over = resolve));
+  return { wait, over: () => over() };
+}
 
 describe("the line to the house", () => {
   // docs/house.md, 接続と居場所: the stream has no replay, so each `ready` reads the record back to the newest event held.
@@ -35,6 +43,117 @@ describe("the line to the house", () => {
     await settle();
 
     assert.deepEqual(livingLog(session), ["one", "two", "three", "four", "five", "six"]);
+  });
+
+  // What the stream brings after a reading of the record failed is newer than what was missed: it must not pass for read.
+  it("still reads what was missed when the reading of the record failed and the line dropped again", async () => {
+    const house = new FakeHouse();
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+    house.happen(speech(LIVING, IVY, "one"));
+
+    house.drop();
+    house.happen(speech(LIVING, IVY, "two"), { heard: false });
+    house.failures.history = 1;
+    house.ready();
+    await settle();
+    house.happen(speech(LIVING, IVY, "three"));
+    house.drop();
+    house.ready();
+    await settle();
+
+    assert.deepEqual(livingLog(session), ["one", "two", "three"]);
+  });
+
+  it("reads the record again by itself after a reading of it failed", async () => {
+    const house = new FakeHouse();
+    house.happen(speech(LIVING, IVY, "one"), { heard: false });
+    house.failures.history = 1;
+    const session = start(house);
+    house.ready();
+    await settle();
+
+    assert.deepEqual(livingLog(session), ["one"]);
+  });
+
+  // An answer about a room that was closed and looked into again is about another showing of it.
+  it("drops the record's late answer for a room that was closed and looked into again", async () => {
+    const house = new FakeHouse();
+    house.happen(speech(BATH, FERN, "1"), { heard: false });
+    const session = start(house);
+    house.ready();
+    await settle();
+    const late = house.hold("history");
+    session.peek(BATH.id);
+    await settle();
+
+    session.peek(undefined);
+    for (let line = 2; line <= 53; line += 1) house.happen(speech(BATH, FERN, String(line)), { heard: false });
+    session.peek(BATH.id);
+    house.ready();
+    await settle();
+    late.give();
+    await settle();
+
+    assert.deepEqual(texts(session, BATH.id), Array.from({ length: 50 }, (_, index) => String(index + 4)));
+    assert.notEqual(session.getSnapshot().logs.get(BATH.id)!.before, undefined);
+  });
+
+  // The tab's place is the house's, and the stream is how the house tells it: an answer on the way is older than that.
+  it("keeps the room the stream told of when the answer to an earlier entering comes late", async () => {
+    const house = new FakeHouse();
+    house.house = house.withLeeIn(undefined);
+    const session = start(house);
+    house.ready();
+    await settle();
+    const late = house.hold("enter");
+    const entering = session.enter(LIVING.id);
+    await settle();
+
+    house.floor(house.withLeeIn(BATH.id));
+    late.give();
+    await entering;
+
+    assert.equal(myRoom(session.getSnapshot()), BATH.id);
+  });
+
+  it("asks the house to say nothing in a room the person is no longer in", async () => {
+    const house = new FakeHouse();
+    const session = start(house);
+    house.ready();
+    await settle();
+    house.floor(house.withLeeIn(BATH.id));
+
+    assert.equal(await session.say(LIVING.id, "only for the living room", []), "refused");
+    assert.deepEqual(house.writes, []);
+  });
+
+  // docs/house.md, 人のログイン: the session is over when the house says so, not when the button was pressed.
+  it("stays signed in and says so when the house did not end the session", async () => {
+    const house = new FakeHouse();
+    house.failures.logout = 1;
+    const session = start(house);
+    house.ready();
+    await settle();
+
+    await session.logout();
+
+    assert.equal(session.getSnapshot().signedIn, true);
+    assert.deepEqual(session.getSnapshot().notice, { kind: "logout-unconfirmed" });
+  });
+
+  it("is signed out when the answer to the logout was lost but the house ended the session", async () => {
+    const house = new FakeHouse();
+    const session = start(house);
+    house.ready();
+    await settle();
+    const answer = house.hold("logout");
+    const leaving = session.logout();
+    answer.lose();
+    await leaving;
+
+    assert.equal(session.getSnapshot().signedIn, false);
   });
 
   it("is not opened again when the house refuses it and the session is gone", async () => {
@@ -63,5 +182,41 @@ describe("the line to the house", () => {
     await settle();
     house.ready();
     assert.equal(session.getSnapshot().line.kind, "open");
+  });
+
+  // docs/house.md, 接続と居場所: no way of asking for the stream again passes by the question about the session.
+  it("opens no stream on being told to connect again before the house answered about the session", async () => {
+    const house = new FakeHouse();
+    house.streamStatus = 503;
+    const session = start(house, () => new Promise(() => {}));
+    await settle();
+    assert.equal(session.getSnapshot().line.kind, "refused");
+
+    house.streamStatus = 200;
+    const answer = house.hold("house");
+    session.retry();
+    await settle();
+    assert.equal(house.sources.length, 1);
+
+    answer.give();
+    await settle();
+    assert.equal(house.sources.length, 2);
+  });
+
+  it("asks about the session again, and opens no stream, while the house cannot answer about it", async () => {
+    const house = new FakeHouse();
+    house.streamStatus = 503;
+    house.failures.house = 1;
+    const pause = waiting();
+    const session = start(house, pause.wait);
+    await settle();
+    assert.equal(house.sources.length, 1);
+    assert.equal(session.getSnapshot().signedIn, undefined);
+
+    house.streamStatus = 200;
+    pause.over();
+    await settle();
+    assert.equal(session.getSnapshot().signedIn, true);
+    assert.equal(house.sources.length, 1);
   });
 });

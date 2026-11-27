@@ -61,8 +61,7 @@ describe("the house's screen", () => {
 
   it("says so when a room filled up before the person got in", async () => {
     const house = new FakeHouse();
-    const [living, bath] = house.house.rooms;
-    house.house = { ...house.house, rooms: [{ ...living!, occupants: [awake(IVY)] }, bath!], away: [LEE] };
+    house.house = house.withLeeIn(undefined);
     house.filled.add("living");
     await open(house);
 
@@ -97,17 +96,47 @@ describe("the house's screen", () => {
     assert.deepEqual(house.said, [{ room: "living", speech: { text: "hello" }, connection }]);
   });
 
-  // docs/house.md, 話す: a speech with no answer may be recorded, so it is never sent again by itself.
-  it("keeps what was written when no answer came, and sends it only once", async () => {
+  // docs/house.md, 話す: a speech with no answer may be recorded, so it is never sent again by itself,
+  // and never as part of what is written next.
+  it("keeps a speech with no answer apart from what is written next, and sends it only once", async () => {
     const house = new FakeHouse();
-    house.loseSayAnswers = true;
     await open(house);
-
+    const answer = house.hold("say");
     await say("did you hear?");
 
-    await within(myRoom()).findByText("送れたか確かめられませんでした。会話に出ていなければ、もう一度送ってください。");
-    assert.equal(screen.getByLabelText("Livingで話す").textContent, "did you hear?");
+    const field = screen.getByLabelText("Livingで話す");
+    await act(async () => {
+      field.textContent = "and another thing";
+      fireEvent.input(field);
+    });
+    await act(async () => {
+      answer.lose();
+    });
+
+    const unsent = await within(myRoom()).findByRole("group", { name: "送れたか確かめられなかった発言" });
+    assert.ok(within(unsent).getByText("did you hear?"));
+    assert.equal(field.textContent, "and another thing");
     assert.equal(house.said.length, 1);
+  });
+
+  // The decision of the review of 2026-11-27: what is written is the room's it was written in.
+  it("leaves what was written in a room there when the person moves to another", async () => {
+    const house = await open();
+    const field = screen.getByLabelText("Livingで話す");
+    await act(async () => {
+      field.textContent = "only for the living room";
+      fireEvent.input(field);
+    });
+
+    await act(async () => {
+      house.floor(house.withLeeIn("bath"));
+    });
+    assert.equal((await screen.findByLabelText("Bathで話す")).textContent, "");
+
+    await act(async () => {
+      house.floor(house.withLeeIn("living"));
+    });
+    assert.equal((await screen.findByLabelText("Livingで話す")).textContent, "only for the living room");
   });
 
   // ADR-0075, 2: nothing is said while the line is down, and nothing is kept to send later.
@@ -124,8 +153,7 @@ describe("the house's screen", () => {
 
   it("has no field to speak in for one who is in no room", async () => {
     const house = new FakeHouse();
-    const [living, bath] = house.house.rooms;
-    house.house = { ...house.house, rooms: [{ ...living!, occupants: [awake(IVY)] }, bath!], away: [LEE] };
+    house.house = house.withLeeIn(undefined);
     await open(house);
 
     assert.ok(within(myRoom()).getByText("いまはどの部屋にもいません"));

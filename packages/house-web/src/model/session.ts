@@ -5,7 +5,7 @@
 import type { HouseActor, HouseEvent, HousePersonView, HouseStreamReady } from "@penelope/contract";
 
 import { type Api, Refused, Unauthorized } from "./api.ts";
-import { appended, caughtUp, type RoomLog, UNREAD_LOG, withOlder } from "./log.ts";
+import { appended, caughtUp, type RoomLog, shownOf, withOlder } from "./log.ts";
 
 /**
  * The line to the house. Only an open line has a connection, so nothing can
@@ -19,7 +19,7 @@ export type Line =
   /** The house refused the stream, or could not be asked: tried again after a while. */
   | { kind: "refused" };
 
-export type Notice = { kind: "full" | "return-failed"; room: string } | { kind: "failed" };
+export type Notice = { kind: "full" | "return-failed"; room: string } | { kind: "failed" | "logout-unconfirmed" };
 
 export type Snapshot = {
   /** Unknown until the house answered once. */
@@ -37,8 +37,8 @@ export type Snapshot = {
   notice: Notice | undefined;
 };
 
-/** What became of a speech. `unknown`: no answer came, so it may be recorded. */
-export type Said = "sent" | "refused" | "unknown" | "offline";
+/** What became of a speech. `refused`: it was not said. `unknown`: no answer came, so it may be recorded. */
+export type Said = "sent" | "refused" | "unknown";
 
 /** The part of EventSource the session uses; the tests give their own. */
 export type Source = Pick<EventSource, "addEventListener" | "close" | "readyState">;
@@ -52,7 +52,8 @@ export type SessionOptions = {
 
 /** EventSource.CLOSED: the browser gave up, as it does when the answer is not 200. */
 const CLOSED = 2;
-const REFUSAL_BACKOFF_MS = [1_000, 2_000, 5_000, 10_000];
+const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000];
+const backoff = (tries: number) => BACKOFF_MS[Math.min(tries, BACKOFF_MS.length - 1)]!;
 
 const INITIAL: Snapshot = {
   signedIn: undefined,
@@ -78,7 +79,8 @@ export function myRoom({ house }: Pick<Snapshot, "house">): string | undefined {
 /** What others said in the person's room since it was last on the screen. */
 export function unread(snapshot: Snapshot): number {
   const room = myRoom(snapshot);
-  const events = (room === undefined ? undefined : snapshot.logs.get(room))?.events ?? [];
+  const log = room === undefined ? undefined : snapshot.logs.get(room);
+  const events = log === undefined ? [] : shownOf(log);
   const from = snapshot.seen === undefined ? -1 : events.findIndex(({ id }) => id === snapshot.seen);
   return events.slice(from + 1).filter((event) => event.kind === "speech" && event.actor.id !== snapshot.house?.you.id).length;
 }
@@ -93,6 +95,10 @@ export class Session {
   private replacement: Source | undefined;
   private opens = 0;
   private refusals = 0;
+  /** Counts the floors the stream brought. */
+  private floors = 0;
+  /** Numbers the readings of records and the showings of rooms. */
+  private ticks = 0;
 
   constructor({ api, open, wait }: SessionOptions) {
     this.api = api;
@@ -117,8 +123,11 @@ export class Session {
     this.set({ line: { kind: "connecting" } });
   }
 
+  /** Connects now. After a refusal the session is still asked about first. */
   retry(): void {
-    if (this.snapshot.signedIn !== false) this.connect();
+    if (this.snapshot.signedIn === false) return;
+    if (this.snapshot.line.kind === "refused") void this.refused(true);
+    else this.connect();
   }
 
   /** Looks into a room of the floor other than the person's own, or stops looking. */
@@ -127,22 +136,25 @@ export class Session {
     this.set({ peek: room });
     this.holdShownRooms();
     // To stop looking needs no new stream: what the old one still brings of that room is dropped.
-    if (room !== undefined && this.snapshot.signedIn === true) this.connect();
+    // After a refusal the stream is opened for this room once the session was checked.
+    if (room !== undefined && this.snapshot.signedIn === true && this.snapshot.line.kind !== "refused") this.connect();
   }
 
-  /** Enters a room; false when the person did not get in. */
+  /** Enters a room; false when the person is not in it afterwards. */
   async enter(room: string): Promise<boolean> {
     const { line } = this.snapshot;
     if (line.kind !== "open") return false;
+    const asked = this.floors;
     try {
-      this.setHouse(await this.api.enter(room, line.connection));
+      const house = await this.api.enter(room, line.connection);
+      // A floor the stream brought meanwhile is newer than this answer.
+      if (asked === this.floors) this.setHouse(house);
       this.set({ notice: undefined });
-      return true;
     } catch (error) {
       if (error instanceof Refused && error.code === "room is full") this.set({ notice: { kind: "full", room } });
       else this.failed(error);
-      return false;
     }
+    return myRoom(this.snapshot) === room;
   }
 
   async leave(): Promise<void> {
@@ -155,11 +167,10 @@ export class Session {
     }
   }
 
-  /** Says it in the person's room. Nothing is kept to send later, and nothing is sent twice. */
-  async say(text: string, to: readonly string[]): Promise<Said> {
+  /** Says it in `room` if the person is in it. Nothing is kept to send later, and nothing is sent twice. */
+  async say(room: string, text: string, to: readonly string[]): Promise<Said> {
     const { line } = this.snapshot;
-    const room = myRoom(this.snapshot);
-    if (line.kind !== "open" || room === undefined) return "offline";
+    if (line.kind !== "open" || room !== myRoom(this.snapshot)) return "refused";
     try {
       const { id, not_delivered } = await this.api.say(room, { text, ...(to.length > 0 ? { to: [...to] } : {}) }, line.connection);
       if (not_delivered.length > 0) this.set({ undelivered: new Map(this.snapshot.undelivered).set(id, not_delivered) });
@@ -173,11 +184,12 @@ export class Session {
 
   /** Reads the page before what is held of a room. */
   async older(room: string): Promise<void> {
-    const before = this.snapshot.logs.get(room)?.before;
-    if (before === undefined) return;
+    const log = this.snapshot.logs.get(room);
+    if (log?.before === undefined) return;
+    const { before, showing } = log;
     try {
       const page = await this.api.history(room, before);
-      this.updateLog(room, (log) => (log.before === before ? withOlder(log, page.events, page.before) : log));
+      this.updateLog(room, (now) => (now.showing === showing && now.before === before ? withOlder(now, page.events, page.before) : now));
     } catch (error) {
       this.failed(error);
     }
@@ -186,7 +198,8 @@ export class Session {
   /** The person's room is on the screen: what is held of it, read from the record or heard, is not unread. */
   see(): void {
     const room = myRoom(this.snapshot);
-    const newest = (room === undefined ? undefined : this.snapshot.logs.get(room))?.events.at(-1)?.id;
+    const log = room === undefined ? undefined : this.snapshot.logs.get(room);
+    const newest = log === undefined ? undefined : shownOf(log).at(-1)?.id;
     if (newest !== undefined && newest !== this.snapshot.seen) this.set({ seen: newest });
   }
 
@@ -194,8 +207,22 @@ export class Session {
     this.set({ notice: undefined });
   }
 
+  /** Signs out once the house ended the session. When it did not, or cannot say, the person stays signed in and is told. */
   async logout(): Promise<void> {
-    await this.api.logout().catch(() => {});
+    try {
+      await this.api.logout();
+    } catch {
+      try {
+        await this.api.house();
+        this.set({ notice: { kind: "logout-unconfirmed" } });
+        return;
+      } catch (error) {
+        if (!(error instanceof Unauthorized)) {
+          this.set({ notice: { kind: "logout-unconfirmed" } });
+          return;
+        }
+      }
+    }
     this.signedOut();
   }
 
@@ -226,11 +253,16 @@ export class Session {
         line: { kind: "open", connection: ready.connection },
         ...(ready.return_failed === undefined ? {} : { notice: { kind: "return-failed" as const, room: ready.return_failed } }),
       });
+      this.floors += 1;
+      const held = [...this.snapshot.logs.keys()];
       this.setHouse(ready.house);
-      for (const room of this.snapshot.logs.keys()) void this.catchUp(room);
+      // A gap may stand between what is held and what this stream brings. A room newly shown is being read already.
+      for (const room of held) this.read(room);
     });
     source.addEventListener("house", (message) => {
-      if (source === this.active) this.setHouse(JSON.parse((message as MessageEvent<string>).data) as HousePersonView);
+      if (source !== this.active) return;
+      this.floors += 1;
+      this.setHouse(JSON.parse((message as MessageEvent<string>).data) as HousePersonView);
     });
     source.addEventListener("room", (message) => {
       if (source !== this.active) return;
@@ -244,45 +276,67 @@ export class Session {
     });
   }
 
-  /** The house did not answer the stream with 200: whether there is a session is asked before anything else. */
-  private async refused(): Promise<void> {
+  /**
+   * The house did not answer the stream with 200. No stream is opened before
+   * the house said that the session is good: an answer that is not one about
+   * the session is asked for again.
+   */
+  private async refused(immediately = false): Promise<void> {
     const opened = ++this.opens;
     this.closeSources();
     this.set({ line: { kind: "refused" } });
-    try {
-      const house = await this.api.house();
-      if (opened !== this.opens) return;
-      this.set({ signedIn: true });
-      this.setHouse(house);
-    } catch (error) {
-      if (opened !== this.opens) return;
-      if (error instanceof Unauthorized) {
-        this.signedOut();
-        return;
+    for (;;) {
+      try {
+        const house = await this.api.house();
+        if (opened !== this.opens) return;
+        this.set({ signedIn: true });
+        this.setHouse(house);
+        break;
+      } catch (error) {
+        if (opened !== this.opens) return;
+        if (error instanceof Unauthorized) {
+          this.signedOut();
+          return;
+        }
       }
+      await this.wait(backoff(this.refusals++));
+      if (opened !== this.opens) return;
     }
-    await this.wait(REFUSAL_BACKOFF_MS[Math.min(this.refusals++, REFUSAL_BACKOFF_MS.length - 1)]!);
+    if (!immediately) await this.wait(backoff(this.refusals++));
     if (opened === this.opens) this.connect();
   }
 
-  private async catchUp(room: string): Promise<void> {
-    const anchor = this.snapshot.logs.get(room)?.events.at(-1)?.id;
-    const fetched: HouseEvent[] = [];
-    let before: string | undefined;
-    try {
-      do {
-        const page = await this.api.history(room, before);
-        fetched.push(...page.events);
-        before = page.before;
-      } while (anchor !== undefined && before !== undefined && !fetched.some(({ id }) => id === anchor));
-    } catch (error) {
-      if (error instanceof Unauthorized) this.signedOut();
-      // Otherwise the next `ready` reads it again.
-      return;
+  /** Starts the reading that brings a room's log up to date, in the place of any reading under way. */
+  private read(room: string): void {
+    const due = ++this.ticks;
+    this.updateLog(room, (log) => ({ ...log, due }));
+    void this.readUntilDone(room, due);
+  }
+
+  private async readUntilDone(room: string, due: number): Promise<void> {
+    for (let tries = 0; ; tries += 1) {
+      const log = this.snapshot.logs.get(room);
+      if (log?.due !== due || this.snapshot.line.kind !== "open") return;
+      const anchor = log.events.at(-1)?.id;
+      const fetched: HouseEvent[] = [];
+      let before: string | undefined;
+      try {
+        do {
+          const page = await this.api.history(room, before);
+          fetched.push(...page.events);
+          before = page.before;
+        } while (anchor !== undefined && before !== undefined && !fetched.some(({ id }) => id === anchor));
+        this.updateLog(room, (now) => (now.due === due ? caughtUp(now, fetched, before) : now));
+        if (!log.read && room === myRoom(this.snapshot)) this.see();
+        return;
+      } catch (error) {
+        if (error instanceof Unauthorized) {
+          this.signedOut();
+          return;
+        }
+      }
+      await this.wait(backoff(tries));
     }
-    const first = this.snapshot.logs.get(room)?.read === false;
-    this.updateLog(room, (log) => caughtUp(log, anchor, fetched, before));
-    if (first && room === myRoom(this.snapshot)) this.see();
   }
 
   private setHouse(house: HousePersonView): void {
@@ -292,12 +346,14 @@ export class Session {
     if (moved) this.see();
   }
 
+  /** Holds a log for each room on the screen and for no other. A room newly shown is read from its newest page. */
   private holdShownRooms(): void {
     const shown = [myRoom(this.snapshot), this.snapshot.peek].filter((room) => room !== undefined);
     const fresh = shown.filter((room) => !this.snapshot.logs.has(room));
     if (fresh.length === 0 && [...this.snapshot.logs.keys()].every((room) => shown.includes(room))) return;
-    this.set({ logs: new Map(shown.map((room) => [room, this.snapshot.logs.get(room) ?? UNREAD_LOG])) });
-    if (this.snapshot.line.kind === "open") for (const room of fresh) void this.catchUp(room);
+    const unread = (): RoomLog => ({ events: [], heard: [], before: undefined, paged: 0, read: false, due: ++this.ticks, showing: this.ticks });
+    this.set({ logs: new Map(shown.map((room) => [room, this.snapshot.logs.get(room) ?? unread()])) });
+    for (const room of fresh) this.read(room);
   }
 
   private updateLog(room: string, change: (log: RoomLog) => RoomLog): void {

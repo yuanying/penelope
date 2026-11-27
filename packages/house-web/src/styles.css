@@ -773,7 +773,7 @@ button.plan-dock:hover {
 .astryx-chat-message-bubble[data-density] {
   border-radius: 16px;
 }
-/* A long record: its older rows are not laid out until they are scrolled to. */
+/* A long record: the rows of its older pages are not laid out until they are scrolled to. */
 .timeline-far {
   content-visibility: auto;
   contain-intrinsic-size: auto 48px;
@@ -919,6 +919,27 @@ button.plan-dock:hover {
 .house-phone .speak-to-chip button {
   width: 32px;
   height: 32px;
+}
+/* A speech that was not said, or is not known to have been: above the field, apart from what is written. */
+.speak-unsent {
+  display: grid;
+  gap: 6px;
+  padding: 10px 14px;
+  border-radius: var(--radius-container);
+  background: var(--color-warning-muted);
+  color: var(--color-on-warning-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.speak-unsent-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  color: var(--color-text-primary);
+}
+.speak-unsent-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .speak-hint {
   min-width: 0;

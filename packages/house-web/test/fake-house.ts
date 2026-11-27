@@ -54,6 +54,8 @@ export function speech(room: { id: string; name: string }, actor: HouseEvent["ac
 export const LIVING = { id: "living", name: "Living" };
 export const BATH = { id: "bath", name: "Bath" };
 
+type Kind = "house" | "history" | "enter" | "say" | "logout";
+
 export class FakeHouse {
   /** The floor: Lee and Ivy in the living room, Fern in the bath, which holds one. */
   house: HousePersonView = {
@@ -74,14 +76,15 @@ export class FakeHouse {
   pageSize = 50;
   /** Rooms that filled up since the floor was sent: entering them is refused. */
   readonly filled = new Set<string>();
-  /** While set, the answer to a speech is lost on the way: the house recorded it, the tab hears nothing. */
-  loseSayAnswers = false;
   /** Whom the next speech does not reach. */
   notDelivered: HouseSpeechResult["not_delivered"] = [];
+  /** How many of the next requests of a kind the house answers with 503, after doing nothing. */
+  readonly failures: Partial<Record<Kind, number>> = {};
   /** Every request but the reads, as `METHOD path`. */
   readonly writes: string[] = [];
   readonly said: Array<{ room: string; speech: HouseSpeech; connection: string | null }> = [];
   readonly sources: FakeSource[] = [];
+  private readonly held = new Map<Kind, Promise<boolean>>();
   private connections = 0;
 
   readonly open = (url: string): Source => {
@@ -129,15 +132,57 @@ export class FakeHouse {
     this.source.emit("house", house);
   }
 
+  /** The floor with Lee in a room, or in none. */
+  withLeeIn(room: string | undefined): HousePersonView {
+    return {
+      ...this.house,
+      rooms: this.house.rooms.map((each) => ({
+        ...each,
+        occupants: [...each.occupants.filter(({ id }) => id !== LEE.id), ...(each.id === room ? [me] : [])],
+      })),
+      away: room === undefined ? [LEE] : [],
+    };
+  }
+
+  /**
+   * The house does what the next request of a kind asks at once, but its
+   * answer is on the way until it is given, or lost.
+   */
+  hold(kind: Kind): { give: () => void; lose: () => void } {
+    let settle!: (arrives: boolean) => void;
+    this.held.set(kind, new Promise((resolve) => (settle = resolve)));
+    return { give: () => settle(true), lose: () => settle(false) };
+  }
+
   readonly fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), "http://house.example.com");
     const method = init?.method ?? "GET";
+    const room = /^\/api\/rooms\/([^/]+)\/(history|enter|say)$/.exec(url.pathname);
+    const kind: Kind | undefined =
+      url.pathname === "/api/house" ? "house" : url.pathname === "/auth/logout" ? "logout" : (room?.[2] as Kind | undefined);
+    if (kind !== undefined && (this.failures[kind] ?? 0) > 0) {
+      this.failures[kind]! -= 1;
+      return Response.json({ error: "unavailable" }, { status: 503 });
+    }
+    const answer = this.answer(url, method, init, room);
+    const held = kind === undefined ? undefined : this.held.get(kind);
+    if (held !== undefined) {
+      this.held.delete(kind!);
+      if (!(await held)) throw new TypeError("network error");
+    }
+    return answer;
+  };
+
+  private answer(url: URL, method: string, init: RequestInit | undefined, room: RegExpExecArray | null): Response {
     const json = (body: unknown, status = 200) => Response.json(body, { status });
     if (!this.signedIn) return json({ error: "unauthorized" }, 401);
     if (method !== "GET") this.writes.push(`${method} ${url.pathname}`);
     const connection = new Headers(init?.headers).get("x-house-connection");
-    const room = /^\/api\/rooms\/([^/]+)\/(history|enter|say)$/.exec(url.pathname);
     if (url.pathname === "/api/house") return json(this.house);
+    if (url.pathname === "/auth/logout") {
+      this.signedIn = false;
+      return new Response(null, { status: 204 });
+    }
     if (room?.[2] === "history") {
       const newestFirst = (this.records.get(room[1]!) ?? []).toReversed();
       const before = url.searchParams.get("before");
@@ -145,15 +190,19 @@ export class FakeHouse {
       const events = newestFirst.slice(from, from + this.pageSize);
       return json({ events, ...(from + this.pageSize < newestFirst.length ? { before: events.at(-1)!.id } : {}) });
     }
-    if (room?.[2] === "enter" && this.filled.has(room[1]!)) return json({ error: "room is full" }, 409);
+    if (room?.[2] === "enter") {
+      if (this.filled.has(room[1]!)) return json({ error: "room is full" }, 409);
+      this.house = this.withLeeIn(room[1]!);
+      return json(this.house);
+    }
     if (room?.[2] === "say") {
       const said = JSON.parse(String(init?.body)) as HouseSpeech;
+      if (!this.house.rooms.find(({ id }) => id === room[1])?.occupants.some(({ id }) => id === LEE.id)) return json({ error: "you are not in that room" }, 409);
       this.said.push({ room: room[1]!, speech: said, connection });
-      if (this.loseSayAnswers) throw new TypeError("network error");
       const event = speech(this.house.rooms.find(({ id }) => id === room[1])!, LEE, said.text, said.to ?? []);
       this.happen(event);
       return json({ id: event.id, not_delivered: this.notDelivered } satisfies HouseSpeechResult);
     }
     return json({ error: "not found" }, 404);
-  };
+  }
 }

@@ -207,22 +207,98 @@ describe("the house's screen in a browser", () => {
     assert.ok(await last.isVisible());
   });
 
-  it("opens a long record at its end, and stays where it was when an older page is read", async (t) => {
+  it("opens a long record at its end, and keeps what was read where it was when an older page is read", async (t) => {
     const house = await evening(t, { long: true });
     const page = await open(t, house, PC);
     await page.getByRole("button", { name: "居間に入る" }).click();
     const newest = page.getByText("Lee が居間に来た");
     await newest.waitFor();
-    assert.ok(await newest.isVisible(), "the newest event is on the screen");
+    const record = page.locator(".room-talk .astryx-chat-layout");
+    await page.waitForFunction(() => {
+      const element = document.querySelector(".room-talk .astryx-chat-layout")!;
+      return element.scrollHeight - element.scrollTop - element.clientHeight < 2;
+    });
 
     const older = page.getByRole("button", { name: "前の会話を読む" });
     await older.scrollIntoViewIfNeeded();
-    const oldestHeld = page.locator(".speech-text").first();
-    const text = await oldestHeld.textContent();
+    const oldestHeld = page.locator(`[data-speech="${await page.locator("[data-speech]").first().getAttribute("data-speech")}"]`);
+    const topIn = async () => (await oldestHeld.boundingBox())!.y - (await record.boundingBox())!.y;
+    const before = await topIn();
     await older.click();
     await page.getByText("洗濯物の話 その 1", { exact: true }).waitFor({ state: "attached" });
 
-    const kept = page.locator(".speech-text", { hasText: new RegExp(`^${text}$`) });
-    assert.ok(await kept.isVisible(), "what was at the top before is still on the screen");
+    assert.ok(Math.abs((await topIn()) - before) <= 2, `the row moved from ${before}px to ${await topIn()}px`);
+  });
+
+  // A touch keyboard has no Shift: Enter is how a line is broken there, and only the button sends.
+  it("breaks the line on Enter on a phone, and sends the lines with the button", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await field(page, "居間").click();
+
+    await page.keyboard.type("一行目");
+    await page.keyboard.press("Enter");
+    await page.keyboard.type("二行目");
+    assert.equal(await page.locator(".speech-text", { hasText: "一行目" }).count(), 0);
+    await page.getByRole("button", { name: "送信" }).click();
+
+    const said = page.locator(".speech-text", { hasText: "二行目" });
+    await said.waitFor();
+    assert.equal(await said.textContent(), "一行目\n二行目");
+  });
+
+  it("says of a candidate to address whether they sleep now, not when the person came in", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await field(page, "居間").click();
+
+    await house.agent("aki").sync({ mood: null, sleepiness: 5, sleep: { state: "awake" } });
+    await page.getByRole("article", { name: "居間" }).getByText(/^寝ている・/).waitFor({ state: "detached" });
+    await page.keyboard.type("@あき");
+
+    const candidate = page.getByRole("option", { name: /アキ/ });
+    await candidate.waitFor();
+    assert.equal(await candidate.textContent(), "アキ");
+  });
+
+  it("takes the way past the floor to the room looked into where that is the conversation shown", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, { width: 1100, height: 800 });
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await field(page, "居間").waitFor();
+    await page.getByRole("button", { name: "風呂を覗く" }).click();
+    await page.getByText("覗いています").waitFor();
+
+    await page.getByRole("link", { name: "会話へ移動" }).focus();
+    await page.keyboard.press("Enter");
+
+    assert.match(await focused(page), /^風呂/);
+    assert.equal(await page.evaluate(() => document.activeElement?.tagName), "H2");
+  });
+
+  it("takes the way past the floor to the strip that opens the conversation on a phone", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await page.getByRole("button", { name: "間取りに戻る" }).click();
+    await page.getByRole("region", { name: "自分のいる部屋" }).waitFor({ state: "detached" });
+
+    await page.getByRole("link", { name: "会話へ移動" }).focus();
+    await page.keyboard.press("Enter");
+
+    assert.equal(await focused(page), "居間の会話を開く");
+  });
+
+  it("names the count of what was not read in the name of the strip that shows it", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await page.getByRole("button", { name: "間取りに戻る" }).click();
+
+    await house.agent("penelope").say("living", "まだいる?");
+
+    await page.getByRole("button", { name: "居間の会話を開く（まだ読んでいない発言 1 件）" }).waitFor();
   });
 });

@@ -1,47 +1,61 @@
 // The stream has no replay, so a room's record is read again on each
 // connection and joined to what is held by the events' ids (docs/house.md,
-// 接続と居場所).
+// 接続と居場所). What the stream brings before that reading is done may
+// stand after a gap, so it is held apart from what is known to be whole.
 import type { HouseEvent } from "@penelope/contract";
 
 export type RoomLog = {
-  /** Oldest first. */
+  /** Oldest first, with nothing missing between them. */
   events: readonly HouseEvent[];
+  /** What the stream brought while a reading was due: after `events`, maybe after a gap. */
+  heard: readonly HouseEvent[];
   /** The cursor of the older page; none when the start of the record is held. */
   before: string | undefined;
+  /** How many of the first `events` came by older pages, asked for by the reader. */
+  paged: number;
   /** False until the record was read once: the room is not known to be silent before that. */
   read: boolean;
+  /** The reading that will bring the log up to date; none when it is. An answer to any other reading is dropped. */
+  due: number | undefined;
+  /** Which showing of the room this is: an answer asked for in an earlier showing is dropped. */
+  showing: number;
 };
 
-export const UNREAD_LOG: RoomLog = { events: [], before: undefined, read: false };
+export function shownOf(log: RoomLog): readonly HouseEvent[] {
+  return log.heard.length === 0 ? log.events : [...log.events, ...log.heard];
+}
 
 /** An event the stream brought. */
 export function appended(log: RoomLog, event: HouseEvent): RoomLog {
-  if (log.events.some(({ id }) => id === event.id)) return log;
-  return { ...log, events: [...log.events, event] };
+  if (shownOf(log).some(({ id }) => id === event.id)) return log;
+  return log.due === undefined ? { ...log, events: [...log.events, event] } : { ...log, heard: [...log.heard, event] };
 }
 
 /** `page` is newest first and was read with the log's cursor. */
 export function withOlder(log: RoomLog, page: readonly HouseEvent[], before: string | undefined): RoomLog {
-  const held = new Set(log.events.map(({ id }) => id));
-  return { ...log, events: [...page.filter(({ id }) => !held.has(id)).reverse(), ...log.events], before };
+  const held = new Set(shownOf(log).map(({ id }) => id));
+  const older = page.filter(({ id }) => !held.has(id)).reverse();
+  return { ...log, events: [...older, ...log.events], before, paged: log.paged + older.length };
 }
 
 /**
- * The record read again from its newest event down (`fetched`, newest first,
- * with the cursor of the page after it) until `anchor`, the newest event held
- * when the reading began. What came by the stream meanwhile stays after it.
- * When the anchor is not among what was fetched, or is no longer held, what
- * was fetched replaces what was held before it.
+ * The record read from its newest event down (`fetched`, newest first, with
+ * the cursor of the page after it) until the newest of `events`. When that
+ * event is not among what was fetched, what was fetched replaces `events`.
+ * What was heard and is not among what was fetched came after the reading.
  */
-export function caughtUp(log: RoomLog, anchor: string | undefined, fetched: readonly HouseEvent[], before: string | undefined): RoomLog {
-  const anchorAt = anchor === undefined ? -1 : log.events.findIndex(({ id }) => id === anchor);
-  const reached = anchorAt < 0 ? -1 : fetched.findIndex(({ id }) => id === anchor);
-  const fresh = (reached < 0 ? fetched : fetched.slice(0, reached)).toReversed();
-  const known = new Set(fresh.map(({ id }) => id));
-  const sinceAnchor = log.events.slice(anchorAt + 1).filter(({ id }) => !known.has(id));
+export function caughtUp(log: RoomLog, fetched: readonly HouseEvent[], before: string | undefined): RoomLog {
+  const anchor = log.events.at(-1)?.id;
+  const reached = anchor === undefined ? -1 : fetched.findIndex(({ id }) => id === anchor);
+  const read = reached < 0 ? fetched.toReversed() : [...log.events, ...fetched.slice(0, reached).toReversed()];
+  const known = new Set(read.map(({ id }) => id));
   return {
-    events: [...(reached < 0 ? [] : log.events.slice(0, anchorAt + 1)), ...fresh, ...sinceAnchor],
+    ...log,
+    events: [...read, ...log.heard.filter(({ id }) => !known.has(id))],
+    heard: [],
     before: reached < 0 ? before : log.before,
+    paged: reached < 0 ? 0 : log.paged,
     read: true,
+    due: undefined,
   };
 }
