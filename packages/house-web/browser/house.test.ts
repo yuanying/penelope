@@ -362,4 +362,29 @@ describe("the house's screen in a browser", () => {
     const bottom = (await page.locator(".room-bottom").boundingBox())!;
     assert.ok(bottom.y - record.y >= PHONE.height / 3, `only ${Math.round(bottom.y - record.y)}px of the record are left above what stands over it`);
   });
+
+  // The screen puts events where the house's record has them, by the place the house gives each of them.
+  it("shows a room's speeches in the house's order when the stream brought them before the record was read", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    let through!: () => void;
+    const stalled = new Promise<void>((resolve) => (through = resolve));
+    await page.route("**/api/rooms/penelope-room/history", async (route) => {
+      await stalled;
+      await route.continue();
+    });
+    await page.getByRole("button", { name: "ペネロペの部屋に入る" }).click();
+    await field(page, "ペネロペの部屋").waitFor();
+    await house.agent("penelope").enter("penelope-room");
+    for (let line = 1; line <= 51; line += 1) await house.agent("penelope").say("penelope-room", `${line} つめ`);
+    await page.locator(".speech-text", { hasText: /^51 つめ$/ }).waitFor();
+
+    // The record holds 53 events, so the reading takes its newest page and the one before it.
+    const read = page.waitForResponse((response) => response.url().includes("/penelope-room/history?before="));
+    through();
+    await (await read).finished();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+
+    assert.deepEqual(await page.locator(".speech-text").allTextContents(), Array.from({ length: 51 }, (_, index) => `${index + 1} つめ`));
+  });
 });

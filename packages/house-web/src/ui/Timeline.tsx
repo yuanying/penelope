@@ -5,7 +5,7 @@ import { Fragment, type RefObject, useLayoutEffect, useRef, useState } from "rea
 
 import type { HouseActor, HouseEvent, HousePersonView } from "@penelope/contract";
 
-import { type RoomLog, shownOf } from "../model/log.ts";
+import type { RoomLog } from "../model/log.ts";
 import { EnterIcon, LeaveIcon, MoonIcon } from "./icons.tsx";
 import { keyOf, ResidentAvatar, type Shown, speakerOf } from "./residents.tsx";
 import { dayOf, timeOf, words } from "./words.ts";
@@ -28,7 +28,7 @@ export function Timeline({ log, you, residents, undelivered, narrow, scroller, o
   const [reading, setReading] = useState(false);
   // An older page is put before what is on the screen: the distance from the end is what stays the same.
   const fromEnd = useRef<number | undefined>(undefined);
-  const events = shownOf(log);
+  const { events } = log;
   const oldest = events[0]?.id;
   useLayoutEffect(() => {
     const element = scroller.current;
@@ -56,11 +56,11 @@ export function Timeline({ log, you, residents, undelivered, narrow, scroller, o
           <Button label={words.older} variant="secondary" size="sm" isLoading={reading} onClick={() => void older()} />
         </div>
       ) : null}
-      {events.map((event, index) => {
+      {events.map((event) => {
         // Only the rows of older pages are laid out late (`content-visibility`). Astryx follows the end of the
         // record by its height, and gives the end up when rows change their height while it follows: a row that
         // was there when the record was opened, or came since, never does.
-        const far = index < log.paged;
+        const far = log.pagedBelow !== undefined && event.seq < log.pagedBelow;
         const day = dayOf(event.occurred_at);
         const divider = day !== lastDay ? <ChatSystemMessage variant="divider">{day}</ChatSystemMessage> : null;
         if (divider) lastSpeaker = undefined;

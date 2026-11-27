@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createApi } from "../src/model/api.ts";
-import { shownOf } from "../src/model/log.ts";
 import { myRoom, Session } from "../src/model/session.ts";
 import { BATH, FakeHouse, FERN, IVY, LIVING, speech } from "./fake-house.ts";
 
@@ -15,7 +14,7 @@ function start(house: FakeHouse, wait: (ms: number) => Promise<void> = async () 
   return session;
 }
 
-const texts = (session: Session, room: string) => shownOf(session.getSnapshot().logs.get(room)!).map((event) => (event.kind === "speech" ? event.text : event.kind));
+const texts = (session: Session, room: string) => session.getSnapshot().logs.get(room)!.events.map((event) => (event.kind === "speech" ? event.text : event.kind));
 const livingLog = (session: Session) => texts(session, LIVING.id);
 /** A wait that is over when the test says so. */
 function waiting() {
@@ -91,6 +90,67 @@ describe("the line to the house", () => {
     await settle();
 
     assert.deepEqual(livingLog(session), Array.from({ length: 51 }, (_, index) => String(index + 1)));
+  });
+
+  // The record's first page is asked for while the stream is already bringing events: which comes first is not the house's to say.
+  it("puts what the stream brought while the first reading was on its way where the record has it", async () => {
+    const house = new FakeHouse();
+    const through = house.stall("history");
+    const session = start(house);
+    house.ready();
+    await settle();
+    for (let line = 1; line <= 51; line += 1) house.happen(speech(LIVING, IVY, String(line)));
+
+    through();
+    await settle();
+
+    assert.deepEqual(livingLog(session), Array.from({ length: 51 }, (_, index) => String(index + 1)));
+  });
+
+  it("puts what the stream brought while a second try at the first reading was on its way where the record has it", async () => {
+    const house = new FakeHouse();
+    house.failures.history = 1;
+    const session = start(house);
+    house.ready();
+    const through = house.stall("history");
+    await settle();
+    for (let line = 1; line <= 51; line += 1) house.happen(speech(LIVING, IVY, String(line)));
+
+    through();
+    await settle();
+
+    assert.deepEqual(livingLog(session), Array.from({ length: 51 }, (_, index) => String(index + 1)));
+  });
+
+  it("leaves no gap under the newest page when the stream brought something older before the record was ever read", async () => {
+    const house = new FakeHouse();
+    house.pageSize = 2;
+    house.failures.history = 1;
+    const session = start(house, () => new Promise(() => {}));
+    house.ready();
+    await settle();
+    house.happen(speech(LIVING, IVY, "one"));
+
+    house.drop();
+    for (const text of ["two", "three", "four"]) house.happen(speech(LIVING, IVY, text), { heard: false });
+    house.ready();
+    await settle();
+
+    assert.deepEqual(livingLog(session), ["one", "two", "three", "four"]);
+  });
+
+  it("puts an event the stream brings after a newer page of the record was read where the record has it", async () => {
+    const house = new FakeHouse();
+    house.pageSize = 2;
+    const [one, two, three] = ["one", "two", "three"].map((text) => speech(LIVING, IVY, text));
+    for (const event of [one!, two!, three!]) house.happen(event, { heard: false });
+    const session = start(house);
+    house.ready();
+    await settle();
+
+    house.tell(one!);
+
+    assert.deepEqual(livingLog(session), ["one", "two", "three"]);
   });
 
   // An answer about a room that was closed and looked into again is about another showing of it.

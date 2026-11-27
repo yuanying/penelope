@@ -21,7 +21,8 @@ export type Draft = { text: string; to: readonly string[] };
  * Whom it was addressed to is kept by name: one who left the room since is
  * still shown, and is left out only on the person's word.
  */
-export type Unsent = { text: string; to: readonly { id: string; name: string }[]; said: Exclude<Said, "sent"> };
+export type Unsent = { key: number; text: string; to: readonly { id: string; name: string }[]; said: Exclude<Said, "sent"> };
+let unsentKeys = 0;
 /** What is written for one room. It stays that room's when the person moves. */
 export type Writing = { draft: Draft; unsent: readonly Unsent[] };
 
@@ -55,7 +56,7 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
   const address = (id: string) => onDraft((now) => (now.to.includes(id) ? now : { ...now, to: [...now.to, id] }));
   const say = async (text: string, addressed: Unsent["to"]) => {
     const said = await onSay(text, addressed.map(({ id }) => id));
-    if (said !== "sent") onWriting((now) => ({ ...now, unsent: [...now.unsent, { text, to: addressed, said }] }));
+    if (said !== "sent") onWriting((now) => ({ ...now, unsent: [...now.unsent, { key: ++unsentKeys, text, to: addressed, said }] }));
   };
   const send = (written: string) => {
     const text = written.trim();
@@ -95,9 +96,9 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
     <>
       {unsent.length > 0 ? (
         <div className="speak-unsent-list">
-          {unsent.map((speech, index) => (
+          {unsent.map((speech) => (
             <UnsentSpeech
-              key={index}
+              key={speech.key}
               speech={speech}
               isPresent={isPresent}
               online={online}

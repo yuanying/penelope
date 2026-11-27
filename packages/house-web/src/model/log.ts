@@ -1,18 +1,18 @@
-// The stream has no replay, so a room's record is read again on each
-// connection and joined to what is held by the events' ids (docs/house.md,
-// 接続と居場所). What the stream brings before that reading is done may
-// stand after a gap, so it is held apart from what is known to be whole.
-import type { HouseEvent } from "@penelope/contract";
+// A room's record as the screen holds it: one set of events, each id once,
+// in the order of `seq`, their place in the house's record. The stream has
+// no replay (docs/house.md, 接続と居場所), so the record is read again on each
+// connection. Where an event goes never depends on when it arrived.
+import type { HousePersonEvent } from "@penelope/contract";
 
 export type RoomLog = {
-  /** Oldest first, with nothing missing between them. */
-  events: readonly HouseEvent[];
-  /** What the stream brought while a reading was due: after `events`, maybe after a gap. */
-  heard: readonly HouseEvent[];
-  /** The cursor of the older page; none when the start of the record is held. */
+  /** In the order of `seq`. */
+  events: readonly HousePersonEvent[];
+  /** The cursor of the page before the oldest event read from the record; none when the start is held. */
   before: string | undefined;
-  /** How many of the first `events` came by older pages, asked for by the reader. */
-  paged: number;
+  /** As of the last reading, nothing is missing up to this `seq`. None before the first reading. */
+  whole: number | undefined;
+  /** Events below this `seq` came by older pages, asked for by the reader. */
+  pagedBelow: number | undefined;
   /** False until the record was read once: the room is not known to be silent before that. */
   read: boolean;
   /** The reading that will bring the log up to date; none when it is. An answer to any other reading is dropped. */
@@ -21,40 +21,43 @@ export type RoomLog = {
   showing: number;
 };
 
-export function shownOf(log: RoomLog): readonly HouseEvent[] {
-  return log.heard.length === 0 ? log.events : [...log.events, ...log.heard];
+function joined(held: readonly HousePersonEvent[], more: readonly HousePersonEvent[]): readonly HousePersonEvent[] {
+  const ids = new Set(held.map(({ id }) => id));
+  const fresh = more.filter(({ id }) => !ids.has(id));
+  return fresh.length === 0 ? held : [...held, ...fresh].sort((a, b) => a.seq - b.seq);
 }
 
 /** An event the stream brought. */
-export function appended(log: RoomLog, event: HouseEvent): RoomLog {
-  if (shownOf(log).some(({ id }) => id === event.id)) return log;
-  return log.due === undefined ? { ...log, events: [...log.events, event] } : { ...log, heard: [...log.heard, event] };
+export function withEvent(log: RoomLog, event: HousePersonEvent): RoomLog {
+  const events = joined(log.events, [event]);
+  return events === log.events ? log : { ...log, events };
 }
 
-/** `page` is newest first and was read with the log's cursor. */
-export function withOlder(log: RoomLog, page: readonly HouseEvent[], before: string | undefined): RoomLog {
-  const held = new Set(shownOf(log).map(({ id }) => id));
-  const older = page.filter(({ id }) => !held.has(id)).reverse();
-  return { ...log, events: [...older, ...log.events], before, paged: log.paged + older.length };
+/** A page read with the log's cursor. */
+export function withOlder(log: RoomLog, page: readonly HousePersonEvent[], before: string | undefined): RoomLog {
+  return { ...log, events: joined(log.events, page), before, pagedBelow: log.pagedBelow ?? log.events[0]?.seq };
 }
 
 /**
- * The record read from its newest event down (`fetched`, newest first, with
- * the cursor of the page after it) until the newest of `events`. When that
- * event is not among what was fetched, what was fetched replaces `events`.
- * What was heard and is not among what was fetched came after the reading.
+ * How far down a reading of the record has to go before it can be joined:
+ * to where nothing was missing at the last reading, or, before the first
+ * reading, to the oldest event held. A reading that stops above that would
+ * leave a gap under what it read.
  */
-export function caughtUp(log: RoomLog, fetched: readonly HouseEvent[], before: string | undefined): RoomLog {
-  const anchor = log.events.at(-1)?.id;
-  const reached = anchor === undefined ? -1 : fetched.findIndex(({ id }) => id === anchor);
-  const read = reached < 0 ? fetched.toReversed() : [...log.events, ...fetched.slice(0, reached).toReversed()];
-  const known = new Set(read.map(({ id }) => id));
+export function reachOf(log: RoomLog): number | undefined {
+  return log.whole ?? log.events[0]?.seq;
+}
+
+/** The record read from its newest event down to `reachOf(log)` or to its start, with the cursor of the page after it. */
+export function caughtUp(log: RoomLog, fetched: readonly HousePersonEvent[], before: string | undefined): RoomLog {
+  const events = joined(log.events, fetched);
   return {
     ...log,
-    events: [...read, ...log.heard.filter(({ id }) => !known.has(id))],
-    heard: [],
-    before: reached < 0 ? before : log.before,
-    paged: reached < 0 ? 0 : log.paged,
+    events,
+    // A reading that stopped at what was whole leaves the older cursor as it was. One that went to the start, or
+    // the first one, sets it.
+    before: log.whole !== undefined && before !== undefined ? log.before : before,
+    whole: events.at(-1)?.seq,
     read: true,
     due: undefined,
   };

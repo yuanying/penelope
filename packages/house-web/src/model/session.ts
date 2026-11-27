@@ -2,10 +2,10 @@
 // connection to act with and has the records of the rooms on the screen read
 // again; a stream the house refuses is not opened again before the session
 // was checked.
-import type { HouseActor, HouseEvent, HousePersonView, HouseStreamReady } from "@penelope/contract";
+import type { HouseActor, HousePersonEvent, HousePersonView, HouseStreamReady } from "@penelope/contract";
 
 import { type Api, Refused, Unauthorized } from "./api.ts";
-import { appended, caughtUp, type RoomLog, shownOf, withOlder } from "./log.ts";
+import { caughtUp, reachOf, type RoomLog, withEvent, withOlder } from "./log.ts";
 
 /**
  * The line to the house. Only an open line has a connection, so nothing can
@@ -32,8 +32,8 @@ export type Snapshot = {
   logs: ReadonlyMap<string, RoomLog>;
   /** By the speech's id: the residents of the room it did not reach. */
   undelivered: ReadonlyMap<string, readonly HouseActor[]>;
-  /** The newest event of the person's room that was on the screen. */
-  seen: string | undefined;
+  /** The `seq` of the newest event of the person's room that was on the screen. */
+  seen: number | undefined;
   notice: Notice | undefined;
 };
 
@@ -81,10 +81,9 @@ export function myRoom({ house }: Pick<Snapshot, "house">): string | undefined {
 /** What others said in the person's room since it was last on the screen. */
 export function unread(snapshot: Snapshot): number {
   const room = myRoom(snapshot);
-  const log = room === undefined ? undefined : snapshot.logs.get(room);
-  const events = log === undefined ? [] : shownOf(log);
-  const from = snapshot.seen === undefined ? -1 : events.findIndex(({ id }) => id === snapshot.seen);
-  return events.slice(from + 1).filter((event) => event.kind === "speech" && event.actor.id !== snapshot.house?.you.id).length;
+  const events = (room === undefined ? undefined : snapshot.logs.get(room))?.events ?? [];
+  const seen = snapshot.seen ?? -Infinity;
+  return events.filter((event) => event.seq > seen && event.kind === "speech" && event.actor.id !== snapshot.house?.you.id).length;
 }
 
 export class Session {
@@ -207,8 +206,7 @@ export class Session {
   /** The person's room is on the screen: what is held of it, read from the record or heard, is not unread. */
   see(): void {
     const room = myRoom(this.snapshot);
-    const log = room === undefined ? undefined : this.snapshot.logs.get(room);
-    const newest = log === undefined ? undefined : shownOf(log).at(-1)?.id;
+    const newest = (room === undefined ? undefined : this.snapshot.logs.get(room))?.events.at(-1)?.seq;
     if (newest !== undefined && newest !== this.snapshot.seen) this.set({ seen: newest });
   }
 
@@ -275,8 +273,8 @@ export class Session {
     });
     source.addEventListener("room", (message) => {
       if (source !== this.active) return;
-      const event = JSON.parse((message as MessageEvent<string>).data) as HouseEvent;
-      this.updateLog(event.room.id, (log) => appended(log, event));
+      const event = JSON.parse((message as MessageEvent<string>).data) as HousePersonEvent;
+      this.updateLog(event.room.id, (log) => withEvent(log, event));
     });
     source.addEventListener("error", () => {
       if (!inUse()) return;
@@ -326,17 +324,20 @@ export class Session {
     for (let tries = 0; ; tries += 1) {
       const log = this.snapshot.logs.get(room);
       if (log?.due !== due || this.snapshot.line.kind !== "open") return;
-      // Down to the newest event with nothing missing before it. When there is none, down to the first event the
-      // stream brought: what it brought is then all among what was read, or newer than it.
-      const reach = log.events.at(-1)?.id ?? log.heard[0]?.id;
-      const fetched: HouseEvent[] = [];
+      const fetched: HousePersonEvent[] = [];
       let before: string | undefined;
       try {
-        do {
+        for (;;) {
           const page = await this.api.history(room, before);
           fetched.push(...page.events);
           before = page.before;
-        } while (reach !== undefined && before !== undefined && !fetched.some(({ id }) => id === reach));
+          // How far to go is asked after each page: the stream may have brought an older event meanwhile.
+          const now = this.snapshot.logs.get(room);
+          if (now?.due !== due) return;
+          const reach = reachOf(now);
+          const oldest = fetched.at(-1)?.seq;
+          if (before === undefined || reach === undefined || oldest === undefined || oldest <= reach) break;
+        }
         this.updateLog(room, (now) => (now.due === due ? caughtUp(now, fetched, before) : now));
         if (!log.read && room === myRoom(this.snapshot)) this.see();
         return;
@@ -362,7 +363,7 @@ export class Session {
     const shown = [myRoom(this.snapshot), this.snapshot.peek].filter((room) => room !== undefined);
     const fresh = shown.filter((room) => !this.snapshot.logs.has(room));
     if (fresh.length === 0 && [...this.snapshot.logs.keys()].every((room) => shown.includes(room))) return;
-    const unread = (): RoomLog => ({ events: [], heard: [], before: undefined, paged: 0, read: false, due: ++this.ticks, showing: this.ticks });
+    const unread = (): RoomLog => ({ events: [], before: undefined, whole: undefined, pagedBelow: undefined, read: false, due: ++this.ticks, showing: this.ticks });
     this.set({ logs: new Map(shown.map((room) => [room, this.snapshot.logs.get(room) ?? unread()])) });
     for (const room of fresh) this.read(room);
   }

@@ -119,6 +119,45 @@ describe("the house's screen", () => {
     assert.equal(house.said.length, 1);
   });
 
+  it("opens a speech with no answer only when it is asked to", async () => {
+    const house = new FakeHouse();
+    await open(house);
+    for (const text of ["first", "second"]) {
+      const answer = house.hold("say");
+      await say(text);
+      await act(async () => {
+        answer.lose();
+      });
+    }
+    const [first] = await within(myRoom()).findAllByRole("group", { name: "送れたか確かめられなかった発言" });
+
+    fireEvent.click(within(first!).getByRole("button", { name: "全文を開く" }));
+    fireEvent.click(within(first!).getByRole("button", { name: "捨てる" }));
+
+    const second = within(myRoom()).getByRole("group", { name: "送れたか確かめられなかった発言" });
+    assert.ok(within(second).getByText("second"));
+    assert.ok(within(second).getByRole("button", { name: "全文を開く" }));
+  });
+
+  // Entering is asked for and comes true later. What the person chose to look at since is theirs.
+  it("leaves a room that was looked into after entering another was asked for on the screen", async () => {
+    const house = new FakeHouse();
+    house.house = house.withLeeIn(undefined);
+    await open(house);
+    const answer = house.hold("enter");
+    fireEvent.click(screen.getByRole("button", { name: "Livingに入る" }));
+    fireEvent.click(screen.getByRole("button", { name: "Bathを覗く" }));
+
+    await act(async () => {
+      house.ready();
+      answer.give();
+    });
+    await screen.findByLabelText("Livingで話す").catch(() => {});
+
+    assert.ok(screen.getByRole("region", { name: "覗いている部屋" }));
+    assert.equal(window.location.hash, "#/peek/bath");
+  });
+
   // The decision of the review of 2026-11-27: what is written is the room's it was written in.
   it("leaves what was written in a room there when the person moves to another", async () => {
     const house = await open();

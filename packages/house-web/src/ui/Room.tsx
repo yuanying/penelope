@@ -10,7 +10,7 @@ import { type ReactNode, type RefObject, useLayoutEffect, useRef, useState } fro
 
 import type { HouseActor, HousePersonView } from "@penelope/contract";
 
-import { type RoomLog, shownOf } from "../model/log.ts";
+import type { RoomLog } from "../model/log.ts";
 import type { Line, Said } from "../model/session.ts";
 import { BackIcon, EnterIcon, EyeIcon, ReconnectIcon } from "./icons.tsx";
 import { isAsleep, keyOf, ResidentAvatar, ResidentCard, ResidentStack, type Shown } from "./residents.tsx";
@@ -56,7 +56,7 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | u
         composer={bottom}
         emptyState={log?.read ? <EmptyState title={words.emptyRoom} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
       >
-        {log !== undefined && shownOf(log).length > 0 ? <Timeline log={log} scroller={scroller} {...timeline} /> : null}
+        {log !== undefined && log.events.length > 0 ? <Timeline log={log} scroller={scroller} {...timeline} /> : null}
       </ChatLayout>
     </div>
   );

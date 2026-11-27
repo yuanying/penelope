@@ -1,7 +1,7 @@
 // A stand-in for the house's API for people (docs/house.md), answered through
 // the fetch and the stream the app is given. The test moves the residents,
 // writes to the stream as the house would, and drops the line when it wants.
-import type { HouseEvent, HousePersonOccupant, HousePersonView, HouseSpeech, HouseSpeechResult } from "@penelope/contract";
+import type { HouseEvent, HousePersonEvent, HousePersonOccupant, HousePersonView, HouseSpeech, HouseSpeechResult } from "@penelope/contract";
 
 import type { Source } from "../src/model/session.ts";
 
@@ -46,9 +46,9 @@ export const asleep = (actor: typeof IVY | typeof FERN, wakeAt: string): HousePe
 const me: HousePersonOccupant = { ...LEE, connected: true };
 
 let counter = 0;
-export function speech(room: { id: string; name: string }, actor: HouseEvent["actor"], text: string, to: string[] = []): HouseEvent {
+export function speech(room: { id: string; name: string }, actor: HouseEvent["actor"], text: string, to: string[] = []): HousePersonEvent {
   counter += 1;
-  return { id: `e-${counter}`, occurred_at: new Date(Date.UTC(2026, 10, 27, 12, 0, counter)).toISOString(), room, actor, kind: "speech", text, to };
+  return { id: `e-${counter}`, seq: counter, occurred_at: new Date(Date.UTC(2026, 10, 27, 12, 0, counter)).toISOString(), room, actor, kind: "speech", text, to };
 }
 
 export const LIVING = { id: "living", name: "Living" };
@@ -71,7 +71,7 @@ export class FakeHouse {
   /** What GET /api/stream answers. */
   streamStatus = 200;
   /** The rooms' records, oldest first. */
-  readonly records = new Map<string, HouseEvent[]>();
+  readonly records = new Map<string, HousePersonEvent[]>();
   /** How many events a page of a record holds. */
   pageSize = 50;
   /** Rooms that filled up since the floor was sent: entering them is refused. */
@@ -87,6 +87,7 @@ export class FakeHouse {
   readonly said: Array<{ room: string; speech: HouseSpeech; connection: string | null }> = [];
   readonly sources: FakeSource[] = [];
   private readonly held = new Map<Kind, Promise<boolean>>();
+  private readonly stalled = new Map<Kind, Promise<void>>();
   private connections = 0;
 
   readonly open = (url: string): Source => {
@@ -130,9 +131,14 @@ export class FakeHouse {
   }
 
   /** Something happened in a room: recorded, and sent to the tab when the line is up. */
-  happen(event: HouseEvent, { heard = true } = {}): void {
+  happen(event: HousePersonEvent, { heard = true } = {}): void {
     this.records.set(event.room.id, [...(this.records.get(event.room.id) ?? []), event]);
-    if (heard) this.source.emit("room", event);
+    if (heard) this.tell(event);
+  }
+
+  /** The stream brings an event that is in the record already. */
+  tell(event: HousePersonEvent): void {
+    this.source.emit("room", event);
   }
 
   /** The floor changed. */
@@ -163,6 +169,13 @@ export class FakeHouse {
     return { give: () => settle(true), lose: () => settle(false) };
   }
 
+  /** The next request of a kind is on its way to the house until it is let through: the house knows nothing of it yet. */
+  stall(kind: Kind): () => void {
+    let through!: () => void;
+    this.stalled.set(kind, new Promise((resolve) => (through = resolve)));
+    return through;
+  }
+
   readonly fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = new URL(String(input), "http://house.example.com");
     const method = init?.method ?? "GET";
@@ -172,6 +185,11 @@ export class FakeHouse {
     if (kind !== undefined && (this.failures[kind] ?? 0) > 0) {
       this.failures[kind]! -= 1;
       return Response.json({ error: "unavailable" }, { status: 503 });
+    }
+    const stalled = kind === undefined ? undefined : this.stalled.get(kind);
+    if (stalled !== undefined) {
+      this.stalled.delete(kind!);
+      await stalled;
     }
     const refusal = kind === undefined ? undefined : this.refusals[kind];
     if (refusal !== undefined) delete this.refusals[kind!];

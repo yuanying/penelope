@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 
 import type { HousePersonView } from "@penelope/contract";
 
-import { shownOf } from "../model/log.ts";
 import { myRoom, type Session, type Snapshot, unread } from "../model/session.ts";
 import { Plan } from "./Plan.tsx";
 import { residentsOf } from "./residents.tsx";
@@ -53,7 +52,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   useEffect(() => session.peek(peeked?.id), [session, peeked?.id]);
   // A tab in the background has shown nothing.
   const myLog = mine === undefined ? undefined : snapshot.logs.get(mine.id);
-  const newest = myLog === undefined ? undefined : shownOf(myLog).at(-1)?.id;
+  const newest = myLog?.events.at(-1)?.id;
   useEffect(() => {
     const see = () => {
       if (talkShown && document.visibilityState === "visible") session.see();
@@ -70,6 +69,8 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const peekHeading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<Element | null>(null);
   const wanted = useRef<FocusTarget | undefined>(undefined);
+  /** Counts what the person did to change what the screen shows. What an earlier act brings later does not move the screen. */
+  const acts = useRef(0);
   useEffect(() => {
     const target = wanted.current;
     if (target === undefined) return;
@@ -90,27 +91,34 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   };
 
   const peek = (room: string) => {
+    acts.current += 1;
     if (peeked === undefined) open("peek");
     else wanted.current = "peek";
     go({ at: "peek", room });
   };
   const toPlan = () => {
+    acts.current += 1;
     wanted.current = "opener";
     go({ at: "plan" });
   };
   const openTalk = () => {
+    acts.current += 1;
     if (phone) open("room");
     else wanted.current = "field";
     go({ at: "talk" });
   };
   const enter = async (room: string) => {
-    if (!(await session.enter(room))) return;
+    const act = ++acts.current;
+    // The person is in the room either way. The screen follows only if they did nothing else with it meanwhile.
+    if (!(await session.enter(room)) || act !== acts.current) return;
     // Focusing the field on a phone would raise the keyboard over the room just entered.
     wanted.current = phone ? "room" : "field";
     go({ at: "talk" }, route.at === "peek");
   };
   const leave = async () => {
+    const act = ++acts.current;
     await session.leave();
+    if (act !== acts.current) return;
     wanted.current = phone ? "plan" : "room";
     if (phone) go({ at: "plan" });
   };
