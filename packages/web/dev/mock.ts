@@ -119,6 +119,15 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
     response.end(faceOf(face));
     return true;
   }
+  if (method === "GET" && path === "/api/status") return (json(200, w.status ?? { sleep: { state: "awake" }, sleepiness: 0, awake_seconds: 0, mood: null }), true);
+  if (method === "GET" && path === "/api/agents") return (json(200, { agents: w.agents ?? [] }), true);
+  if (method === "GET" && path === "/api/schedules") return (json(200, { schedules: w.schedules ?? [] }), true);
+  if (method === "DELETE" && path.startsWith("/api/schedules/")) {
+    const i = w.schedules?.findIndex((schedule) => schedule.id === path.slice("/api/schedules/".length)) ?? -1;
+    if (i < 0) return (json(404, { error: "no such schedule" }), true);
+    w.schedules!.splice(i, 1);
+    return (empty(), true);
+  }
   if (method === "GET" && path === "/api/settings") return (json(200, w.settings), true);
   if (method === "PUT" && path === "/api/settings") {
     const chunks: Buffer[] = [];

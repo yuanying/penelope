@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import type { SubAgentStatus } from "@penelope/contract";
+import type { AgentState, SubAgent, SubAgentStatus } from "@penelope/contract";
 
 import { iso } from "./time.ts";
 
@@ -22,5 +22,15 @@ export class SubAgents {
            started_at = coalesce(started_at, excluded.started_at), updated_at = excluded.updated_at`,
       )
       .run(status.agent, status.purpose, status.closed ? 1 : 0, status.closed ? null : at, at);
+  }
+
+  list(states: { stateOf(agent: string): { state: AgentState; since?: string } }): SubAgent[] {
+    const rows = this.db
+      .prepare("SELECT agent, purpose, coalesce(started_at, updated_at) AS started_at FROM sub_agents WHERE closed = 0 ORDER BY rowid")
+      .all() as Array<{ agent: string; purpose: string; started_at: string }>;
+    return rows.map(({ agent, purpose, started_at }) => {
+      const { state, since } = states.stateOf(agent);
+      return { agent, purpose, state, started_at, state_since: since ?? started_at };
+    });
   }
 }

@@ -6,7 +6,7 @@ import type http from "node:http";
 import path from "node:path";
 
 import { ICON_TYPES } from "@penelope/avatar";
-import type { AgentResponse, RecordKind, RecordResultResponse, RecordUnseenResponse } from "@penelope/contract";
+import type { AgentResponse, AgentStatus, RecordKind, RecordResultResponse, RecordUnseenResponse, SchedulesResponse, SubAgent, SubAgentsResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
 import { type AgentSettings, faceBytes } from "./avatar.ts";
@@ -18,6 +18,7 @@ import type { MemoryView } from "./memory-view.ts";
 import type { Memory } from "./memory.ts";
 import type { ModelSettings } from "./model-settings.ts";
 import { type ActivityRecord, RecordQueryError } from "./record.ts";
+import type { Schedules } from "./schedules.ts";
 import { AGENT_ICONS_PATH } from "./web.ts";
 
 export const SESSION_COOKIE = "penelope_session";
@@ -31,6 +32,9 @@ export type UiOptions = {
   login: GitHubLogin;
   sessions: LoginSessions;
   modelSettings: ModelSettings;
+  schedules: Schedules;
+  readStatus: () => AgentStatus;
+  listAgents: () => SubAgent[];
   /** The owner's GitHub user ID. Without one, no one gets in. */
   ownerId: number | undefined;
   /** Where the owner reaches the backend. Cookies are Secure when it is https. */
@@ -161,12 +165,33 @@ export function uiHandler(options: UiOptions): Handler {
     }
 
     switch (route) {
+      case "GET /api/status":
+        sendJson(response, 200, options.readStatus(), { "cache-control": "no-store" });
+        return;
+      case "GET /api/agents":
+        sendJson(response, 200, { agents: options.listAgents() } satisfies SubAgentsResponse, { "cache-control": "no-store" });
+        return;
+      case "GET /api/schedules":
+        sendJson(response, 200, { schedules: options.schedules.entries("main") } satisfies SchedulesResponse, { "cache-control": "no-store" });
+        return;
       case "GET /api/settings":
         sendJson(response, 200, options.modelSettings.read(), { "cache-control": "no-store" });
         return;
       case "PUT /api/settings":
         sendJson(response, 200, options.modelSettings.save(await readJson(request, 16 * 1024)), { "cache-control": "no-store" });
         return;
+    }
+    const scheduleId = /^\/api\/schedules\/([^/]+)$/.exec(url.pathname)?.[1];
+    if (request.method === "DELETE" && scheduleId !== undefined) {
+      let id: string;
+      try {
+        id = decodeURIComponent(scheduleId);
+      } catch {
+        throw new HttpError(404, "no such schedule");
+      }
+      if (!options.schedules.remove(id)) throw new HttpError(404, "no such schedule");
+      sendEmpty(response, 204);
+      return;
     }
     throw new HttpError(404, "no such path");
   };

@@ -1,7 +1,7 @@
 // The backend's API for the personal page (docs/ui-api.md).
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId, JobEndKind, MemoryMove, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, TurnResult } from "./sandbox.ts";
+import type { Activity, AgentId, JobEndKind, MemoryMove, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, ScheduleWhen, TurnResult } from "./sandbox.ts";
 
 /** An image copy stored by the backend. */
 export type ReplyImage = {
@@ -16,6 +16,23 @@ export type ReplyImage = {
 
 /** Whether an agent is in a turn or waiting for events. */
 export type AgentState = "thinking" | "waiting";
+
+/** One open sub-agent, as `GET /api/agents` lists it. */
+export type SubAgent = {
+  agent: AgentId;
+  purpose: string;
+  state: AgentState;
+  /** RFC 3339: when the runner first said it was started. */
+  started_at: string;
+  /** RFC 3339: since when it is in this state. */
+  state_since: string;
+};
+
+export type SubAgentsResponse = { agents: SubAgent[] };
+
+/** One schedule as `GET /api/schedules` lists it, with its next due time (RFC 3339). */
+export type ScheduleEntry = { id: string; reason: string; next_at: string } & ScheduleWhen;
+export type SchedulesResponse = { schedules: ScheduleEntry[] };
 
 /** `GET /api/agent`, read without a login: what the UI shows of the agent. */
 export type AgentResponse = {

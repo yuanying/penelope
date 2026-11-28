@@ -1,6 +1,6 @@
 # UI 向けの API の仕様
 
-各配置の個人のページが backend を呼ぶ API。記憶の閲覧・編集・復元、活動の記録、モデル設定を扱う。会話と通知は家の担当で、旧 iPhone アプリが各配置に直接つなぐ API も廃止した（[ADR-0079](adr/0079-open-resident-pages-from-the-house.md)・[ADR-0080](adr/0080-connect-the-iphone-app-to-the-house.md)）。型は `packages/contract` の `src/ui.ts` が正である。
+各配置の個人のページが backend を呼ぶ API。記憶の閲覧・編集・復元、活動の記録、本体とサブエージェントの状態、予約、モデル設定を扱う。会話と通知は家の担当で、旧 iPhone アプリが各配置に直接つなぐ API も廃止した（[ADR-0079](adr/0079-open-resident-pages-from-the-house.md)・[ADR-0080](adr/0080-connect-the-iphone-app-to-the-house.md)）。型は `packages/contract` の `src/ui.ts` が正である。
 
 ## 認証
 
@@ -25,6 +25,8 @@
 | 口 | 中身 |
 | --- | --- |
 | `GET /api/agent`・`GET /api/agent/icons/<表情>[<拡張子>]` | エージェントの名前と表情のアイコン（認証なし） |
+| `GET /api/status`・`GET /api/agents` | 本体の状態と開いているサブエージェント（「今の様子」） |
+| `GET /api/schedules`・`DELETE /api/schedules/<id>` | 予約の一覧と取り消し |
 | `GET /api/settings`・`PUT /api/settings` | モデルと思考の深さの設定 |
 | `GET /api/record`・`GET /api/record/<種類>/<id>`・`GET /api/record/unseen`・`POST /api/record/seen` | 活動の記録（「活動の記録」） |
 | `GET /api/memory` および `/api/memory/…` | コミット済みの記憶の閲覧（「記憶」） |
@@ -49,6 +51,20 @@
 - `model` は `<provider>/<model>`。最初の `/` より後ろ全体がモデルの ID。候補の `models` は runner から届いた `{provider, id, name, context_window, thinking_levels}` の一覧。`context_window` はトークン数。一覧が届いていないか期限切れなら `models: []`、`default: null`。
 - `PUT /api/settings` は `{model, thinking}` を配置の設定として保存し、`200` で `GET` と同じ形を返す。候補に無いモデルや、そのモデルが対応しない深さは `400`。いずれもオーナーのログインが必要で、sandbox や A2A の token は使えない。
 - PC・スマートフォンとも「場所」の「設定」に置く。保存済みか既定かを示し、候補ごとに名前・provider/ID・コンテキストの大きさ・使える思考の深さを確認できる。保存すると本体・サブエージェント・夜の振り返りと整理係の次のターンから効く。今走っているターンは変わらない。
+
+## 今の様子
+
+- `GET /api/status` は [sandbox 向けの本体の状態](sandbox-api.md#本体の状態) と同じ `AgentStatus` を返す。眠りと起床予定、眠気、起きてからの秒数、コンテキストの使用量（報告があるとき）、気分が分かる。
+- `GET /api/agents` は `{agents: [...]}`（`SubAgentsResponse`）。runner が [起こしたと知らせた](sandbox-api.md#サブエージェントの状態) サブエージェントだけを、名前を初めて受けた順に載せる。閉じたものは載せない。
+- 1 件は名前（`agent`）、目的（`purpose`）、状態（`state`: `thinking` または `waiting`）、開始時刻（`started_at`）、その状態になった時刻（`state_since`）を持つ。時刻は RFC 3339。状態と `state_since` は最後の `turn_start` または `turn_end` から引く。まだ記録が無ければ `waiting` で、`state_since` は `started_at` と同じ。
+- 個人ページの「今の様子」（`#/status`）を開いたときと「読み直す」を押したときに、それぞれ直接読む。サブエージェントの名前から活動の記録を開ける。ここからサブエージェントを操作することはできない。
+
+## 予約
+
+- `GET /api/schedules` は `{schedules: [...]}`（`SchedulesResponse`）。[sandbox 向けの予約一覧](sandbox-api.md#予約) と同じ本体の予約を作った順で返す。1 件（`ScheduleEntry`）には `id`、`reason`、`cron` か `at` の一方、次に来る時刻（`next_at`、RFC 3339 の UTC）がある。cron は配置の時間帯で数えた次の回、1 回だけなら `at` と同じ。
+- `DELETE /api/schedules/<id>` は予約を消す。消したら `204`、もう無ければ `404`（`{error}`）。取り消しの出来事は入らない。予約を作るのはエージェントであり、個人ページには作る口を置かない。
+- 「出来事と予約」（`#/events`）を開くたびに一覧を読む。次に来る時刻で並べて日ごとに区切り、日付と時刻はブラウザの時間帯で出す。定期予約は cron の式を出し、毎日・毎週・毎月・毎年の単純な式には読み方も添える。
+- オーナーが確認してから取り消す。`404` なら一覧を読み直す。ほかの失敗では知らせを出して行を残す。
 
 ## 活動の記録
 
@@ -124,22 +140,11 @@
 ### Web UI の活動の記録
 
 - ナビゲーションの「活動の記録」に置く。一覧と詳細は `#/record`、`#/record/turns/<id>`、`#/record/nights/<id>`、`#/record/sub-agents/<名前>` で開ける。
-- まだ見ていない失敗の数は、PC のナビゲーションとスマートフォンのメニューに出す。活動の記録を開いている間は札ではなく、一覧の知らせに出す。
+- まだ見ていない失敗の数は、PC のナビゲーションとスマートフォンのメニューに出す。活動の記録を開いている間は札を出さない。一覧の知らせは、活動の記録を開いたときと「読み直す」を押したときに更新する。
 - 一覧は、ブラウザの時間帯を `tz` に渡して今日を読む。下までスクロールすると `before` の日を読み、「読み直す」を押すと今日の一覧を取り直す。
 - 夜の一覧行と 1 件の画面では、段の結果の横に記憶の変更量を出す。変更が 0 なら「記憶の変更なし」、計測されていなければ「記憶の変更は不明」、振り返りで `handoff_changed` が `false` なら「引き継ぎ未更新」と出す。行われなかった段と新しいセッションには変更量を出さない。毎回読む層の超過と照合対象外の件数は、夜の行と 1 件の画面に注意事項として出す。棚卸しでは一覧でも「棚卸し」と示し、詳細では整理係の下に中身・構成それぞれの成否、理由、変更量とターンへのリンク（ターンがあるとき）を出す。整理係全体の変更量を別に表示しない。
 - 畳みは 1 時間ごと（ブラウザの時間帯）で、失敗していないターンが 2 つ以上ある時間帯だけを畳む。畳んだ行はその時間の始まりの位置に置く。きっかけの種類ごとの数は、多い順に 3 つまでと「ほか n」。
 - 1 件の画面のツールの結果は、開いたときに `GET /api/record/turns/<id>/results/<call_id>` を読む。`404` なら「この結果は残っていません。」を出す。閉じたサブエージェントのターンは、「残りの n 件を見る」で次のページを読む。
-
-## 画像
-
-返事に添えられた画像は、backend が返事を受けた時点で写したものである（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)、[sandbox-api.md](sandbox-api.md) の「返事の画像」）。オーナーがメッセージに添えた画像も、backend がメッセージを受けた時点で同じように写す（[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md)）。
-
-- 履歴（`agent` と `owner`）と流れの `reply` の `images` の 1 件は、`id`・`mime_type`（PNG・JPEG・GIF・WebP。中身の先頭の bytes から）・`size`（byte）・`name`（写した元のファイルの名前）を持つ。
-- `GET /api/assets/<id>` は、その写しの中身を `mime_type` の型で返す。オーナーの cookie または Bearer で読める（ほかは `401`）。無い ID、読めない写しは `404`。GET のほかの method は `405`。
-- 同じ ID の写しは変わらないので、`cache-control: private, max-age=31536000, immutable` を付ける。`x-content-type-options: nosniff` も付ける。
-- Web UI は返事の文の下に縮小して並べ、押すと大きく見せる（[docs/design](design/README.md) の「返事の画像」）。オーナーの画像は吹き出しの上に並べる。送った直後はブラウザの持つファイルで出し、backend が受け付けたら応答の `images` の写しに替える。読み込み直した後と同じ見た目にするためである。
-- 返事の知らせには画像を載せず、数だけを `images` に入れる（「知らせの中身」）。
-- 写しの一覧の口はまだ無い。写しは返事と別の表に、種類・作った時刻・作ったエージェントとともに持つので（[backend.md](backend.md) の「作ったものの写し」）、作ったものの一覧の画面を作るときに `GET /api/assets` のような口を足せる。
 
 ## 記憶
 
@@ -208,10 +213,6 @@
 - 作ったものの一覧の口と画面（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。
 - どの配置でも同じ形に保つ（[ADR-0026](adr/0026-move-natsumi-myao-and-aki-one-deployment-each-without-a-way-back.md)）。
 
-## 承認（後の波）
+## 承認
 
-形だけを置く。最初の版では作らない。
-
-- `GET /api/approvals`: Sentinel の承認待ちの一覧。
-- `POST /api/approvals/<id>`: 答える（「この 1 回」か「このホストをずっと」、または断る）。
-- backend は Sentinel の管理口へ中継する（[ADR-0005](adr/0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)）。中身の形は、管理口の形とともに既定を ask に切り替えるときに決める。
+Sentinel の承認は個人のページでは扱わない。実装するときは、家でその住人との 1 対 1 の欄から答える（[ADR-0079](adr/0079-open-resident-pages-from-the-house.md)）。

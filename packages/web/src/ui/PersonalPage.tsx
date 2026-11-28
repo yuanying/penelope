@@ -14,7 +14,9 @@ import { MemoryPlace } from "./memory/Memory.tsx";
 import { PlaceItems } from "./places.tsx";
 import { RecordPlace } from "./Record.tsx";
 import { useRoute } from "./route.ts";
+import { Schedules } from "./Schedules.tsx";
 import { Settings } from "./Settings.tsx";
+import { StatusPage } from "./StatusPage.tsx";
 import { words } from "./words.ts";
 
 const phone = () => window.matchMedia("(max-width: 767px)");
@@ -54,6 +56,8 @@ export function PersonalPage({ api, unseen, onSeen, onUnauthorized, onLogout }: 
       </header>
       {route.place === "memory" && <MemoryPlace api={api} onUnauthorized={onUnauthorized} page={route.page} readOnly={compact} />}
       {route.place === "log" && <RecordPlace api={api} onUnauthorized={onUnauthorized} page={route.page} onSeen={onSeen} />}
+      {route.place === "status" && <StatusPage api={api} onUnauthorized={onUnauthorized} />}
+      {route.place === "events" && <Schedules api={api} onUnauthorized={onUnauthorized} />}
       {route.place === "settings" && <Settings api={api} onUnauthorized={onUnauthorized} agentName={agent.name} />}
     </main>
   );

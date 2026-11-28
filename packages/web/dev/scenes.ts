@@ -8,12 +8,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-import type { AgentResponse, RecordRow, RecordTurn } from "@penelope/contract";
+import type { AgentResponse, AgentStatus, RecordRow, RecordTurn, ScheduleEntry, SubAgent } from "@penelope/contract";
 
 import { allowMemoryEdit, MEMORY_TURN, type MemoryScene, memoryScene } from "./memory.ts";
 
 export type Scene = {
   agent: AgentResponse;
+  status?: AgentStatus;
+  agents?: SubAgent[];
+  schedules?: ScheduleEntry[];
   /** The rows of the activity record's list, in any order. */
   record: RecordRow[];
   /** The turns of the nightly switch: on the night's page only, never rows of the list (docs/ui-api.md). */
@@ -211,7 +214,15 @@ function ordinary(now: number): Scene {
   const memory = memoryScene(now, "normal", { id: "n-1", daysBefore: 0 });
   const rows = memoryRows(c, memory)!;
   const record = [...day.record.map((row) => row.kind === "night" && row.id === rows.night.id ? { ...row, stages: rows.night.stages } : row), rows.turn];
-  return { agent, ...day, record, memory, previousSeenAt: c.ago(600), unseen: 0 };
+  return {
+    agent, ...day, record, memory, previousSeenAt: c.ago(600), unseen: 0,
+    status: { sleep: { state: "awake" }, sleepiness: 42, awake_seconds: 18_000, mood: "落ち着いている" },
+    agents: [{ agent: "reviewer", purpose: "記事を読む", state: "thinking", started_at: c.ago(7), state_since: c.ago(3) }],
+    schedules: [
+      { id: "s-1", reason: "朝の予定を確かめる。終わったら知らせる。", cron: "0 6 * * *", next_at: c.at(6, 0, -1) },
+      { id: "s-2", reason: "記事の続きを読む", at: c.at(11, 0, -1), next_at: c.at(11, 0, -1) },
+    ],
+  };
 }
 
 function withMemory(now: number, state: "normal" | "over" | "broken" | "empty" = "normal"): Scene {
@@ -249,7 +260,7 @@ export const scenes: Record<string, SceneDef> = {
   empty: {
     about: "only the starting memory, no activity record",
     // Nothing has happened yet, so the memory is what she starts with: personality.md alone.
-    make: (now) => ({ ...ordinary(now), record: [], nightTurns: [], memory: memoryScene(now, "empty"), previousSeenAt: new Date(now).toISOString() }),
+    make: (now) => ({ ...ordinary(now), record: [], nightTurns: [], agents: [], schedules: [], memory: memoryScene(now, "empty"), previousSeenAt: new Date(now).toISOString() }),
   },
   memory: { about: "memory: an ordinary day, a night with moves, a year of diaries", make: withMemory },
   "memory-over": { about: "memory: the always-read layer exceeds its target", make: (now) => withMemory(now, "over") },

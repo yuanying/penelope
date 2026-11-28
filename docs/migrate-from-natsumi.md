@@ -289,11 +289,11 @@ kubectl -n $ns exec -i penelope-0 -c sandbox -- \
 
 1. 記憶: オーナーが話しかけて返事が来た後に、`kubectl -n $ns exec penelope-0 -c backend -- git -C /memory rev-list --count HEAD` が 5 の 2 の `commits` より増えている。
 2. アバター: `kubectl -n $ns exec penelope-0 -c sandbox -- avatar check` が誤りを出さない。Web UI に名前と表情のアイコンが出る。
-3. 予約: sandbox で `curl -s -H "Authorization: Bearer $PENELOPE_BACKEND_TOKEN" "$PENELOPE_BACKEND_URL/v1/schedules?agent=main" | jq '.schedules | length'` が 8 の `after` と同じ。Web UI の予約の一覧でも数を見る。
+3. 予約: 個人ページの「出来事と予約」に出る件数が、8 の `after` と同じ。
 4. Slack: bot を招いたチャンネルで bot にメンションすると出来事として届き、エージェントが `slackctl post` で返せる。
 5. A2A: `curl -s https://<公開のホスト>/.well-known/agent-card.json | jq -r .name` が名前である（受け口を開いたとき）。エージェントから相手に頼め、Sentinel の記録に相手のホストが出る。
 6. 絵: 自分の絵を頼むと、返事に画像が添えられる。Sentinel の記録に sd-webui のホストが出る。
-7. 個人のページ: オーナーでログインし、記憶と活動の記録、モデル設定が開ける。
+7. 個人のページ: オーナーでログインし、記憶、活動の記録、今の様子、モデル設定が開ける。
 8. backup: `components/backup/` を使うなら、手で 1 回動かして成功する（見本の README の「backup」）。
 
 ### 10. 最初のメッセージでパスの移り変わりを伝える

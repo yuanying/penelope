@@ -7,7 +7,9 @@ import { mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSy
 import path from "node:path";
 import { describe, it } from "node:test";
 
+import { SubAgents } from "../src/agents.ts";
 import type { AgentSettings } from "../src/avatar.ts";
+import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
@@ -16,6 +18,8 @@ import { MemoryView } from "../src/memory-view.ts";
 import { Memory } from "../src/memory.ts";
 import { ModelSettings } from "../src/model-settings.ts";
 import { ActivityRecord } from "../src/record.ts";
+import { Schedules } from "../src/schedules.ts";
+import { Sleepiness } from "../src/sleepiness.ts";
 import { uiHandler } from "../src/ui-api.ts";
 import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
 
@@ -74,6 +78,10 @@ async function setup(
   const clock = new FakeClock("2026-11-14T09:00:00Z");
   const now = clock.now;
   const db = openDatabase(path.join(dir, "backend.sqlite"));
+  const schedules = new Schedules(db, { now, timeZone: "UTC" });
+  const subAgents = new SubAgents(db, { now });
+  const conversation = new Conversation(db, { now });
+  const sleepiness = new Sleepiness(db, now, "UTC");
   const record = new ActivityRecord(db, { now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
@@ -92,6 +100,9 @@ async function setup(
       login,
       sessions,
       modelSettings,
+      schedules,
+      readStatus: () => sleepiness.status(),
+      listAgents: () => subAgents.list(conversation),
       ownerId: settings?.ownerId,
       publicUrl,
       agent: () => agent,
@@ -112,8 +123,55 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { record, sessions, modelSettings, github, target, signIn, call, clock, memoryDir, memory };
+  return { record, schedules, subAgents, conversation, sleepiness, sessions, modelSettings, github, target, signIn, call, clock, memoryDir, memory };
 }
+
+it("requires the owner's session for status, sub-agents and schedule management", async (t) => {
+  const { call } = await setup(t);
+  for (const path of ["/api/status", "/api/agents", "/api/schedules"]) {
+    assert.equal((await call(path, undefined)).status, 401, path);
+  }
+  assert.equal((await call("/api/schedules/example", undefined, { method: "DELETE" })).status, 401);
+});
+
+it("reads the main agent's current mood on the personal page", async (t) => {
+  const { call, signIn, sleepiness } = await setup(t);
+  sleepiness.setMood("ひと休み");
+  const answer = await call("/api/status", signIn());
+  assert.equal(answer.status, 200);
+  assert.equal(answer.json().mood, "ひと休み");
+});
+
+it("lists the open sub-agents with their recorded turn state", async (t) => {
+  const { call, signIn, subAgents, conversation, clock } = await setup(t);
+  subAgents.record({ agent: "reviewer", purpose: "記事を読む", closed: false });
+  subAgents.record({ agent: "done", purpose: "確認した", closed: true });
+  const at = new Date(clock.now()).toISOString();
+  conversation.activities("reviewer", [{ kind: "turn_start", at, turn_id: "t-1" }]);
+  const answer = await call("/api/agents", signIn());
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.json(), {
+    agents: [{ agent: "reviewer", purpose: "記事を読む", state: "thinking", started_at: at, state_since: at }],
+  });
+});
+
+it("shows the runner's schedules with their next due time", async (t) => {
+  const { call, signIn, schedules } = await setup(t);
+  const made = schedules.create({ agent: "main", reason: "日次確認", cron: "0 10 * * *" });
+  const answer = await call("/api/schedules", signIn());
+  assert.equal(answer.status, 200);
+  assert.deepEqual(answer.json(), {
+    schedules: [{ id: made.id, reason: "日次確認", cron: "0 10 * * *", next_at: "2026-11-14T10:00:00.000Z" }],
+  });
+});
+
+it("removes a schedule from the same list the runner uses", async (t) => {
+  const { call, signIn, schedules } = await setup(t);
+  const made = schedules.create({ agent: "main", reason: "日次確認", cron: "0 10 * * *" });
+  const answer = await call(`/api/schedules/${made.id}`, signIn(), { method: "DELETE" });
+  assert.equal(answer.status, 204);
+  assert.deepEqual(schedules.list("main"), []);
+});
 
 it("does not expose the retired conversation and notification routes to the owner", async (t) => {
   const { call, signIn } = await setup(t);
@@ -341,8 +399,8 @@ function parseCookie(line: string | undefined): { name: string; value: string; a
 }
 
 /** Follows a login through GitHub as a browser would, and answers the callback's response. */
-async function logIn(env: Awaited<ReturnType<typeof setup>>, { tamperState = false, startPath = "/auth/github/start" } = {}) {
-  const start = await env.call(startPath, undefined);
+async function logIn(env: Awaited<ReturnType<typeof setup>>, { tamperState = false } = {}) {
+  const start = await env.call("/auth/github/start", undefined);
   assert.equal(start.status, 302);
   const authorize = new URL(String(start.headers.location));
   const code = `code-${Math.random()}`;
@@ -350,13 +408,6 @@ async function logIn(env: Awaited<ReturnType<typeof setup>>, { tamperState = fal
   const state = tamperState ? "forged" : authorize.searchParams.get("state");
   return env.call(`/auth/github/callback?code=${code}&state=${state}`, undefined);
 }
-
-const appVerifier = "a".repeat(43);
-const appChallenge = createHash("sha256").update(appVerifier).digest("base64url");
-const appStart = `/auth/app/start?code_challenge=${appChallenge}&code_challenge_method=S256`;
-const appExchange = (env: Awaited<ReturnType<typeof setup>>, code: string, code_verifier = appVerifier) =>
-  env.call("/auth/app/token", undefined, { json: { code, code_verifier, device_name: "旅先の iPhone" } });
-const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
 describe("the login", () => {
   it("sends the browser to GitHub with a state and a PKCE challenge", async (t) => {

@@ -2,6 +2,7 @@
 // replace.
 import type {
   AgentResponse,
+  AgentStatus,
   MemoryChangeResponse,
   MemoryChangesResponse,
   MemoryCompareResponse,
@@ -22,7 +23,9 @@ import type {
   RecordSubAgentResponse,
   RecordTurnResponse,
   RecordUnseenResponse,
+  SchedulesResponse,
   SettingsResponse,
+  SubAgentsResponse,
 } from "@penelope/contract";
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -43,6 +46,10 @@ export class Refused extends Error {
 export type Api = {
   agent(): Promise<AgentResponse>;
   logout(): Promise<void>;
+  status(): Promise<AgentStatus>;
+  agents(): Promise<SubAgentsResponse>;
+  schedules(): Promise<SchedulesResponse>;
+  removeSchedule(id: string): Promise<void>;
   settings(): Promise<SettingsResponse>;
   saveSettings(selection: ModelSelection): Promise<SettingsResponse>;
   /** One day of the activity record, newest first, narrowed as asked; today when no day is given. */
@@ -112,6 +119,12 @@ export function createApi(fetch: Fetch): Api {
     agent: async () => (await call("/api/agent")).json() as Promise<AgentResponse>,
     logout: async () => {
       await call("/auth/logout", { method: "POST" });
+    },
+    status: async () => (await call("/api/status")).json() as Promise<AgentStatus>,
+    agents: async () => (await call("/api/agents")).json() as Promise<SubAgentsResponse>,
+    schedules: async () => (await call("/api/schedules")).json() as Promise<SchedulesResponse>,
+    removeSchedule: async (id) => {
+      await call(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
     },
     settings: async () => (await call("/api/settings")).json() as Promise<SettingsResponse>,
     saveSettings: async (selection) => (await call("/api/settings", {

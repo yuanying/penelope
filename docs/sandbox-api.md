@@ -35,7 +35,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
 | `POST /v1/job-events` | 裏の仕事の終わりを入れる |
-| `POST /v1/replies` | オーナーへの返事（画像を添えられる） |
+| `POST /v1/replies` | 旧 runner との互換用。オーナーへの返事と添付画像を保存する |
 | `POST /v1/a2a/replies` | A2A の Task に返す |
 | `POST /v1/activity` | 途中経過 |
 | `POST /v1/turns/end` | ターンの終わり |
@@ -189,19 +189,20 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 ## サブエージェントの状態
 
 - body は `{agent, purpose, closed}`（型は `SubAgentStatus`）。runner が、サブエージェントを起こしたとき（`closed: false`）、閉じたとき（`closed: true`）、runner が立ち上がったときに閉じていないサブエージェントのすべてについて送る。
-- backend は、サブエージェントごとに最後に受けたものを残す（永続、SQLite の `sub_agents`）。同じ名前を受け直したら、目的と `closed` を置き換える。UI に閉じていないサブエージェントを出すためである（[ui-api.md](ui-api.md) の「サブエージェント」）。受けるたびに UI の流れへ `agent` を送る。
-- 走っているか待っているか（UI の `state`）は、サブエージェントの途中経過とターンの終わりから決める（「途中経過」）。
-- この口をまだ受けていない名前の途中経過とターンの終わりも、ほかと同じく受けて、記録・流れ・コミットに回す。`GET /api/agents` には載せない。後でこの口を受けたら、それまでの途中経過から決めた `state` で載る。
+- backend は、サブエージェントごとに最後に受けたものを残す（永続、SQLite の `sub_agents`）。同じ名前を受け直したら、目的と `closed` を置き換える。開いているサブエージェントは個人ページの [「今の様子」](ui-api.md#今の様子) に出す。目的と閉じた時刻は [活動の記録](ui-api.md#活動の記録) でも使う。
+- この口をまだ受けていない名前の途中経過とターンの終わりも、ほかと同じく記録し、ターンの終わりにはコミットする。
 - `agent` が `main` か形の違う名前、`purpose` が文字列でない、`closed` が真偽値でなければ `400`。応答は `204`。
 
 ## 返事
 
+`POST /v1/replies` は、runner の `reply` が家に直接届けるようになるまで（U2）の互換用。個人のページには配信しない。
+
 - body は `{agent, text, expression?, in_reply_to?, turn_id?, images?}`。
-  - `turn_id`: 返事を出したターンの ID（「途中経過」の `turn_id`）。backend は返事をそのターンに結び付け、活動の記録と会話の行き来に使う（[ADR-0038](adr/0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)）。無ければ、backend はそのとき本体の進んでいるターン（記録に始まりがあって終わりの無いもの）に結び付け、それも無ければ結び付けない。空の文字列は `400`。
-  - `expression`: 表情。Web UI はアバターをこの表情の絵で出す（[ADR-0016](adr/0016-show-the-avatar-and-expression-from-the-first-web-ui.md)）。
+  - `turn_id`: 返事を出したターンの ID（「途中経過」の `turn_id`）。backend は返事をそのターンに結び付け、活動の記録の返事の数に使う。無ければ、backend はそのとき本体の進んでいるターン（記録に始まりがあって終わりの無いもの）に結び付け、それも無ければ結び付けない。空の文字列は `400`。
+  - `expression`: 表情。指定された値は返事と一緒に保存する。
   - `in_reply_to`: 答えている出来事の `seq`。ターンの `<events>` の行の `seq` である（`batch` のまとめなら `seqs` の 1 つ）。
   - `images`: 返事に添える画像の並び（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。1 件は `{name, data}`（型は `ReplyImageUpload`）で、`name` はファイルの名前（ディレクトリを除く、1〜255 文字）、`data` はファイルの中身の base64（padding 付き）。
-- 応答は `201` と `{id}`。backend は会話の履歴に残し、UI の流れへ送る（[ui-api.md](ui-api.md)）。
+- 応答は `201` と `{id}`。backend は互換用の履歴に保存する。
 
 ### 返事の画像
 
@@ -209,7 +210,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 - 種類は中身の先頭の bytes で決める（取り込み口の添付と同じ見分け方、[events.md](events.md)）。名前の拡張子と送り手の言い分は見ない。
 - 1 枚でも合わなければ、文も含めて何も残さず `400` で断る。`error` は `not sent: ` に続けて、何番目のどのファイルが、なぜ合わないかを言う（枚数が多い、名前が無い、base64 でない、大きすぎる、PNG・JPEG・GIF・WebP でない）。
 - backend は確かめに通った画像を写しの置き場に書いてから、返事と写しの記録を 1 つの transaction で残す（[backend.md](backend.md) の「作ったものの写し」）。書けなければ、書きかけを消し、返事も残さずに `500`（`not sent: the images could not be kept`）で答える。
-- 画像の無い返事、`images` が空の返事は、履歴と流れに `images` の欄を持たない。
+- 画像の無い返事や `images` が空の返事は、画像の写しを作らない。
 
 ### `reply` のツール（runner）
 
@@ -236,7 +237,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 - `turn_id` は runner がターンごとに付ける UUID である。runner の 1 ターンは、Pi の 1 回の実行（入力を渡してから、Pi がそれ以上自分で続けなくなるまで）で、その間に steer と follow-up で入った出来事も含む。
 - runner が[畳む前の頼み](events.md#畳む前の頼み)を送る場合、頼みとその答えは同じ `turn_id` のターンに入る。ターンの終わりの知らせは、その答えの後に送る。
 - `tool_result` の `output` は、結果の文字の部分を改行でつないだものである。画像などの文字でない部分は `[image/png]` のように種類だけを書く。16,000 文字を超えた分は送らず、`[N more characters]` と数だけを添える。
-- 送れなかった途中経過は送り直さない。記録と UI の写しだけのためである。
+- 送れなかった途中経過は送り直さない。活動の記録に使う。
 
 | `kind` | ほかの欄 |
 | --- | --- |
@@ -247,7 +248,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 | `message` | `text`（返答の区切り） |
 | `turn_end` | なし |
 
-- backend は 1 件ずつ記録に残し、UI の流れへ送る。`turn_start` でエージェントを `thinking`、`turn_end` で `waiting` にする。
+- backend は 1 件ずつ活動の記録に残す。
 - エージェントの今の `state` とその時刻は、記録に残したそのエージェントの最後の `turn_start`（`thinking`）か `turn_end`（`waiting`）と、その `at` である。別には残さないので、backend が立ち上がり直しても同じものが引ける。どちらもまだ無いエージェントは `waiting` である。
 - サブエージェントの途中経過は、`agent` をサブエージェントの名前にして同じ形で送る。サブエージェントのターンは、サブエージェントの 1 回の実行（頼みか続きを受けてから止まるまで）である。runner が立ち上がり直して中断したサブエージェントを戻すときは、切れたターンの `turn_end` を送る。
 - 1 件でも形が違えば、要求の全体を `400` で断り、何も残さない。
@@ -257,10 +258,9 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 - body は `{agent, turn_id, result?, reason?, seqs?, night?, context?}`（型は `TurnEndRequest`）。`turn_id` は前後に空白がない 1 行の文字列。`night` はコミットの印にもなる（下の「ターンの結果ときっかけ」）。`context` は [眠気の計算](backend.md#眠気) に使う。backend が `/memory` の作業ツリーの変わったものをコミットする合図である（[ADR-0006](adr/0006-memory-kept-compatible-without-checks-committed-outside.md)）。コミットの形は [backend.md](backend.md) の「`/memory` のコミット」にある。
 - runner はこの要求の直前に、夜やサブエージェントのターンも含め、作業ツリーの共有権限をそろえる。変更か未修正があった場合はその件数だけを 1 行に残し、未修正があっても要求は送る（[Pod の仕様書](pod.md)、[ADR-0061](adr/0061-share-memory-worktree-access-before-turn-commits.md)）。
 - backend はコミットを終えてから `204` で答える。コミットに失敗したら `500` で答える。backend のログには、Git の処理・分類した理由（権限拒否・インデックスへの追加失敗・インデックスのロックなど）と、その理由を示す診断の件数だけを残す。件数が不明なら `affected=unknown` とする。要求への応答は汎用のエラーのままで、ログにも応答にもパス・本文・Git の生の出力は載せない。本体の夜のターン（`night` あり）では backend がコミットの変更量も数える。数を取れなくても応答は変えず、runner に数は返さない。
-- UI の流れでは、エージェントを `waiting` にする。
-- runner は、ターンの `turn_end` の途中経過を送り終えてから、この口を呼ぶ。`turn_end` を送れなかったとき（途中経過は送り直さない）は、流れでは `waiting` になるが、記録から引く `state`（`GET /api/agents`）は次のターンの `turn_start` か `turn_end` まで `thinking` のままである。
+- runner は、ターンの `turn_end` の途中経過の送信を試みてから、この口を呼ぶ。`turn_end` の送信に失敗した場合、個人ページのサブエージェントの状態は次の `turn_start` か `turn_end` まで更新されない。
 - サブエージェントのターンの終わりにも、runner は `agent` をサブエージェントの名前にして送り、backend は同じくコミットする。サブエージェントが `/memory` に書いたものを、本体の次のターンを待たずに残すためである。本体のターンの途中の変更も一緒にコミットされる（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md) の「サブエージェントの途中経過とターンの終わり」）。
-- 途中経過の `turn_end` は UI と記録のため、この口はコミットのために、別に置く。
+- 途中経過の `turn_end` と、ターンの結果の報告・記憶のコミットに使うこの口は別に置く。
 - 本体の通常のターンに限り、`context: {tokens, context_window}` を報告する。`tokens` は畳み込みを適用して送ったコンテキストについて、モデルが最後に返した使用量（キャッシュ分を含む入力と出力の合計）。`context_window` はそのモデルの上限である。使用量が無いときや、使用量を得た後で compaction してまだ新しい使用量が無いときは、`context` を省く。
 - backend は本体の通常のターンで `tokens` が 0 以上、`context_window` が正の安全な整数であることを確かめる。形が違えば `400` を返す。欄が無ければコンテキストを不明として扱い、ターンの終了はそのまま受ける。夜やサブエージェントのターンではこの欄を使わない。
 
@@ -382,7 +382,7 @@ runner は本体にだけ `sleep` ツールを渡す。ツールは受け付け�
 | `awake_seconds` | 実際に起きた時刻からの秒数。眠りの間は増えない |
 | `context` | 直近の本体の通常のターンのコンテキストを表す `{tokens, context_window}`。報告がなければ欄ごと省く |
 
-計算と起点の決め方は [backend.md の「眠気」](backend.md#眠気)。
+計算と起点の決め方は [backend.md の「眠気」](backend.md#眠気)。オーナーは個人ページの [「今の様子」](ui-api.md#今の様子) でも同じ状態を読める。
 
 ## モデルの設定
 

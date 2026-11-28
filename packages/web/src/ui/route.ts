@@ -17,11 +17,11 @@ export type MemoryPage =
 export type Route =
   | { place: "log"; page?: RecordPage }
   | { place: "memory"; page?: MemoryPage }
-  | { place: "settings" };
+  | { place: "status" | "events" | "settings" };
 
 export type Place = Route["place"];
 
-const NAMES: Record<Place, string> = { log: "record", memory: "memory", settings: "settings" };
+const NAMES: Record<Place, string> = { log: "record", memory: "memory", status: "status", events: "events", settings: "settings" };
 const PAGES: Record<RecordPage["kind"], string> = { turn: "turns", night: "nights", sub_agent: "sub-agents" };
 
 export function parseRoute(hash: string): Route {
@@ -64,7 +64,8 @@ export function parseRoute(hash: string): Route {
     }
     return { place: "log" };
   }
-  return name === "settings" ? { place: "settings" } : { place: "memory" };
+  if (name === "settings" || name === "status" || name === "events") return { place: name };
+  return { place: "memory" };
 }
 
 export function hashOf(route: Route): string {

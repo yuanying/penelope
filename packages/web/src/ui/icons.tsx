@@ -17,6 +17,20 @@ export const MemoryIcon = (props: Props) => (
     <path d="M9 10h6M9 14h6" strokeLinecap="round" />
   </svg>
 );
+export const EventsIcon = (props: Props) => (
+  <svg {...base} strokeLinejoin="round" {...props}>
+    <path d="M4 13l3-8h10l3 8v6H4v-6z" />
+    <path d="M4 13h5l1 2h4l1-2h5" />
+  </svg>
+);
+export const RepeatIcon = (props: Props) => (
+  <svg {...base} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" {...props}>
+    <path d="M17 3l4 4-4 4" />
+    <path d="M3 11V9a2 2 0 0 1 2-2h16" />
+    <path d="M7 21l-4-4 4-4" />
+    <path d="M21 13v2a2 2 0 0 1-2 2H3" />
+  </svg>
+);
 export const SettingsIcon = (props: Props) => (
   <svg {...base} strokeLinecap="round" {...props}>
     <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />

@@ -125,6 +125,142 @@ body {
   text-overflow: ellipsis;
 }
 
+/* Her schedules (docs/design/README.md, 12): by day, one row each, a thin line under each. */
+.schedules-page {
+  gap: 28px;
+}
+.schedules-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.schedules-summary {
+  color: var(--color-text-secondary);
+}
+.schedule-day {
+  display: flex;
+  flex-direction: column;
+}
+.schedule-day-label {
+  margin: 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.schedules {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.schedule {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.schedule-time {
+  flex: 0 0 56px;
+  padding-top: 10px;
+  font-size: 16px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.schedule-open {
+  flex: 1 1 160px;
+  min-width: 0;
+  min-height: 44px;
+  padding: 8px 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+/* A very long first sentence is cut at two lines until the row is opened. */
+.schedule-lead {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-wrap: pretty;
+}
+.schedule-open[aria-expanded="true"] .schedule-lead {
+  display: block;
+  -webkit-line-clamp: none;
+  line-clamp: none;
+  overflow: visible;
+}
+.schedule-rest {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.schedule-rest.open {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.schedule-how {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.schedule-how svg {
+  flex: none;
+}
+.schedule-how code {
+  padding: 1px 6px;
+  border-radius: 0.375rem;
+  background: var(--color-neutral);
+  font-size: 11px;
+}
+/* Quiet: no fill, a thin line, the secondary text, and still 44px high. */
+.schedule-remove {
+  flex: none;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-element);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.status-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.status-agents {
+  list-style: none;
+  padding: 0;
+}
+.status-agents > li {
+  border-bottom: 1px solid var(--color-border);
+  padding: 12px 0;
+  overflow-wrap: anywhere;
+}
+.status-agents p {
+  margin: 4px 0 0;
+}
+
 .flow {
   list-style: none;
   margin: 0;

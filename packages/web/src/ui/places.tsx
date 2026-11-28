@@ -2,13 +2,15 @@ import { Badge } from "@astryxdesign/core/Badge";
 import { SideNavItem } from "@astryxdesign/core/SideNav";
 import type { ComponentType, SVGProps } from "react";
 
-import { LogIcon, MemoryIcon, SettingsIcon } from "./icons.tsx";
+import { EventsIcon, LogIcon, MemoryIcon, SettingsIcon, SubAgentIcon } from "./icons.tsx";
 import type { Place } from "./route.ts";
 import { words } from "./words.ts";
 
 const PLACES: Array<[Place, ComponentType<SVGProps<SVGSVGElement>>]> = [
   ["memory", MemoryIcon],
   ["log", LogIcon],
+  ["status", SubAgentIcon],
+  ["events", EventsIcon],
   ["settings", SettingsIcon],
 ];
 
