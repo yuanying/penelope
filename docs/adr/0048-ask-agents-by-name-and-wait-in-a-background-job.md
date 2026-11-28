@@ -61,7 +61,7 @@
 
 ## Related ADRs
 
-- Superseded by（一部）: [ADR-0081 `ask-agent` の終わりの出来事には頼んだ本文も載せる](0081-include-the-request-in-ask-agent-completion.md)（Decision 項 2（終わりの出来事だけで結果を読み、必要なら同じ Task を続ける）の、出来事に含める内容）。
+- Superseded by（一部）: [ADR-0081 `ask-agent` は頼んだ本文を返事と同じ Task のディレクトリに残す](0081-save-ask-agent-requests-with-replies.md)（Decision 項 2（終わりの出来事だけで結果を読み、必要なら同じ Task を続ける）に送信した本文のパスを加える）。
 - Related: [ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md)（Decision「書き方の規則、手順、出来事ごとの扱いはプロンプトに書かない」の範囲内。Pi のツールを足さず、既存の bash と `job_start` で image のコマンドを使う。方針の追加や置き換えはしない）
 - Related: [ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする](0004-the-sentinel-keeps-the-keys-through-a-replaceable-source.md)（Decision「鍵は Sentinel が持つ」を変えない）
 - Related: [ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md)（Decision「終わったターンを、送る直前に畳む」の対象を変えない）

@@ -49,7 +49,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0045 | [夜のプロンプトは目的を伝え、印の付いたモデルだけに手順を足す](0045-tell-nightly-roles-their-goals-and-add-guidance-by-model.md) | Accepted（一部を ADR-0059 で置き換え） |
 | 0046 | [モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md) | Accepted |
 | 0047 | [A2A のメッセージで画像を受け、Task の成果として返す](0047-exchange-images-over-a2a.md) | Accepted |
-| 0048 | [A2A は `ask-agent` で名前を指定して頼み、裏の仕事で返事を待つ](0048-ask-agents-by-name-and-wait-in-a-background-job.md) | Accepted（一部を [ADR-0081](0081-include-the-request-in-ask-agent-completion.md) で置き換え） |
+| 0048 | [A2A は `ask-agent` で名前を指定して頼み、裏の仕事で返事を待つ](0048-ask-agents-by-name-and-wait-in-a-background-job.md) | Accepted（一部を [ADR-0081](0081-save-ask-agent-requests-with-replies.md) で置き換え） |
 | 0049 | [配置ごとの目的に沿って記憶を知識ベースに育てる](0049-grow-memory-around-an-instance-purpose.md) | Accepted |
 | 0050 | [夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) | Accepted（一部を ADR-0059 で置き換え） |
 | 0051 | [照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md) | Accepted |
@@ -82,5 +82,5 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0078 | [`reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md) | Accepted |
 | 0079 | [会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md) | Accepted |
 | 0080 | [iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md) | Accepted |
-| 0081 | [`ask-agent` の終わりの出来事には頼んだ本文も載せる](0081-include-the-request-in-ask-agent-completion.md) | Accepted |
+| 0081 | [`ask-agent` は頼んだ本文を返事と同じ Task のディレクトリに残す](0081-save-ask-agent-requests-with-replies.md) | Accepted |
 | 0082 | [人の居場所はブラウザの接続で変えない](0082-keep-people-in-rooms-until-they-leave.md) | Accepted |

@@ -70,7 +70,7 @@
 
 ## Related ADRs
 
-- Superseded by: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（家の発言と画像の保管・閲覧）。
+- Superseded by: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（家の発言と画像の保管・閲覧。Decision 項 2（画像でないもの、上限を超えるものは名前で残す）の扱いは引き継がない）。
 - Superseded by: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)。
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
