@@ -1,7 +1,7 @@
 # 端から端までの確かめ（e2e）
 
 [docs/pod.md](../docs/pod.md) の Pod の 4 つのコンテナ（Sentinel・backend・sandbox・receivers）を Docker Compose で 1 つの網の名前空間に並べ、
-Pod の外を偽物にして、オーナーのログインから夜の切り替えまでを通す。
+オーナーのログインから夜の切り替えまでを通す。家への画像付きの返事は実際の house image で確かめる。モデル、GitHub、クラスタの API は偽物を使う。
 
 ```sh
 make e2e
@@ -32,19 +32,21 @@ COMPOSE_PROJECT_NAME=penelope-e2e-<ブランチ名> VERSION=<ブランチ名> ma
 | `init` | `NET_ADMIN` を持つ init container。sandbox の UID（1000）の TCP と名前解決を、IPv4 と IPv6 とも Sentinel へ向け直す。loopback はそのまま（`init/redirect.sh`）。Pod と同じく root のファイルシステムは読み取り専用 |
 | `volumes` | volume の持ち主を決め、sandbox の HOME に Pi の設定（`config/models.json`）を置く。Pod の `fsGroup` と配置の役目に当たる |
 | `sentinel`・`backend`・`sandbox`・`receivers` | リポジトリの image そのまま。`network_mode: service:pod` で名前空間を共有する |
-| `outside` | Pod の外の偽物（下の「偽物」） |
+| `outside` | Pod の外の偽物と家の TLS 終端 |
+| `house` | リポジトリの house image。`outside` と名前空間を共有する |
 
 - volume と mount は pod.md の表のとおり。`/memory/.git` は別の volume で、sandbox には読み取りで重ねる。取り込み口と管理口の socket は sandbox に mount しない。
-- sandbox に置くのはサロゲートと Sentinel の CA の公開の証明書だけである。本物の鍵（モデルの鍵、backend の token、OAuth の client secret）は Sentinel・backend・偽物にだけ mount する。
+- sandbox に置くのはサロゲートと Sentinel の CA の公開の証明書だけである。本物の鍵（モデルの鍵、backend の token、OAuth の client secret）やテスト用の ServiceAccount token は、Sentinel・backend・receivers・家・偽物のうち、認証に必要なコンテナにだけ mount する。
 - receivers は image のまま `serve` で動き、Alertmanager のプラグインを `/v1/webhooks/fraction` で、GitHub のプラグインを `/v1/webhooks/github` で、Slack のプラグインをワークスペース `work` で有効にする（`config/receivers.json`）。Alertmanager の token と GitHub の webhook の秘密は走らせるたびに作る `alertmanager-token` と `github-webhook-secret` で、receivers にだけ mount する。Slack の app-level token と bot の token（`slack-app-token`・`slack-bot-token`）は、receivers と偽物にだけ mount する。テストは同じコンテナで小さな送り手（`sender/send.ts`）も動かし、自分で作った封筒で取り込み口の socket を叩く。
 
 ## 偽物
 
 `outside` のコンテナ 1 つが、Pod の外を受け持つ（`outside/`）。
 
-- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`・`a.apps.example.com`・`slack.com`・`wss-primary.slack.com`・`files.slack.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
-- モデル: Pi の `openai-completions` が話す chat completions の偽物。テストの印（`E2E-TURN-1` など）を見て、決まった返事と道具の呼び出し（`write`・`bash`）を返す。受けた入力をすべて覚え、`Authorization` が本物の鍵だったか（Sentinel が差し替えたか）を記録する。
+- 名前解決: テストの名前（`model.example.com`・`backend.example.com`・`plain.example.net`・`github.com`・`api.github.com`・`kubernetes.example.com`・`auth.example.com`・`a.apps.example.com`・`house.example.com`・`slack.com`・`wss-primary.slack.com`・`files.slack.com`）を自分のアドレスで答え、ほかは無いと答える。Pod のすべてのコンテナの `resolv.conf` はこれを指す（クラスタの DNS に当たる）。テストはマシンの外に出ない。
+- モデル: Pi の `openai-completions` が話す chat completions の偽物。テストの印（`E2E-TURN-1` など）を見て、決まった返事と道具の呼び出し（`write`・`bash`・`reply`）を返す。受けた入力をすべて覚え、`Authorization` が本物の鍵だったか（Sentinel が差し替えたか）を記録する。
 - GitHub の OAuth と API: token の交換（client secret と PKCE を確かめる）と `/user`。
+- 家（`house.example.com`）: TLS を終端し、要求を家の HTTP ポートへ渡す。家は同じ偽の TokenReview を使い、テストの配置と聞き手を認証する。`test/house.ts` は聞き手が送った画像をエージェントが受け取り、Sentinel を通して部屋に送り返した画像と発言 ID を確かめる。
 - 素通しの宛先: `plain.example.net`（HTTPS と平文の HTTP）。
 - アプリ（`a.apps.example.com`）: Sentinel のワイルドカードの登録（`*.apps.example.com`）に当たる名前。届いた `Authorization` が本物の鍵だったかを返す。
 - クラスタの API server の TokenReview（`kubernetes.example.com`）: backend 自身の ServiceAccount の token（`kube-token`）で尋ねられたときだけ答える。A2A の送り手の token（`sender-token`、`system:serviceaccount:e2e:claude`）と、allow-list に無い ServiceAccount の token（`stranger-token`）を知っている。

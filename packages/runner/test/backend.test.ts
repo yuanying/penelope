@@ -52,11 +52,6 @@ test("every body names the agent", async () => {
   assert.deepEqual(fake.sent("POST", "/v1/sessions/rotated"), [{ agent: "main", seq: 7 }]);
 });
 
-test("a reply answers with its id", async () => {
-  assert.deepEqual(await backend.reply({ text: "done", expression: "smile", in_reply_to: 1 }), { id: "r-1" });
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "done", expression: "smile", in_reply_to: 1 }]);
-});
-
 test("schedules are made, listed and deleted", async () => {
   const made = await backend.createSchedule({ reason: "check CI", cron: "0 9 * * *" });
   assert.deepEqual(made, { id: "s-1", agent: "main", reason: "check CI", cron: "0 9 * * *" });

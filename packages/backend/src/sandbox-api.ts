@@ -26,10 +26,8 @@ import { iso } from "./time.ts";
 
 /** The longest a poll waits. */
 export const MAX_WAIT_SECONDS = 60;
-/** Replies and activity carry tool output, so the limit is generous. */
+/** Activity can carry tool output, so the limit is generous. */
 export const DEFAULT_SANDBOX_BYTES = 16 * 1024 * 1024;
-/** A reply carries up to four images of 10 MiB in base64 (ADR-0032). */
-export const DEFAULT_REPLY_BYTES = 64 * 1024 * 1024;
 
 export type SandboxOptions = {
   /** The real token. Without one, every request is refused. */
@@ -50,8 +48,6 @@ export type SandboxOptions = {
   sleep: Sleep;
   now: () => number;
   maxBytes?: number;
-  /** The limit of a reply's body, which carries its images. */
-  maxReplyBytes?: number;
   log?: (line: string) => void;
 };
 
@@ -59,7 +55,6 @@ export function sandboxHandler(options: SandboxOptions): Handler {
   const { queue, conversation, agents, schedules, memory, memoryView, inbox, record, sleep, now } = options;
   const log = options.log ?? console.error;
   const maxBytes = options.maxBytes ?? DEFAULT_SANDBOX_BYTES;
-  const maxReplyBytes = options.maxReplyBytes ?? DEFAULT_REPLY_BYTES;
   const expected = options.token === undefined || options.token === "" ? undefined : digest(options.token);
 
   // What is kept for the record never refuses what it is kept from (ADR-0038).
@@ -162,43 +157,6 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         sendEmpty(response, 202);
         return;
       }
-      case "POST /v1/replies": {
-        const { agent, text, expression, in_reply_to, images, turn_id } = withAgent(object(await readJson(request, maxReplyBytes)));
-        mainOnly(agent, "replies to the owner");
-        if (turn_id !== undefined && (typeof turn_id !== "string" || turn_id === "")) throw new HttpError(400, "turn_id must be a non-empty string");
-        if (typeof text !== "string") throw new HttpError(400, "text must be a string");
-        if (expression !== undefined && typeof expression !== "string") throw new HttpError(400, "expression must be a string");
-        if (in_reply_to !== undefined && !Number.isSafeInteger(in_reply_to)) throw new HttpError(400, "in_reply_to must be a seq");
-        // Any image that does not pass refuses the whole reply, its text too (ADR-0032).
-        let checked;
-        try {
-          checked = checkImages(images);
-        } catch (error) {
-          if (error instanceof ImageRefusal) throw new HttpError(400, `not sent: ${error.message}`);
-          throw error;
-        }
-        let turn: string | undefined;
-        keep(() => (turn = record.replyTurn(turn_id as string | undefined)));
-        let reply;
-        try {
-          reply = conversation.reply(
-            {
-              agent,
-              text,
-              ...(expression === undefined ? {} : { expression: expression as string }),
-              ...(in_reply_to === undefined ? {} : { in_reply_to: in_reply_to as number }),
-              ...(turn === undefined ? {} : { turn_id: turn }),
-            },
-            checked,
-          );
-        } catch (error) {
-          if (!(error instanceof AssetStoreError)) throw error;
-          log(`replies: ${error.message}`);
-          throw new HttpError(500, "not sent: the images could not be kept");
-        }
-        sendJson(response, 201, reply);
-        return;
-      }
       case "POST /v1/a2a/replies": {
         const { agent, in_reply_to, state, text, images } = withAgent(object(await readJson(request, A2A_BODY_MAX_BYTES)));
         mainOnly(agent, "answers A2A tasks");
@@ -225,6 +183,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
         const { agent, activities } = withAgent(await body());
         if (!Array.isArray(activities)) throw new HttpError(400, "activities must be a list");
         const blocks = activities.map(activity);
+        if (blocks.some((block) => block.kind === "house_reply")) mainOnly(agent, "reports house replies");
         conversation.activities(agent, blocks);
         keep(() => record.activities(agent, blocks));
         sendEmpty(response, 204);
@@ -357,7 +316,7 @@ export function sandboxHandler(options: SandboxOptions): Handler {
       sendEmpty(response, 204);
       return;
     }
-    const known = ["/v1/status", "/v1/sleep", "/v1/mood", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/replies", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
+    const known = ["/v1/status", "/v1/sleep", "/v1/mood", "/v1/events/ack", "/v1/self-events", "/v1/job-events", "/v1/agents", "/v1/a2a/replies", "/v1/activity", "/v1/turns/end", "/v1/memory/repairs", "/v1/schedules", "/v1/sessions/rotated"];
     if (known.includes(url.pathname)) throw new HttpError(405, "not this method");
     throw new HttpError(404, "no such path");
   };
@@ -463,8 +422,13 @@ function activity(value: unknown): Activity {
     case "tool_result":
       if (typeof block.is_error !== "boolean") throw bad("of kind tool_result needs is_error as a boolean");
       return { ...base, kind, call_id: text("call_id"), is_error: block.is_error, output: text("output") };
+    case "house_reply": {
+      const speech_id = text("speech_id");
+      if (!speech_id.trim() || speech_id.length > 128) throw bad("of kind house_reply needs a non-blank speech_id of at most 128 characters");
+      return { ...base, kind, speech_id };
+    }
     default:
-      throw bad("kind must be turn_start, thinking, tool_call, tool_result, message or turn_end");
+      throw bad("kind must be turn_start, thinking, tool_call, tool_result, message, house_reply or turn_end");
   }
 }
 

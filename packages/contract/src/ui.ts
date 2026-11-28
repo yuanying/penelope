@@ -198,7 +198,7 @@ export type RecordDayResponse = {
 
 /** One block of a turn's flow: as the activity it was, but a tool's result carries only its size. */
 export type RecordFlowItem =
-  | Exclude<Activity, { kind: "turn_start" | "turn_end" | "tool_result" }>
+  | Exclude<Activity, { kind: "turn_start" | "turn_end" | "tool_result" | "house_reply" }>
   | {
       kind: "tool_result";
       at: string;
@@ -219,6 +219,8 @@ export type RecordTurnResponse = {
   flow: RecordFlowItem[];
   /** Whether its flow is gone with time (30 days), only the summary left. */
   expired: boolean;
+  /** House speech IDs confirmed for this turn. */
+  house_reply_ids?: string[];
 };
 
 /** `GET /api/record/turns/<id>/results/<call_id>`: the whole output of one tool's result. */

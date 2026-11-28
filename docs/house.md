@@ -67,7 +67,7 @@
 - gated の後ろでは `Gated-Assertion` を確かめます。`aud` は `public_url` の小文字のホスト名です。要求の `Host` は使いません。gated 用の audience を持つ ServiceAccount token を `Authorization: Bearer` で gated に渡します。
 - TokenReview には家の ServiceAccount の token を `token_file` で渡します。`url` は Kubernetes API server の HTTPS URL です。`ca_file` を省くと Node の既定の CA を使います。`audiences` は 1 つ以上で、Kubernetes API server 自身の audience ではなく、家を呼ぶために発行する token の audience を並べます。家の ServiceAccount には TokenReview の `create` 権限が必要です。
 - 両方を設定したときに `Gated-Assertion` があれば、assertion で判定します。失敗しても TokenReview には進みません。assertion がなければ Bearer token を TokenReview で確かめます。
-- receivers と CLI は配置の同じ ServiceAccount として呼びます。receivers だけが自身の実 token を持ちます。sandbox の CLI にはサロゲートを渡し、Sentinel が本物に差し替えます。
+- receivers、sandbox の `reply` と CLI は配置の同じ ServiceAccount として呼びます。receivers には実 token を渡します。sandbox はサロゲートを送り、Sentinel が本物に差し替えます。
 
 ## エージェント用 API
 
@@ -264,9 +264,15 @@ SSE が切れたときは発言を止め、新しい `ready` を待ちます。�
 
 旧版の receivers のプラグインは家の `id` と `occurred_at` を出来事の封筒に写します。`stream` は `event.room.id`、`delivery` と `answer_via` は `HouseDelivery` の値です。`payload` は `event` に `owner` を加えたものです。`owner` は `actor.kind` が `person` かつ `actor.id` がプラグインの `owner_id` と一致する場合だけ `true` です。本文の名乗りは使いません。
 
-`summary` は、話し手の種別・ID、該当するときは `owner` と `you`、明示された宛先の ID を先頭に置き、表示名と部屋での行動を続けた 1 行です。例: `[person lee, owner, to ivy] Lee spoke in 居間`。`you` は `HouseView.you` と話し手の ID が一致するときに付きます。宛先の一覧が長いときは先頭の ID と残りの件数を表示します。`summary` に発言の本文は含めません。
+新版のプラグインは、家の `owner` を `payload` に加えます。`summary` は話し手の種別と ID、該当する場合は `owner` と明示された宛先の ID、表示名、行動を示します。例: `[person lee, owner, to ivy] Lee spoke in 居間`。長い宛先の一覧は先頭の ID と残りの件数を示します。本文は含めません。
 
-`source` はプラグインの設定で決め、backend では inline にします。ターンの行では `stream` が部屋 ID、`summary` が家で確認した出来事、発言の `text` が本文です。すべての宛先を含む元の封筒は `/sources/<source>/<room-id>/` に残ります。
+受信元の既定は `house` です。backend の inline 設定にその受信元を含めると、発言の `text` は本文としてターンに入ります。元の封筒は `/sources/house/<stream>/` に残ります。画像を取得したら、プラグインは封筒と画像を backend に渡します。backend は画像を添付として `/sources/house/files/<seq>-<image-id>` に置きます。元の名前は封筒の `payload.images` に残します。
+
+## runner の `reply`
+
+- 引数は `text`・`expression`・`images`・`to` です。本文は 20,000 文字以下で、画像があれば省けます。画像には sandbox の絶対パスか HOME からの相対パスを渡します。runner は通常ファイルか、枚数とサイズが上限内かを確かめ、ファイルの名前とバイト列を `HouseReply` の画像にします。画像の形式は家が確かめます。1 枚でも送れなければ、発言全体を断ります。
+- runner は `HOUSE_URL` と `HOUSE_TOKEN` を CLI と同じように使います。家の設定が無ければ送れません。通信が途切れた場合や応答を読めなかった場合、家が記録済みのことがあるため、送り直しません。別の送り先にも転送しません。
+- 確認できた場合、結果は届け先、部屋にいなかった宛先、起きていなかった聞き手、無視された `to` を示します。runner は続けて [途中経過](sandbox-api.md#途中経過) を送り、発言の ID をターンに結び付けます。記録への通知に失敗しても、発言を送り直しません。
 
 ## CLI
 

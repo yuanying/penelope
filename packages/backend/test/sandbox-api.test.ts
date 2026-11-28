@@ -5,8 +5,6 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX } from "@penelope/contract";
-
 import { Inbox } from "../src/a2a/inbox.ts";
 import { SubAgents } from "../src/agents.ts";
 import { Assets } from "../src/assets.ts";
@@ -45,9 +43,8 @@ async function setup(
     timeZone,
     redeliverMs: 300_000,
   });
-  const assetsDir = path.join(dir, "assets");
-  const assets = new Assets(db, assetsDir, { now: clock.now });
-  const conversation = new Conversation(db, { now: clock.now, assets });
+  const assets = new Assets(path.join(dir, "assets"));
+  const conversation = new Conversation(db);
   const agents = new SubAgents(db, { now: clock.now });
   const memoryDir = path.join(dir, "memory");
   mkdirSync(memoryDir);
@@ -76,17 +73,8 @@ async function setup(
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ port }, pathname, { ...options, headers: { connection: "close", authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, record, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, logs, inbox, db, clock, assets, assetsDir, modelSettings };
+  return { queue, conversation, record, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, logs, inbox, db, clock, modelSettings };
 }
-
-/** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
-const image = {
-  png: (padding = 0) => Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(padding)]),
-  jpeg: () => Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3]),
-  gif: () => Buffer.from("GIF89a-gif"),
-  webp: () => Buffer.concat([Buffer.from("RIFF"), Buffer.alloc(4), Buffer.from("WEBPVP8 ")]),
-};
-const upload = (name: string, bytes: Buffer) => ({ name, data: bytes.toString("base64") });
 
 const self = (id: string) => ({ agent: "main", id, summary: `note ${id}`, payload: { id } });
 
@@ -429,95 +417,26 @@ describe("the sandbox's API", () => {
     });
   });
 
-  describe("replies", () => {
-    it("counts a legacy reply against the turn the runner names", async (t) => {
-      const { call, record } = await setup(t);
-      await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-1", result: "done" } });
-      const answer = await call("/v1/replies", { json: { agent: "main", text: "done", turn_id: "t-1" } });
-      assert.equal(answer.status, 201);
-      assert.equal(record.turn("t-1").turn.replies, 1);
-    });
-
-    it("are refused without text", async (t) => {
-      const { call } = await setup(t);
-      assert.equal((await call("/v1/replies", { json: { agent: "main" } })).status, 400);
-      assert.equal((await call("/v1/replies", { json: { agent: "main", text: "x", in_reply_to: "3" } })).status, 400);
-    });
-  });
-
-  describe("replies with images", () => {
-    it("keep a copy of each image in the order sent", async (t) => {
-      // Guards against: an image the owner is not shown, shown in another order, or read from the sandbox's file later.
-      const { call, assets } = await setup(t);
-      const sent = [image.png(100), image.jpeg(), image.gif(), image.webp()];
-      const answer = await call("/v1/replies", {
-        json: { agent: "main", text: "描いたよ", images: sent.map((bytes, i) => upload(`draw-${i}.img`, bytes)) },
-      });
-      assert.equal(answer.status, 201, answer.text);
-      const { id } = answer.json();
-      const images = assets.ofMessages([id]).get(id) ?? [];
-      assert.deepEqual(
-        images.map(({ mime_type, size, name }) => ({ mime_type, size, name })),
-        [
-          { mime_type: "image/png", size: sent[0]!.length, name: "draw-0.img" },
-          { mime_type: "image/jpeg", size: sent[1]!.length, name: "draw-1.img" },
-          { mime_type: "image/gif", size: sent[2]!.length, name: "draw-2.img" },
-          { mime_type: "image/webp", size: sent[3]!.length, name: "draw-3.img" },
-        ],
-      );
-      assert.equal(new Set(images.map((kept) => kept.id)).size, 4, "each copy has an id of its own");
-      images.forEach((kept, i) => {
-        const found = assets.get(kept.id);
-        assert.ok(found, kept.id);
-        assert.equal(found.mime_type, kept.mime_type);
-        assert.deepEqual(readFileSync(found.file), sent[i]);
-      });
-    });
-
-    it("take four images of the largest size in one reply", async (t) => {
-      // Guards against: a body limit that refuses what the limits of the images allow.
-      const { call, assets } = await setup(t);
-      const largest = image.png(REPLY_IMAGE_MAX_BYTES - 8);
-      const images = Array.from({ length: REPLY_IMAGES_MAX }, (_, i) => upload(`big-${i}.png`, largest));
-      const answer = await call("/v1/replies", { json: { agent: "main", text: "大きいよ", images } });
-      assert.equal(answer.status, 201, answer.text.slice(0, 200));
-      const { id } = answer.json();
-      assert.equal(assets.ofMessages([id]).get(id)?.length, REPLY_IMAGES_MAX);
-    });
-
-    for (const [why, images, said] of [
-      ["an image that is not PNG, JPEG, GIF or WebP", [upload("ok.png", image.png()), upload("notes.txt", Buffer.from("just text"))], /notes\.txt/],
-      ["an image with no bytes", [upload("empty.png", Buffer.alloc(0))], /empty\.png/],
-      ["an image over the size limit", [upload("huge.png", image.png(REPLY_IMAGE_MAX_BYTES - 7))], /huge\.png/],
-      ["more images than the limit", Array.from({ length: REPLY_IMAGES_MAX + 1 }, (_, i) => upload(`${i}.png`, image.png())), /at most 4/],
-      ["data that is not base64", [{ name: "x.png", data: "not base64!" }], /x\.png/],
-      ["an image without a name", [{ data: image.png().toString("base64") }], /name/],
-      ["images that are not a list", "x.png", /images/],
-    ] as const) {
-      it(`are refused whole, text and all, for ${why}`, async (t) => {
-        // Guards against: a reply that reaches the owner with an image missing, or a copy kept of what was refused.
-        const { call, db, assetsDir } = await setup(t);
-        const answer = await call("/v1/replies", { json: { agent: "main", text: "見て", images } });
-        assert.equal(answer.status, 400);
-        assert.match(answer.json().error, said);
-        assert.deepEqual(db.prepare("SELECT id FROM history").all(), []);
-        assert.deepEqual(existsSync(assetsDir) ? readdirSync(assetsDir) : [], []);
-      });
-    }
-
-    it("are refused whole with 500 when the copies cannot be written", async (t) => {
-      // Guards against: a reply that reaches the owner without the images it said it had.
-      const { call, db, assetsDir } = await setup(t);
-      writeFileSync(assetsDir, "not a directory");
-      const answer = await call("/v1/replies", { json: { agent: "main", text: "見て", images: [upload("a.png", image.png())] } });
-      assert.equal(answer.status, 500);
-      assert.match(answer.json().error, /images/);
-      assert.deepEqual(db.prepare("SELECT id FROM history").all(), []);
-    });
+  it("no longer accepts a reply at the legacy sandbox endpoint", async (t) => {
+    const { call } = await setup(t);
+    assert.equal((await call("/v1/replies", { json: { agent: "main", text: "done" } })).status, 404);
   });
 
   describe("activity", () => {
     const at = "2026-11-14T09:00:00Z";
+    it("keeps the confirmed house speech ID on the turn the runner names", async (t) => {
+      const { call, record } = await setup(t);
+      const report = await call("/v1/activity", { json: { agent: "main", activities: [
+        { kind: "turn_start", at, turn_id: "t-other" },
+        { kind: "house_reply", at, turn_id: "t-speaker", speech_id: "house-1" },
+      ] } });
+      assert.equal(report.status, 204, report.text);
+      const detail = record.turn("t-speaker");
+      assert.deepEqual(detail.house_reply_ids, ["house-1"]);
+      assert.equal(detail.turn.replies, 1);
+      assert.deepEqual(record.turn("t-other").house_reply_ids ?? [], []);
+    });
+
     it("is refused when a block is not one of the kinds", async (t) => {
       const { call } = await setup(t);
       for (const activity of [
@@ -827,12 +746,12 @@ describe("the sandbox's API", () => {
       assert.equal((await call("/v1/agents")).status, 405);
     });
 
-    it("cannot reply, answer an A2A task or touch the schedules", async (t) => {
+    it("cannot report a house reply, answer an A2A task or touch the schedules", async (t) => {
       // Guards against: a sub-agent's words reaching the owner or another agent (ADR-0022).
       const { call } = await setup(t);
       const agent = "review-pr-22";
       for (const [pathname, options] of [
-        ["/v1/replies", { json: { agent, text: "done" } }],
+        ["/v1/activity", { json: block(agent, "house_reply", { speech_id: "h-1" }) }],
         ["/v1/a2a/replies", { json: { agent, in_reply_to: 1, state: "completed" } }],
         ["/v1/schedules", { json: { agent, reason: "x", cron: "0 9 * * *" } }],
         [`/v1/schedules?agent=${agent}`, {}],
@@ -905,18 +824,9 @@ describe("the sandbox's API", () => {
     assert.deepEqual(record.day({ day: "2026-11-14" }).rows, []);
   });
 
-  it("answers 413 to a reply over the 64 MiB of the spec, and keeps none of it", async (t) => {
-    // Guards against: a reply's images making the backend read and keep a body of any size.
-    const { call, db } = await setup(t);
-    const answer = await call("/v1/replies", { json: { agent: "main", text: "x".repeat(64 * 1024 * 1024) } });
-    assert.equal(answer.status, 413);
-    assert.deepEqual(db.prepare("SELECT id FROM history").all(), []);
-  });
-
   it("answers 404 to a path it does not have", async (t) => {
     const { call } = await setup(t);
     assert.equal((await call("/v1/nothing")).status, 404);
-    assert.equal((await call("/v1/replies")).status, 405);
     assert.equal((await call("/v1/sleep")).status, 405);
   });
 

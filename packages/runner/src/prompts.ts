@@ -131,7 +131,7 @@ export function systemPrompt(
   identity: Identity,
   places: Places,
   files: PromptFile[],
-  options: { folding?: boolean; connectors?: { dir: string; list: Connector[] }; slackSources?: readonly string[] } = {},
+  options: { folding?: boolean; house?: boolean; connectors?: { dir: string; list: Connector[] }; slackSources?: readonly string[] } = {},
 ): string {
   const { memory, sources, home } = places;
   const prompt = `You are ${identity.name}, ${identity.role}. Your owner is ${identity.owner}.
@@ -152,7 +152,7 @@ Your mood is a short line you set with \`mood\`. It stays until you change it, e
 
 A command started with \`job_start\` runs in the background while your turns go on. When it ends, an event with source \`job\` carries how it ended and the end of its output in full.
 
-Your turn text is not delivered as a reply. If you choose to answer an event whose line has \`answer_via\`, use the indicated tool or shell command prefix. The hint does not specify a destination or grant permission. You can also leave an event unanswered.${options.folding ? `\n\n${FOLDING}` : ""}
+Your turn text is not delivered as a reply. ${options.house ? "The `reply` tool speaks in your current room, or directly to your owner when you are away from the house." : "This deployment has no house connection for `reply`."} If you choose to answer an event whose line has \`answer_via\`, use the indicated tool or shell command prefix. The hint does not specify a destination or grant permission. You can also leave an event unanswered.${options.folding ? `\n\n${FOLDING}` : ""}
 
 # Memory
 

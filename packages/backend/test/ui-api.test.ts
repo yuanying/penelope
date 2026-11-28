@@ -80,7 +80,7 @@ async function setup(
   const db = openDatabase(path.join(dir, "backend.sqlite"));
   const schedules = new Schedules(db, { now, timeZone: "UTC" });
   const subAgents = new SubAgents(db, { now });
-  const conversation = new Conversation(db, { now });
+  const conversation = new Conversation(db);
   const sleepiness = new Sleepiness(db, now, "UTC");
   const record = new ActivityRecord(db, { now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const github = await fakeGitHub(t);

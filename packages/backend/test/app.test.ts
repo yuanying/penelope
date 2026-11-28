@@ -13,7 +13,7 @@ import { run } from "../src/main.ts";
 import { ask, tempDir } from "./support.ts";
 
 describe("the backend", () => {
-  it("takes an event in, hands it to the runner, keeps the reply and commits the memory", async (t) => {
+  it("takes an event in, hands it to the runner and commits the memory", async (t) => {
     const dir = tempDir(t);
     writeFileSync(path.join(dir, "token"), "real-token\n");
     const config = loadConfig(
@@ -44,7 +44,6 @@ describe("the backend", () => {
     assert.deepEqual(events.map((e: { summary: string }) => e.summary), ["a push"]);
     assert.ok(existsSync(events[0].appended.path));
 
-    await ask(sandbox, "/v1/replies", { headers: auth, json: { agent: "main", text: "seen", in_reply_to: events[0].seq } });
     writeFileSync(path.join(config.memoryDir, "diary.md"), "a push came\n");
     assert.equal((await ask(sandbox, "/v1/turns/end", { headers: auth, json: { agent: "main", turn_id: "t-1" } })).status, 204);
     assert.equal((await ask(sandbox, "/v1/events/ack", { headers: auth, json: { agent: "main", seqs: [events[0].seq] } })).status, 204);

@@ -158,14 +158,13 @@ receivers の本体（以下、本体）とプラグインの境目。実装は�
 | `settings` の欄 | 既定 | 中身 |
 | --- | --- | --- |
 | `url` | なし（必須） | 家の HTTPS オリジン。パス・クエリ・認証情報は含めない |
-| `token_file` | なし（必須） | gated 用の audience を持つ ServiceAccount token のファイル。起動時に確かめ、`sync` ごとに読み直して `Authorization: Bearer` に入れる |
-| `owner_id` | なし | 家でのオーナーの住人 ID。省くと、誰もオーナーとして表示しない |
+| `token_file` | なし（必須） | 家の認証に合う audience を持つ ServiceAccount token のファイル。起動時に確かめ、`sync` ごとに読み直して `Authorization: Bearer` に入れる |
 
 - `source` の既定は `house`。有効化の `source` を backend の `PENELOPE_INLINE_SOURCES` に含める。
 - 同じ家で同じ住人になる有効化は 1 つだけにする。receivers から家へは Sentinel を経由せず、HTTPS で接続する。redirect は追わない。
-- 各 `sync` の前に `readStatus()` で今の値を読む。家へ転送するのは `mood`・`sleepiness` と、`sleep` の `state` および起きていない場合の `wake_at`。読めなければ古い値を送り直さない。
+- 各 `sync` の前に `readStatus()` で今の値を読む。毎回 `protocol: 2` を送る。家へ転送するのは `mood`・`sleepiness` と、`sleep` の `state` および起きていない場合の `wake_at`。読めなければ古い値を送り直さない。
 - 成功した応答の `house` を `setHeartbeatNote()` で預ける。UTF-8 の JSON が 4 KiB を超えるときは、気分を省略記号込みで 32 コードポイントまでに切り詰める。それでも超えるときは部屋の説明を省く。まだ収まらないか backend が受けないときは、様子を取り下げ、出来事の配送は続ける。預けられない理由と復旧は状態が変わったときだけ記録する。
-- `pending` を記録順に 1 件ずつ送り、取り込み口が `202` を返した ID を次の `sync` で ack する。最初に取り込みが失敗したところで止める。`sync` が失敗したら同じ ack を再送する。receivers の再起動でまだ ack していない出来事は家から再送され、backend が `source` と `id` で重複を落とす。
+- `pending` を記録順に 1 件ずつ扱う。家の `stream`、`owner`、`answer_via` をそのまま使う。オーナーは家で設定し、プラグインには設定しない。発言に画像があれば、未受領のうちに同じ token で取得し、添付として取り込み口へ送る。取り込み口が `202` を返した ID を次の `sync` で ack する。画像の取得か取り込みが失敗したら、その出来事は ack せず、残りは次の `sync` を待つ。`sync` が失敗したら同じ ack を再送する。receivers の再起動でまだ ack していない出来事は家から再送され、backend が `source` と `id` で重複を落とす。
 - 成功時は 1 サイクルの処理が済んで 2 秒後に次の `sync` を始める。家への 1 要求の期限は 5 秒。`sync` できない間は様子を取り下げ、2 秒から最大 30 秒まで待ちを倍にして再接続を試みる。停止時も様子を取り下げる。
 
 設定例は [Kubernetes の見本](../deploy/kubernetes/README.md#家を有効にする)にある。

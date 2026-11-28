@@ -15,8 +15,6 @@ import type {
   ModelSelectionResponse,
   MoodRequest,
   PollResponse,
-  ReplyRequest,
-  ReplyResponse,
   Schedule,
   ScheduleListResponse,
   ScheduleWhen,
@@ -112,10 +110,6 @@ export class Backend {
 
   async commitMemoryRepairs(repair: Without<MemoryRepairRequest>): Promise<void> {
     await this.post("/v1/memory/repairs", repair);
-  }
-
-  async reply(reply: Without<ReplyRequest>): Promise<ReplyResponse> {
-    return (await this.post("/v1/replies", reply)) as ReplyResponse;
   }
 
   async sleep(request: Without<SleepRequest>): Promise<SleepResponse> {

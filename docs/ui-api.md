@@ -124,6 +124,7 @@
   - `turn` は一覧の行と同じ形。
   - `flow` は、そのターンの途中経過を順に並べたもの（`turn_start` と `turn_end` は除く）。形は sandbox 向けの口の途中経過の 1 件と同じだが、`tool_result` だけは `output` の代わりに大きさ（`lines` 行・`bytes` バイト、UTF-8）を持つ（型は `RecordFlowItem`）。結果の本文は開いたときに下の口で読む。
   - `expired` は、30 日を過ぎて流れが消えたとき `true`（そのとき `flow` は空）。
+  - `house_reply_ids` は、そのターンで家が受け取った発言の ID の並び。本文や画像は家が持つ。
 - `GET /api/record/turns/<id>/results/<call_id>` は `{output}`（型は `RecordResultResponse`）。そのツールの結果の本文の全部（runner が切った 16,000 文字まで）。流れが消えたもの、無いものは `404`。
 - `GET /api/record/nights/<id>` は `{night, turns}`（型は `RecordNightResponse`）。`turns` は `{reflection?, verifier?, curator?, content?, structure?}`（一覧の `turn` の行と同じ形）。通常はその段の最後のターン、棚卸しでは `content`・`structure` に報告された各ターンを返し、`curator` は旧 UI 向けにうち最後のものを返す。
 - `GET /api/record/sub-agents/<name>?before=` は `{sub_agent, turns, before?}`（型は `RecordSubAgentResponse`）。`sub_agent` は一覧の行と同じ形（閉じていなければ `closed_at` が無い）。`turns` はそのサブエージェントのターンの新しい順で、1 ページ 20 件。`before` は次のページの不透明な cursor で、最後のページには無い。backend の渡していない `before` は `400`。

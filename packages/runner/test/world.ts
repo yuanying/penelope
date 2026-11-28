@@ -81,6 +81,7 @@ export async function world(options: { turnFold?: boolean; ownerSkills?: boolean
       const runner = new Runner({
         config,
         backend: new Backend({ url: config.backend.url, token: TOKEN, agent: "main" }),
+        house: { origin: new URL(config.backend.url), token: TOKEN },
         modelRuntime,
         imageLimits: await readImageLimits(join(config.agentDir, "models.json")),
         settings: () => SettingsManager.inMemory({ retry: { enabled: false } }),

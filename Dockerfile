@@ -126,6 +126,8 @@ ENV NODE_ENV=production PENELOPE_VERSION=${VERSION}
 WORKDIR /app
 COPY --from=ts-build /src/packages/receivers/package.json ./
 COPY --from=receivers-deps /src/node_modules ./node_modules
+COPY --from=ts-build /src/packages/contract/package.json ./node_modules/@penelope/contract/
+COPY --from=ts-build /src/packages/contract/dist ./node_modules/@penelope/contract/dist
 COPY --from=ts-build /src/packages/slack/package.json ./node_modules/@penelope/slack/
 COPY --from=ts-build /src/packages/slack/dist ./node_modules/@penelope/slack/dist
 COPY --from=ts-build /src/packages/receivers/dist ./dist

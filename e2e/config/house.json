@@ -1,0 +1,23 @@
+{
+  "name": "E2E house",
+  "database": ":memory:",
+  "rooms": [{ "id": "living", "name": "Living room", "description": "A place to talk", "capacity": null }],
+  "agents": [
+    { "id": "penelope", "name": "Penelope", "service_account": "e2e/claude", "owner_login": "e2e-owner" },
+    { "id": "neighbor", "name": "Neighbor", "service_account": "e2e/stranger" }
+  ],
+  "people": [{ "login": "e2e-owner", "name": "E2E Owner" }],
+  "auth": {
+    "github": {
+      "public_url": "https://house.example.com",
+      "client_id": "e2e-client-id",
+      "client_secret_file": "/run/secrets/e2e/github-client-secret"
+    },
+    "tokenreview": {
+      "url": "https://kubernetes.example.com",
+      "token_file": "/run/secrets/e2e/kube-token",
+      "audiences": ["https://penelope.example.com"],
+      "ca_file": "/run/secrets/e2e/outside-ca.crt"
+    }
+  }
+}

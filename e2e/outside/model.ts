@@ -107,6 +107,13 @@ export function script(messages: readonly ChatMessage[]): Answer {
         { text: "E2E-TEXT-1" },
       ];
     }
+    if (input.includes("E2E-HOUSE-IMAGE")) {
+      const path = /"path":"([^"]+\/house\/files\/[^"]+)"/.exec(input)?.[1];
+      return path ? [
+        { calls: [{ name: "reply", args: { text: "E2E-HOUSE-REPLY", expression: "happy", to: ["neighbor"], images: [path] } }] },
+        { text: "Sent the house image." },
+      ] : [{ text: "The house image is missing." }];
+    }
     if (input.includes("E2E-A2A-ASK")) return [{ calls: [replyToAgent(input, "input-required", "E2E-A2A-QUESTION")] }, { text: "Asked." }];
     if (input.includes("E2E-A2A-ANSWER")) {
       const user = messages.findLast((message) => message.role === "user");

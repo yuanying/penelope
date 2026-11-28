@@ -203,10 +203,10 @@ X 検索を使わない場合は、`X_SEARCH_*` の環境変数、コネクタ�
 
 ## 家を有効にする
 
-見本は既定で家に接続しない。家の API、receivers の `house` プラグイン、sandbox の `house` CLI を含む同じ版の image を使う。家は別に用意し、[家の設定](../../docs/house.md#設定)の `agents` と gated の許可にこの Pod の ServiceAccount を載せる。gated では `GET /v1/agent/house`、`POST /v1/agent/rooms/<room-id>/enter`、`POST /v1/agent/rooms/<room-id>/say`、`DELETE /v1/agent/room`、`POST /v1/agent/sync` を許可の対象にする。
+見本は既定で家に接続しない。家、receivers、sandbox の同じ版の image を使う。家は別に用意し、[家の設定](../../docs/house.md#設定)の `agents` と gated の許可にこの Pod の ServiceAccount を載せる。出かけているときに `reply` を届ける相手は、家の `owner_login` で設定する。gated では `GET /v1/agent/house`、`POST /v1/agent/rooms/<room-id>/enter`、`DELETE /v1/agent/room`、`POST /v1/agent/reply`、`POST /v1/agent/sync`、`GET /v1/agent/images/<image-id>` を許可の対象にする。
 
 1. [`house/statefulset.yaml`](example/house/statefulset.yaml) を `kustomization.yaml` の `patches` に加える。`audience` は gated の `--serviceaccount-audience` に合わせる。token の mount は receivers と Sentinel だけに置く。
-2. [`house/receivers-entry.json`](example/house/receivers-entry.json) の項目を `receivers/config.json` の `plugins` に足す。`url` と `owner_id` は配置の値に替える。`owner_id` は家での住人 ID で、GitHub のログインやユーザー ID ではない。オーナーの住人 ID が無ければ省く。
+2. [`house/receivers-entry.json`](example/house/receivers-entry.json) の項目を `receivers/config.json` の `plugins` に足す。`url` は配置の値に替える。旧版のプラグインに `owner_id` を設定していた場合は削除する。
 3. `backend.env` の `PENELOPE_INLINE_SOURCES` に `house` を足す。有効化の `source` を変えた場合は、その値を足す。
 4. `sandbox/surrogates.env` で `HOUSE_URL` に家の HTTPS オリジン、`HOUSE_TOKEN` にサロゲートを設定する。`sentinel/sentinel.yaml` の `hosts` にそのホストを登録する。同じサロゲートを使い、鍵の出どころを projected token にする。
 

@@ -1,13 +1,11 @@
-// Image copies for A2A Task artifacts and legacy runner replies.
+// Image copies for A2A Task artifacts.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import type { DatabaseSync } from "node:sqlite";
 
-import { type AgentId, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImage } from "@penelope/contract";
+import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImage } from "@penelope/contract";
 
 import { imageTypeOf } from "./sources.ts";
-import { iso } from "./time.ts";
 
 /** An image a reply carries, checked: its name, its type from its first bytes, and its bytes. */
 export type CheckedImage = { name: string; mime_type: string; data: Uint8Array };
@@ -72,13 +70,8 @@ function padding(data: string): number {
 
 export class Assets {
   readonly dir: string;
-  private readonly db: DatabaseSync;
-  private readonly now: () => number;
-
-  constructor(db: DatabaseSync, dir: string, { now }: { now: () => number }) {
-    this.db = db;
+  constructor(dir: string) {
     this.dir = dir;
-    this.now = now;
   }
 
   /**
@@ -109,19 +102,6 @@ export class Assets {
     return stored;
   }
 
-  /**
-   * Records the written copies as the images of a line of the history, in
-   * their order: a reply, made by its agent, or one of the owner's messages,
-   * by none. Run in that line's transaction.
-   */
-  record(messageId: string, agent: AgentId | undefined, stored: readonly StoredImage[]): void {
-    const insert = this.db.prepare(
-      "INSERT INTO assets (id, kind, mime_type, size, name, file, agent, created_at, message_id, position) VALUES (?, 'image', ?, ?, ?, ?, ?, ?, ?, ?)",
-    );
-    const at = iso(this.now());
-    stored.forEach((image, position) => insert.run(image.id, image.mime_type, image.size, image.name, image.file, agent ?? null, at, messageId, position));
-  }
-
   /** Reads a stored file by its backend-generated basename, not by a sandbox path or a UI ID. */
   read(file: string): Buffer {
     return readFileSync(path.join(this.dir, file));
@@ -130,31 +110,5 @@ export class Assets {
   /** Removes the files of copies that were not recorded. */
   discard(stored: readonly StoredImage[]): void {
     for (const image of stored) removeQuietly(path.join(this.dir, image.file));
-  }
-
-  /** The images of each of the lines of the history, in their order; a line with none is not in the map. */
-  ofMessages(messageIds: readonly string[]): Map<string, ReplyImage[]> {
-    const found = new Map<string, ReplyImage[]>();
-    if (messageIds.length === 0) return found;
-    const rows = this.db
-      .prepare(
-        `SELECT message_id, id, mime_type, size, name FROM assets
-          WHERE message_id IN (${messageIds.map(() => "?").join(", ")}) ORDER BY message_id, position`,
-      )
-      .all(...messageIds) as Array<ReplyImage & { message_id: string }>;
-    for (const { message_id: messageId, id, mime_type, size, name } of rows) {
-      const list = found.get(messageId) ?? [];
-      list.push({ id, mime_type, size, name });
-      found.set(messageId, list);
-    }
-    return found;
-  }
-
-  /** Where the bytes of a copy are, with its type and size; undefined when there is no such copy. */
-  get(id: string): { file: string; mime_type: string; size: number } | undefined {
-    const row = this.db.prepare("SELECT file, mime_type, size FROM assets WHERE id = ?").get(id) as
-      | { file: string; mime_type: string; size: number }
-      | undefined;
-    return row === undefined ? undefined : { ...row, file: path.join(this.dir, row.file) };
   }
 }

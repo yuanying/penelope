@@ -15,8 +15,6 @@ import type {
   ErrorBody,
   Event,
   PollResponse,
-  ReplyRequest,
-  ReplyResponse,
   Schedule,
   ScheduleListResponse,
   ScheduleRequest,
@@ -128,14 +126,6 @@ export const self = {
   summary: "the child finished the review",
   payload: { result: "ok" },
 } satisfies SelfEventRequest;
-
-export const reply = {
-  agent: "main",
-  text: "done",
-  expression: "smile",
-  in_reply_to: 13,
-} satisfies ReplyRequest;
-export const replyCreated = { id: "r-1" } satisfies ReplyResponse;
 
 const at = "2026-11-14T09:01:02Z";
 export const activities = [

@@ -45,8 +45,8 @@ export class FakeBackend {
   private readonly schedules: Schedule[] = [];
   private waiters: (() => void)[] = [];
   private replies = 0;
-  /** When set, every reply is refused with a 400 and this error, as the backend refuses an image. */
   refuseReplies: string | undefined;
+  houseReplyResult: unknown;
   refuseMemoryRepairs = false;
   failRotationReports = 0;
   private readonly server: Server;
@@ -157,9 +157,13 @@ export class FakeBackend {
     }
     if (key === "POST /v1/sleep" && this.sleepResponse) return answer(200, this.sleepResponse);
     if (key === "POST /v1/mood") return answer(204);
-    if (key === "POST /v1/replies") {
+    if (key === "POST /v1/agent/reply") {
       if (this.refuseReplies !== undefined) return answer(400, { error: this.refuseReplies });
-      return answer(201, { id: `r-${++this.replies}` });
+      return answer(200, this.houseReplyResult ?? {
+        id: `r-${++this.replies}`,
+        destination: { kind: "dm", dm: { agent_id: "ivy", owner_id: "lee" } },
+        not_delivered: [],
+      });
     }
     if (key === "POST /v1/a2a/replies") {
       const { in_reply_to, state } = body as { in_reply_to: number; state: string };

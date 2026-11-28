@@ -13,7 +13,7 @@ type TurnLineBase = {
 
 type TurnEventBase = TurnLineBase & {
   kind?: never;
-  /** The backend's order; what `reply`'s `in_reply_to` takes. */
+  /** The backend's order. For A2A, this is the event number that `reply_to_agent` takes. */
   seq: number;
   delivery: Delivery;
   answer_via?: AnswerVia;

@@ -2,7 +2,7 @@
 # (e2e/README.md). `pod` holds the network namespace that the four containers
 # share, as a Pod's pause container does; `init` redirects the sandbox's
 # traffic in it before they start; `volumes` gives the volumes the owners a
-# Pod's fsGroup would. `outside` is the world outside the Pod, all fake.
+# Pod's fsGroup would. `outside` runs the fakes and terminates TLS for the house.
 #
 # Both `outside` and `pod` are on Docker's default bridge, with the addresses
 # Docker gives them; the test starts them first and writes what depends on
@@ -44,11 +44,25 @@ services:
       OUTSIDE_OWNER_GITHUB_ID: "4242"
       OUTSIDE_KUBE_TOKEN_FILE: /run/secrets/e2e/kube-token
       OUTSIDE_SENDER_TOKEN_FILE: /run/secrets/e2e/sender-token
+      OUTSIDE_HOUSE_SURROGATE: e2e-surrogate-house-0001
       OUTSIDE_STRANGER_TOKEN_FILE: /run/secrets/e2e/stranger-token
       OUTSIDE_SLACK_APP_TOKEN_FILE: /run/secrets/e2e/slack-app-token
       OUTSIDE_SLACK_BOT_TOKEN_FILE: /run/secrets/e2e/slack-bot-token
     volumes:
       - ./.run:/run/secrets/e2e:ro
+
+  house:
+    image: penelope-house:${PENELOPE_E2E_TAG:?}
+    network_mode: service:outside
+    environment:
+      PENELOPE_HOUSE_CONFIG_FILE: /etc/penelope/house.json
+      NODE_EXTRA_CA_CERTS: /run/secrets/e2e/outside-ca.crt
+    volumes:
+      - *resolv
+      - ./config/house.json:/etc/penelope/house.json:ro
+      - ./.run/kube-token:/run/secrets/e2e/kube-token:ro
+      - ./.run/github-client-secret:/run/secrets/e2e/github-client-secret:ro
+      - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
 
   # The Pod's network namespace.
   pod:
@@ -100,6 +114,7 @@ services:
       - ./.run/sentinel-ca.key:/run/secrets/e2e/sentinel-ca.key:ro
       - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
       - ./.run/model-key:/run/secrets/e2e/model-key:ro
+      - ./.run/sender-token:/run/secrets/e2e/sender-token:ro
       - ./.run/backend-token:/run/secrets/e2e/backend-token:ro
       - ./.run/slack-bot-token:/run/secrets/e2e/slack-bot-token:ro
       - sandbox-socket:/run/penelope/sandbox
@@ -128,7 +143,7 @@ services:
       PENELOPE_OWNER_GITHUB_ID: "4242"
       PENELOPE_TIME_ZONE: UTC
       # Slack's events are inline, and the runner draws them (ADR-0029).
-      PENELOPE_INLINE_SOURCES: job,slack,a2a
+      PENELOPE_INLINE_SOURCES: job,slack,a2a,house
       # Off until the heartbeat's scenario makes the backend again with it, in seconds.
       PENELOPE_HEARTBEAT_SECONDS: ${PENELOPE_E2E_HEARTBEAT_SECONDS:-}
       PENELOPE_AVATAR: penelope
@@ -170,6 +185,8 @@ services:
     environment:
       PENELOPE_BACKEND_URL: https://backend.example.com
       PENELOPE_BACKEND_TOKEN: e2e-surrogate-backend-0001
+      HOUSE_URL: https://house.example.com
+      HOUSE_TOKEN: e2e-surrogate-house-0001
       PENELOPE_NAME: Penelope
       PENELOPE_ROLE: the end-to-end test's agent
       PENELOPE_OWNER: the e2e owner
@@ -209,6 +226,7 @@ services:
       - *resolv
       - ./config/receivers.json:/etc/penelope/receivers/config.json:ro
       - ./.run/alertmanager-token:/run/secrets/e2e/alertmanager-token:ro
+      - ./.run/sender-token:/run/secrets/e2e/sender-token:ro
       - ./.run/github-webhook-secret:/run/secrets/e2e/github-webhook-secret:ro
       - ./.run/slack-app-token:/run/secrets/e2e/slack-app-token:ro
       - ./.run/slack-bot-token:/run/secrets/e2e/slack-bot-token:ro

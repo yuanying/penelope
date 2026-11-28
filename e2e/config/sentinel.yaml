@@ -27,6 +27,12 @@ hosts:
       - place: bearer
         surrogate: e2e-surrogate-backend-0001
         source: { file: /run/secrets/e2e/backend-token }
+  - name: house.example.com
+    upstream_ca: /run/secrets/e2e/outside-ca.crt
+    credentials:
+      - place: bearer
+        surrogate: e2e-surrogate-house-0001
+        source: { file: /run/secrets/e2e/sender-token }
   # Slack's Web API, for slackctl post (ADR-0033). Its upload URL is
   # opened only to be sent to the fake, and has no credential: slackctl
   # sends it no token, and a surrogate there is refused.

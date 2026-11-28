@@ -1,6 +1,14 @@
 {
   "plugins": [
     {
+      "name": "house",
+      "plugin": "house",
+      "settings": {
+        "url": "https://house.example.com",
+        "token_file": "/run/secrets/e2e/sender-token"
+      }
+    },
+    {
       "name": "fraction",
       "plugin": "alertmanager",
       "settings": {

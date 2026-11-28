@@ -15,6 +15,7 @@ import { after, before, describe, it } from "node:test";
 import type { RecordDayResponse, RecordNight, RecordSubAgentResponse, RecordTurn, RecordTurnResponse, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 
 import { E2E_PNG } from "../outside/model.ts";
+import { houseRoundTrip } from "./house.ts";
 import {
   a2aCall,
   Browser,
@@ -820,4 +821,6 @@ describe("the Pod end to end", () => {
     assert.ok(sent.system.includes("E2E-HANDOFF: the next session starts from here."), "handoff.md is in the new system prompt");
     assert.ok(!JSON.stringify(first!.messages).includes("E2E-TURN-1"), "the day's session is left behind");
   }));
+
+  it("answers a house resident with an image through the Sentinel", track(() => houseRoundTrip(browser)));
 });

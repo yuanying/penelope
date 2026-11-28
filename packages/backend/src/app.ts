@@ -67,8 +67,8 @@ export async function startBackend(
     timeZone: config.timeZone,
     redeliverMs: config.redeliverMs,
   });
-  const assets = new Assets(db, config.assetsDir, { now });
-  const conversation = new Conversation(db, { now, assets });
+  const assets = new Assets(config.assetsDir);
+  const conversation = new Conversation(db);
   const agents = new SubAgents(db, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
   const scheduler = new Scheduler(schedules, queue, { now, log });

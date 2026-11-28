@@ -21,7 +21,7 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 - 同じ UID で動くエージェントを、backend と UI が見分けるための欄である。確かめはしない（sandbox の中の名乗り）。
 
 - サブエージェントは出来事を取らない。本体からサブエージェントへの頼みは runner の中で直接渡り、backend はサブエージェントの列を持たない（[ADR-0022](adr/0022-sub-agents-run-by-the-runner-and-talk-only-to-the-main-agent.md)）。`agent` が `main` でない `GET /v1/events` は `400` で断る。
-- サブエージェントには返事・A2A の返事・眠り・気分・予約・裏の仕事の道具が無い。`agent` が `main` でない `POST /v1/replies`・`POST /v1/a2a/replies`・`POST /v1/sleep`・`POST /v1/mood`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
+- サブエージェントには返事・A2A の返事・眠り・気分・予約・裏の仕事の道具が無い。`agent` が `main` でない場合、`house_reply` の途中経過は `400` で断る。同じく `agent` が `main` でない `POST /v1/a2a/replies`・`POST /v1/sleep`・`POST /v1/mood`・`POST /v1/job-events`・予約の口（`GET`・`POST`・`DELETE`）は `400` で断る。取り違えを防ぐためで、守りではない。
 
 ## 口の一覧
 
@@ -35,7 +35,6 @@ sandbox の中の runner と道具が backend を呼ぶ口を決める。方針�
 | `POST /v1/events/ack` | 済んだ出来事を知らせる |
 | `POST /v1/self-events` | 自分宛ての出来事を入れる |
 | `POST /v1/job-events` | 裏の仕事の終わりを入れる |
-| `POST /v1/replies` | 旧 runner との互換用。オーナーへの返事と添付画像を保存する |
 | `POST /v1/a2a/replies` | A2A の Task に返す |
 | `POST /v1/activity` | 途中経過 |
 | `POST /v1/turns/end` | ターンの終わり |
@@ -202,29 +201,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 
 ## 返事
 
-`POST /v1/replies` は、runner の `reply` が家に直接届けるようになるまで（U2）の互換用。個人のページには配信しない。
-
-- body は `{agent, text, expression?, in_reply_to?, turn_id?, images?}`。
-  - `turn_id`: 返事を出したターンの ID（「途中経過」の `turn_id`）。backend は返事をそのターンに結び付け、活動の記録の返事の数に使う。無ければ、backend はそのとき本体の進んでいるターン（記録に始まりがあって終わりの無いもの）に結び付け、それも無ければ結び付けない。空の文字列は `400`。
-  - `expression`: 表情。指定された値は返事と一緒に保存する。
-  - `in_reply_to`: 答えている出来事の `seq`。ターンの `<events>` の行の `seq` である（`batch` のまとめなら `seqs` の 1 つ）。
-  - `images`: 返事に添える画像の並び（[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md)）。1 件は `{name, data}`（型は `ReplyImageUpload`）で、`name` はファイルの名前（ディレクトリを除く、1〜255 文字）、`data` はファイルの中身の base64（padding 付き）。
-- 応答は `201` と `{id}`。backend は互換用の履歴に保存する。
-
-### 返事の画像
-
-- 上限は contract の `src/images.ts` が正で、runner と backend が同じものを使う。1 回 4 枚（`REPLY_IMAGES_MAX`）、1 枚 10 MiB（`REPLY_IMAGE_MAX_BYTES`、10,485,760 バイト）、種類は PNG・JPEG・GIF・WebP（`REPLY_IMAGE_TYPES`）。
-- 種類は中身の先頭の bytes で決める（取り込み口の添付と同じ見分け方、[events.md](events.md)）。名前の拡張子と送り手の言い分は見ない。
-- 1 枚でも合わなければ、文も含めて何も残さず `400` で断る。`error` は `not sent: ` に続けて、何番目のどのファイルが、なぜ合わないかを言う（枚数が多い、名前が無い、base64 でない、大きすぎる、PNG・JPEG・GIF・WebP でない）。
-- backend は確かめに通った画像を写しの置き場に書いてから、返事と写しの記録を 1 つの transaction で残す（[backend.md](backend.md) の「作ったものの写し」）。書けなければ、書きかけを消し、返事も残さずに `500`（`not sent: the images could not be kept`）で答える。
-- 画像の無い返事や `images` が空の返事は、画像の写しを作らない。
-
-### `reply` のツール（runner）
-
-- `images` に、sandbox の中の画像のファイルの場所を並べて渡す。相対の場所は HOME から引く。引数と説明の文は `packages/runner/src/tools.ts` が正である。
-- runner はファイルを読んで base64 にし、`name` をファイルの名前にして送る。backend は sandbox のファイルを読まない。
-- runner は、枚数が上限より多い、ファイルが無い・読めない・普通のファイルでない、大きさが上限より大きい（読む前に `stat` で見る）ときは、送らずにツールのエラーにする。種類は確かめず、backend に任せる。backend の断りは、その `error` をそのままツールのエラーにする。どちらも `Not sent` / `not sent` で始まり、返事は届いていない。
-- 畳んだターンにも `reply` の呼び出しは丸ごと残る（[ADR-0015](adr/0015-fold-ended-turns-before-they-are-sent.md)）。残るのはファイルの場所だけで、画像の中身はモデルへの入力に入らない。
+`reply` は backend ではなく [家の API](house.md#runner-の-reply) に送る。backend には、家が返した発言 ID とターン ID だけを途中経過として知らせる。
 
 ## A2A の Task に返す
 
@@ -253,6 +230,7 @@ Next: job_start {"command":"ask-agent 'helper' '--task' 'task-123' '<answer>'"}
 | `tool_call` | `call_id`・`name`・`arguments`（任意の JSON） |
 | `tool_result` | `call_id`・`is_error`・`output`（文字列） |
 | `message` | `text`（返答の区切り） |
+| `house_reply` | `speech_id`（家が受け取った発言の ID。空白だけでない 128 文字以下） |
 | `turn_end` | なし |
 
 - backend は 1 件ずつ活動の記録に残す。
@@ -420,4 +398,4 @@ runner は本体にだけ `sleep` ツールを渡す。ツールは受け付け�
 
 ## 状態コード
 
-成功で body の無いもの（ack・途中経過・ターンの終わり・記憶の参照の修正コミット・サブエージェントの状態・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB。返事は画像を運ぶので 64 MiB で、4 枚の 10 MiB の base64 が収まる。A2A の返事は 32 MiB）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。
+成功で body の無いもの（ack・途中経過・ターンの終わり・記憶の参照の修正コミット・サブエージェントの状態・切り替えの知らせ）は `204`、形が違えば `400`、認証が通らなければ `401`、口の無い道は `404`、道はあるが method が違えば `405`、body が上限（16 MiB。A2A の返事は 32 MiB）より大きければ `413`。backend が本物の token を設定されていなければ、すべての要求を `401` で断る。

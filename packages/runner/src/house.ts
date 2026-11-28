@@ -1,31 +1,27 @@
-import type { HouseActor, HouseEnterResult, HouseResident, HouseSpeech, HouseSpeechResult, HouseView } from "@penelope/contract";
+import type { HouseActor, HouseEnterResult, HouseReply, HouseReplyResult, HouseResident, HouseView } from "@penelope/contract";
 
 const USAGE = `Usage:
   house status
   house enter <room-id>
-  house leave
-  house say <room-id> <text> [--to <resident-id> ...]`;
+  house leave`;
 const ROOM_ID = /^[a-z0-9_-][a-z0-9._-]{0,127}$/;
-const RESIDENT_ID = /^[a-z0-9_-][a-z0-9._-]{0,63}$/;
 
-type Command = { kind: "status" } | { kind: "leave" } | { kind: "enter"; room: string } | { kind: "say"; room: string; speech: HouseSpeech };
+type Command = { kind: "status" } | { kind: "leave" } | { kind: "enter"; room: string };
 
-function commandOf([kind, room, text, ...flags]: readonly string[]): Command | string {
+function commandOf([kind, room, extra]: readonly string[]): Command | string {
   if (kind === "status") return room === undefined ? { kind } : "status takes no arguments";
   if (kind === "leave") return room === undefined ? { kind } : "leave takes no arguments";
-  if (kind !== "enter" && kind !== "say") return "expected status, enter, leave, or say; see house --help";
+  if (kind !== "enter") return "expected status, enter, or leave; see house --help";
   if (!room || !ROOM_ID.test(room)) return "use a room ID shown by house status, not a display name";
-  if (kind === "enter") return text === undefined ? { kind, room } : "enter takes only a room ID";
-  if (!text?.trim() || text.length > 4_000) return "speech text must be non-blank and at most 4,000 characters";
-  const to: string[] = [];
-  for (let i = 0; i < flags.length; i += 2) {
-    const id = flags[i + 1];
-    if (flags[i] !== "--to") return "only --to <resident-id> may follow the speech text";
-    if (!id || !RESIDENT_ID.test(id)) return "--to takes a resident ID shown by house status, not a display name";
-    to.push(id);
-  }
-  if (to.length > 50) return "say takes at most 50 --to arguments";
-  return { kind, room, speech: to.length ? { text, to } : { text } };
+  return extra === undefined ? { kind, room } : "enter takes only a room ID";
+}
+
+export type HouseConnection = { origin: URL; token: string };
+
+export function houseConnection(env: Readonly<Record<string, string | undefined>>): HouseConnection | undefined {
+  const origin = originOf(env.HOUSE_URL);
+  const token = env.HOUSE_TOKEN;
+  if (origin && token && /^[a-zA-Z0-9._~+/-]+=*$/.test(token)) return { origin, token };
 }
 
 function originOf(raw: string | undefined): URL | undefined {
@@ -61,12 +57,56 @@ function describe({ name, you, rooms, away }: HouseView): string {
 }
 
 function refusal(status: number, kind: Command["kind"]): string {
-  if (status === 400 && kind === "say") return "the house rejected the speech text or a --to resident ID";
   if (status === 401 || status === 403) return "caller authentication was rejected";
   if (status === 409 && kind === "enter") return "the room is full";
-  if (status === 409 && kind === "say") return "you are not in that room";
-  if (status === 404 && (kind === "enter" || kind === "say")) return "the room was not found";
+  if (status === 404 && kind === "enter") return "the room was not found";
   return "the house did not accept the request";
+}
+
+export async function postHouseReply(connection: HouseConnection, speech: HouseReply, signal?: AbortSignal): Promise<HouseReplyResult> {
+  const timeout = AbortSignal.timeout(10_000);
+  const unconfirmed = "the speech may already have been recorded";
+  const response = await fetch(new URL("/v1/agent/reply", connection.origin), {
+    method: "POST",
+    headers: { authorization: `Bearer ${connection.token}`, "content-type": "application/json" },
+    body: JSON.stringify(speech),
+    redirect: "manual",
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+  }).catch(() => { throw new Error(`Could not confirm the reply with the house; ${unconfirmed}.`); });
+
+  if (response.status !== 200) {
+    if (response.status >= 500 || response.ok) {
+      await response.body?.cancel().catch(() => {});
+      throw new Error(`Reply not confirmed (house HTTP ${response.status}); ${unconfirmed}.`);
+    }
+    const body = await response.json().catch(() => undefined) as { error?: unknown } | undefined;
+    const reason = typeof body?.error === "string" ? `: ${line(body.error).slice(0, 240)}` : "";
+    throw new Error(`Not sent (house HTTP ${response.status})${reason}.`);
+  }
+
+  const result = await response.json().catch(() => undefined) as HouseReplyResult | undefined;
+  const destination = result?.destination;
+  const validDestination = destination?.kind === "room"
+    ? typeof destination.room?.id === "string" && typeof destination.room?.name === "string" &&
+      Array.isArray(result?.absent_to) && result.absent_to.every((id) => typeof id === "string") && result.ignored_to === undefined
+    : destination?.kind === "dm" && typeof destination.dm?.owner_id === "string" && typeof destination.dm?.agent_id === "string" &&
+      result?.absent_to === undefined;
+  if (!result || typeof result.id !== "string" || !result.id || !validDestination ||
+    !Array.isArray(result.not_delivered) || !result.not_delivered.every((actor) => typeof actor?.id === "string" && typeof actor.name === "string")) {
+    throw new Error(`The house returned an invalid reply confirmation; ${unconfirmed}.`);
+  }
+  return result;
+}
+
+export function describeHouseReply({ id, destination, absent_to, ignored_to, not_delivered }: HouseReplyResult): string {
+  const where = destination.kind === "room" ? `${line(destination.room.name)} (${line(destination.room.id)})` :
+    `your owner (${line(destination.dm.owner_id)}) in a direct conversation`;
+  return [
+    `Sent to ${where}, id ${line(id)}.`,
+    ...(absent_to?.length ? [`Not in the room: ${absent_to.map(line).join(", ")}`] : []),
+    ...(ignored_to === undefined ? [] : [`Ignored to: ${JSON.stringify(ignored_to)}`]),
+    ...(not_delivered.length ? [`Not delivered (not awake): ${not_delivered.map(residentLabel).join(", ")}`] : []),
+  ].join("\n");
 }
 
 const success = (text: string) => ({ code: 0, stdout: `${text}\n`, stderr: "" });
@@ -76,23 +116,18 @@ export async function runHouse(args: readonly string[], env: Readonly<Record<str
   if (args.length === 1 && args[0] === "--help") return success(USAGE);
   const command = commandOf(args);
   if (typeof command === "string") return fail(command, 2);
-  const noConfirmation = (reason: string) => fail(command.kind === "say" ? `${reason}; the speech may already have been recorded` : reason);
-  const origin = originOf(env.HOUSE_URL);
-  const token = env.HOUSE_TOKEN;
-  if (!origin || !token || !/^[a-zA-Z0-9._~+/-]+=*$/.test(token)) return fail("set HOUSE_URL and HOUSE_TOKEN in the deployment", 2);
-
-  const path = command.kind === "status" ? "house" : command.kind === "leave" ? "room" :
-    `rooms/${command.room}/${command.kind}`;
+  const connection = houseConnection(env);
+  if (!connection) return fail("set HOUSE_URL and HOUSE_TOKEN in the deployment", 2);
+  const { origin, token } = connection;
+  const path = command.kind === "status" ? "house" : command.kind === "leave" ? "room" : `rooms/${command.room}/enter`;
   const method = command.kind === "status" ? "GET" : command.kind === "leave" ? "DELETE" : "POST";
-  const headers = new Headers({ authorization: `Bearer ${token}` });
-  const body = command.kind === "say" ? JSON.stringify(command.speech) : undefined;
-  if (body !== undefined) headers.set("content-type", "application/json");
+  const headers = { authorization: `Bearer ${token}` };
   const signal = AbortSignal.timeout(10_000);
   let response: Response;
   try {
-    response = await request(new URL(`/v1/agent/${path}`, origin), { method, headers, ...(body !== undefined ? { body } : {}), redirect: "manual", signal });
+    response = await request(new URL(`/v1/agent/${path}`, origin), { method, headers, redirect: "manual", signal });
   } catch {
-    return noConfirmation(signal.aborted ? "request timed out" : "could not confirm the request with the house");
+    return fail(signal.aborted ? "request timed out" : "could not confirm the request with the house");
   }
   if (response.status !== (command.kind === "leave" ? 204 : 200)) {
     await response.body?.cancel().catch(() => {});
@@ -106,15 +141,9 @@ export async function runHouse(args: readonly string[], env: Readonly<Record<str
         return success([`Entered ${command.room}. Occupants:`, ...residents(occupants)].join("\n"));
       }
       case "leave": return success("You are outside the rooms.");
-      case "say": {
-        const { id, not_delivered } = await response.json() as HouseSpeechResult;
-        if (typeof id !== "string" || id === "" || !Array.isArray(not_delivered)) return noConfirmation("the house returned an invalid response");
-        const missed = not_delivered.map(residentLabel);
-        return success(`Spoke in ${command.room}.${missed.length ? `\nNot delivered (not awake): ${missed.join(", ")}` : ""}`);
-      }
     }
   } catch {
-    return noConfirmation(signal.aborted ? "request timed out" : "the house returned an invalid response");
+    return fail(signal.aborted ? "request timed out" : "the house returned an invalid response");
   }
 }
 

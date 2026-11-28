@@ -26,7 +26,7 @@ function setup(t: { after: (fn: () => void) => void }) {
     timeZone: "UTC",
     redeliverMs: 300_000,
   });
-  const conversation = new Conversation(db, { now: clock.now });
+  const conversation = new Conversation(db);
   const record = new ActivityRecord(db, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000, owner: 1, log: () => {} });
   const event = (source: string, id: string, summary: string) =>
     queue.accept({ source, id, occurred_at: new Date(clock.now()).toISOString(), summary, payload: { text: summary } }, { builtin: true }).seq;
@@ -115,14 +115,6 @@ describe("the activity record", () => {
       assert.equal(expired, false);
       assert.deepEqual(flow[1], { kind: "tool_result", at: "2026-11-14T10:00:02.000Z", turn_id: "t-1", call_id: "c-1", is_error: false, lines: 3, bytes: 6 });
       assert.equal(record.result("t-1", "c-1"), "a\nb\né");
-    });
-
-    it("ties a reply that names no turn to the main agent's turn under way", (t) => {
-      const { record } = setup(t);
-      record.activities("main", [{ kind: "turn_start", at: "2026-11-14T10:00:00.000Z", turn_id: "t-1" }]);
-      assert.equal(record.replyTurn(undefined), "t-1");
-      record.activities("main", [{ kind: "turn_end", at: "2026-11-14T10:00:05.000Z", turn_id: "t-1" }]);
-      assert.equal(record.replyTurn(undefined), undefined);
     });
   });
 

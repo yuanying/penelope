@@ -30,7 +30,7 @@ function setup(t: { after: (fn: () => void) => void }, limits = { deadlineMs: 24
     redeliverMs: 5 * MINUTE,
   });
   const assetsDir = path.join(dir, "assets");
-  const assets = new Assets(db, assetsDir, { now: clock.now });
+  const assets = new Assets(assetsDir);
   const inbox = new Inbox(db, queue, { assets, now: clock.now, limits });
   return { sourcesDir, clock, queue, inbox, db, assetsDir };
 }

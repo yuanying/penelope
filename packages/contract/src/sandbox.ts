@@ -130,20 +130,6 @@ export type SleepResponse = { wake_at: string; duration_seconds: number; clamped
 
 export type MoodRequest = FromAgent & { mood: string };
 
-/** `POST /v1/replies`: a reply to the owner. */
-export type ReplyRequest = FromAgent & {
-  text: string;
-  /** The turn it is sent in (ADR-0038). Without it, the backend takes the main agent's turn under way. */
-  turn_id?: string;
-  /** The face to show: the Web UI puts the latest one beside the avatar (ADR-0016). */
-  expression?: string;
-  /** The `seq` of the event it answers. */
-  in_reply_to?: number;
-  /** Images to show with it, read from files in the sandbox: at most REPLY_IMAGES_MAX (ADR-0032). */
-  images?: ReplyImageUpload[];
-};
-export type ReplyResponse = { id: string };
-
 /** One image of a reply, as the runner read it from a file in the sandbox. */
 export type ReplyImageUpload = {
   /** The file's name, without its directory. */
@@ -161,6 +147,7 @@ export type Activity =
   | (ActivityBase & { kind: "tool_call"; call_id: string; name: string; arguments: unknown })
   | (ActivityBase & { kind: "tool_result"; call_id: string; is_error: boolean; output: string })
   | (ActivityBase & { kind: "message"; text: string })
+  | (ActivityBase & { kind: "house_reply"; speech_id: string })
   | (ActivityBase & { kind: "turn_end" });
 
 /** `POST /v1/activity` */

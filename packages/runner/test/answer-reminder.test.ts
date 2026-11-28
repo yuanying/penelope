@@ -121,13 +121,13 @@ test("text first produced by the fold request does not trigger a reminder", asyn
 test("a notice can call the usual tools, and its failure is the turn's failure", async () => {
   const { fake, start, logs } = await world();
   await start((call) => {
-    if (reminder(call.lastText)) return { calls: [{ tool: "reply", args: { text: "sent", in_reply_to: 1 } }] };
+    if (reminder(call.lastText)) return { calls: [{ tool: "reply", args: { text: "sent" } }] };
     if (call.lastRole === "toolResult") return { error: "Provider unavailable" };
     return { text: "Draft" };
   });
   fake.push({ ...ui(1, "hello"), answer_via });
   await until(() => acked(fake).includes(1));
-  assert.equal(fake.sent("POST", "/v1/replies").length, 1);
+  assert.equal(fake.sent("POST", "/v1/agent/reply").length, 1);
   assert.equal((fake.sent("POST", "/v1/turns/end") as TurnEndRequest[])[0]?.result, "failed");
   assert.deepEqual(logs.filter((line) => line.startsWith("answer reminder: ")), [
     'answer reminder: {"events":[{"seq":1,"source":"ui"}],"attempted":true,"tool_calls":1,"result":"failed"}',

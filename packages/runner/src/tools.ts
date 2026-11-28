@@ -1,18 +1,14 @@
-// The tools that only the main agent has: those that reach the backend (the
-// reply to the owner, the answer to an agent that asked over A2A, her
-// schedules and events to herself), each only calling the backend's API
-// (docs/sandbox-api.md), those that start and talk to her sub-agents
-// (ADR-0022), and those of her background jobs (ADR-0030). Their
-// descriptions state what they do (ADR-0008).
+// The main agent's tools: house replies, the backend's API, sub-agents and background jobs.
 
 import { readFile, stat } from "node:fs/promises";
 import { basename, resolve } from "node:path";
 
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
-import { A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, MOOD_MAX_LENGTH, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
+import { A2A_IMAGE_MAX_BYTES, A2A_IMAGES_MAX, HOUSE_EXPRESSIONS, HOUSE_REPLY_TEXT_MAX, MOOD_MAX_LENGTH, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImageUpload } from "@penelope/contract";
 import { Type } from "typebox";
 
 import type { Backend } from "./backend.ts";
+import { describeHouseReply, type HouseConnection, postHouseReply } from "./house.ts";
 import type { Jobs } from "./jobs.ts";
 import type { SubAgents } from "./subagents.ts";
 
@@ -22,8 +18,7 @@ function text(value: string) {
 
 /**
  * The files of a reply's images, read: each a regular file of at most the
- * limit, relative paths from HOME. The backend tells their kind from their
- * bytes; the runner only spares reading and sending what cannot pass.
+ * limit, relative paths from HOME. The receiving service checks their type from their bytes.
  */
 async function readImages(paths: readonly string[], home: string, maxImages = REPLY_IMAGES_MAX, maxBytes = REPLY_IMAGE_MAX_BYTES): Promise<ReplyImageUpload[]> {
   if (paths.length > maxImages) throw new Error(`Not sent: a reply carries at most ${maxImages} images, not ${paths.length}.`);
@@ -43,40 +38,46 @@ async function readImages(paths: readonly string[], home: string, maxImages = RE
   return images;
 }
 
-/** `turn` names the turn under way, for a reply to carry (ADR-0038). */
-export function backendTools(backend: Backend, { home, turn }: { home: string; turn?: () => string | undefined }): ToolDefinition[] {
+export function backendTools(backend: Backend, { home, house, recordHouseReply }: {
+  home: string;
+  house?: HouseConnection;
+  recordHouseReply?: (id: string) => void;
+}): ToolDefinition[] {
   // Folding keeps direct replies from the transcript. Pi records nested calls only inside codemode.
   const reply = defineTool({
     name: "reply",
     exposure: "model-only",
     label: "Reply",
     description:
-      "Send a message to your owner. It is the only way your words reach them; the text of your turn is not shown to anyone.",
+      "Send a message to your current room in the house, or directly to your owner when you are away. The house decides where it goes when it is sent. Your turn text is not sent.",
     parameters: Type.Object({
-      text: Type.String({ description: "The message." }),
-      expression: Type.Optional(
-        Type.String({
-          description:
-            "The expression of your face as you say it. The owner's screen has a face for each of: neutral, happy, laughing, surprised, thinking, worried, sad, sleepy, angry.",
-        }),
-      ),
-      in_reply_to: Type.Optional(Type.Integer({ description: "The seq of the event this answers." })),
+      text: Type.Optional(Type.String({
+        maxLength: HOUSE_REPLY_TEXT_MAX,
+        description: `The message, at most ${HOUSE_REPLY_TEXT_MAX} characters. It can be blank or omitted when you attach an image.`,
+      })),
+      expression: Type.Optional(Type.Enum(HOUSE_EXPRESSIONS, { description: "The expression shown with the message." })),
+      to: Type.Optional(Type.Unknown({
+        description: "In a room, a list of up to 50 resident IDs to address. Others in the room can still hear the message. When you are away, the house ignores this value.",
+      })),
       images: Type.Optional(
         Type.Array(Type.String(), {
           description: `Paths of image files to show with the message, relative to your home or absolute: PNG, JPEG, GIF or WebP, at most ${REPLY_IMAGES_MAX}, each at most ${REPLY_IMAGE_MAX_BYTES} bytes. The owner sees copies taken when it is sent; changing a file later does not change them. If one of them cannot be sent, nothing of the message is sent, and the error says why.`,
         }),
       ),
     }),
-    async execute(_id, params) {
-      const { images: paths, ...rest } = params;
-      const images = paths === undefined || paths.length === 0 ? undefined : await readImages(paths, home);
-      const turnId = turn?.();
-      const { id } = await backend.reply({
-        ...rest,
-        ...(turnId === undefined ? {} : { turn_id: turnId }),
+    async execute(_id, { text: message = "", expression, to, images: paths }, signal) {
+      if (!house) throw new Error("Not sent: the house is not configured for this deployment.");
+      if (message.length > HOUSE_REPLY_TEXT_MAX) throw new Error(`Not sent: the text can have at most ${HOUSE_REPLY_TEXT_MAX} characters.`);
+      if (!message.trim() && !paths?.length) throw new Error("Not sent: a reply needs text or an image.");
+      const images = paths?.length ? await readImages(paths, home) : undefined;
+      const result = await postHouseReply(house, {
+        text: message,
+        ...(expression === undefined ? {} : { expression }),
+        ...(to === undefined ? {} : { to }),
         ...(images === undefined ? {} : { images }),
-      });
-      return text(`Sent (id ${id}).`);
+      }, signal);
+      recordHouseReply?.(result.id);
+      return text(describeHouseReply(result));
     },
   });
 

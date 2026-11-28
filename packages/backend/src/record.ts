@@ -115,7 +115,9 @@ type SubAgentRow = { agent: string; purpose: string; closed: number; started_at:
 const TURN_SELECT = `
   SELECT t.rowid, t.turn_id, t.agent, t.started_at, t.ended_at, t.result, t.reason, t.recorded_at, t.triggers,
          t.trigger_count, t.tools, t.stage, t.at, n.row AS night_row,
-         (SELECT count(*) FROM history h WHERE h.turn_id = t.turn_id) AS replies
+         (SELECT count(*) FROM history h WHERE h.turn_id = t.turn_id) +
+         (SELECT count(DISTINCT json_extract(a.body, '$.speech_id')) FROM activities a
+            WHERE a.turn_id = t.turn_id AND a.agent = t.agent AND a.kind = 'house_reply') AS replies
     FROM turns t LEFT JOIN session_rotations n ON n.seq = t.night_seq`;
 
 const SUB_AGENT_SELECT = `
@@ -287,15 +289,6 @@ export class ActivityRecord {
       );
   }
 
-  /** The turn a reply belongs to: the one the runner names, else the main agent's turn under way. */
-  replyTurn(turnId: string | undefined): string | undefined {
-    if (turnId !== undefined) return turnId;
-    const row = this.db.prepare("SELECT turn_id FROM turns WHERE agent = 'main' AND ended_at IS NULL AND result IS NULL ORDER BY at DESC LIMIT 1").get() as
-      | { turn_id: string }
-      | undefined;
-    return row?.turn_id;
-  }
-
   /** The newest failures learned of after the previous heartbeat, apart from the night's work. */
   heartbeatFailures(since: string): HeartbeatPendingList<HeartbeatFailure> | undefined {
     const rows = this.db.prepare(
@@ -344,8 +337,13 @@ export class ActivityRecord {
     if (row === undefined) throw new RecordQueryError(404, "no such turn");
     const blocks = this.db.prepare("SELECT body FROM activities WHERE turn_id = ? AND agent = ? ORDER BY row").all(turnId, row.agent) as Array<{ body: string }>;
     const flow: RecordFlowItem[] = [];
+    const houseReplyIds = new Set<string>();
     for (const { body } of blocks) {
       const activity = JSON.parse(body) as Activity;
+      if (activity.kind === "house_reply") {
+        houseReplyIds.add(activity.speech_id);
+        continue;
+      }
       if (activity.kind === "turn_start" || activity.kind === "turn_end") continue;
       if (activity.kind === "tool_result") {
         const { output, ...rest } = activity;
@@ -355,7 +353,7 @@ export class ActivityRecord {
       }
     }
     const expired = flow.length === 0 && Date.parse(row.at) < this.now() - RECORD_FLOW_DAYS * DAY_MS;
-    return { turn: turnOf(row), flow, expired };
+    return { turn: turnOf(row), flow, expired, ...(houseReplyIds.size ? { house_reply_ids: [...houseReplyIds] } : {}) };
   }
 
   /** The whole output of one tool's result in a turn. */
@@ -446,7 +444,8 @@ export class ActivityRecord {
     const flow = iso(this.now() - RECORD_FLOW_DAYS * DAY_MS);
     const summary = iso(this.now() - RECORD_SUMMARY_DAYS * DAY_MS);
     const steps: Array<[string, string | number]> = [
-      ["DELETE FROM activities WHERE row IN (SELECT row FROM activities WHERE at < ? LIMIT ?)", flow],
+      ["DELETE FROM activities WHERE row IN (SELECT row FROM activities WHERE at < ? AND kind <> 'house_reply' LIMIT ?)", flow],
+      ["DELETE FROM activities WHERE row IN (SELECT row FROM activities WHERE at < ? AND kind = 'house_reply' LIMIT ?)", summary],
       ["DELETE FROM turns WHERE rowid IN (SELECT rowid FROM turns WHERE at < ? LIMIT ?)", summary],
       ["DELETE FROM session_rotations WHERE row IN (SELECT row FROM session_rotations WHERE at < ? LIMIT ?)", summary],
       [`DELETE FROM sleeps WHERE control_seq IN (

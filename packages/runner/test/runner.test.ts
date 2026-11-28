@@ -50,7 +50,7 @@ function events(input: string): (TurnLine & Record<string, unknown>)[] {
 
 /** Answers the owner with a reply, then stops. */
 const replying: Script = (call) =>
-  call.lastRole === "user" ? { thinking: "they said hello", calls: [{ tool: "reply", args: { text: "hi", in_reply_to: 1 } }] } : { text: "replied" };
+  call.lastRole === "user" ? { thinking: "they said hello", calls: [{ tool: "reply", args: { text: "hi" } }] } : { text: "replied" };
 
 test("an event becomes a turn; the reply, the activities, the turn's end and the ack follow", async () => {
   const { fake, start, calls } = await world();
@@ -65,11 +65,12 @@ test("an event becomes a turn; the reply, the activities, the turn's end and the
   );
   const sent = activities(fake);
   const turnId = sent[0]!.turn_id;
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "hi", in_reply_to: 1, turn_id: turnId }]);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [{ text: "hi" }]);
+  assert.deepEqual(sent.filter((activity) => activity.kind === "house_reply").map((activity) => activity.speech_id), ["r-1"]);
 
   assert.deepEqual(
     sent.map((a) => a.kind),
-    ["turn_start", "thinking", "tool_call", "tool_result", "message", "turn_end"],
+    ["turn_start", "thinking", "tool_call", "house_reply", "tool_result", "message", "turn_end"],
   );
   assert.ok(sent.every((a) => a.turn_id === turnId));
   assert.deepEqual(fake.sent("POST", "/v1/turns/end"), [{ agent: "main", turn_id: turnId, result: "done", seqs: [1] }]);

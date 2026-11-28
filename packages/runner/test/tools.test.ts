@@ -21,7 +21,7 @@ beforeEach(async () => {
   fake = new FakeBackend();
   home = mkdtempSync(join(tmpdir(), "runner-tools-"));
   const backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
-  tools = new Map(backendTools(backend, { home }).map((tool) => [tool.name, tool]));
+  tools = new Map(backendTools(backend, { home, house: { origin: new URL(await fake.url), token: TOKEN } }).map((tool) => [tool.name, tool]));
 });
 afterEach(() => {
   rmSync(home, { recursive: true, force: true });
@@ -55,23 +55,62 @@ test("mood saves the main session's sentence through the backend", async () => {
   assert.deepEqual(fake.sent("POST", "/v1/mood"), [{ agent: "main", mood }]);
 });
 
-test("reply sends the text, the expression and the event it answers", async () => {
-  assert.match(await call("reply", { text: "done", expression: "smile", in_reply_to: 13 }), /r-1/);
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), [{ agent: "main", text: "done", expression: "smile", in_reply_to: 13 }]);
+test("reply distinguishes addressees who are absent from those who are not awake", async () => {
+  fake.houseReplyResult = {
+    id: "s-one", destination: { kind: "room", room: { id: "living", name: "居間" } },
+    absent_to: ["moss"], not_delivered: [{ id: "fern", name: "Fern", kind: "agent" }],
+  };
+  const result = await call("reply", { text: "done", expression: "happy", to: ["fern", "moss"] });
+  assert.equal(result, "Sent to 居間 (living), id s-one.\nNot in the room: moss\nNot delivered (not awake): Fern (fern)");
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [{ text: "done", expression: "happy", to: ["fern", "moss"] }]);
 });
 
-test("reply sends the images it is given, read from their files, in their order", async () => {
-  // Guards against: an image she names not reaching the backend, or reaching it as another file's bytes.
+test("reply reports the ignored to value in a direct conversation even when it is not an array", async () => {
+  const to = { resident: "fern" };
+  fake.houseReplyResult = {
+    id: "s-one", destination: { kind: "dm", dm: { agent_id: "ivy", owner_id: "lee" } },
+    ignored_to: to, not_delivered: [],
+  };
+  const result = await call("reply", { text: "done", to });
+  assert.equal(result, 'Sent to your owner (lee) in a direct conversation, id s-one.\nIgnored to: {"resident":"fern"}');
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [{ text: "done", to }]);
+});
+
+test("reply accepts 20,000 characters but does not send a longer message", async () => {
+  const text = "あ".repeat(20_000);
+  await assert.rejects(call("reply", { text: text + "い" }), /20000/);
+  assert.match(await call("reply", { text }), /^Sent to /);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [{ text }]);
+});
+
+test("reply sends nothing when the text is blank and there are no images", async () => {
+  await assert.rejects(call("reply", { text: " \n", images: [] }), /text or an image/);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), []);
+});
+
+test("reply does not resend a speech whose confirmation could not be read", async () => {
+  fake.houseReplyResult = { id: "s-one" };
+  await assert.rejects(call("reply", { text: "done" }), /may already have been recorded/);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [{ text: "done" }]);
+});
+
+test("reply without a configured house fails without sending to the backend", async () => {
+  const backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
+  tools = new Map(backendTools(backend, { home }).map((tool) => [tool.name, tool]));
+  await assert.rejects(call("reply", { text: "done" }), /house is not configured/);
+  assert.deepEqual(fake.order(), []);
+});
+
+test("reply sends images in order even when given no text", async () => {
   mkdirSync(join(home, "out"));
   const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
   const jpeg = Buffer.from([0xff, 0xd8, 0xff, 2]);
   writeFileSync(join(home, "out", "cat.png"), png);
   writeFileSync(join(home, "dog.jpg"), jpeg);
-  assert.match(await call("reply", { text: "描いたよ", images: ["out/cat.png", join(home, "dog.jpg")] }), /r-1/);
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), [
+  assert.match(await call("reply", { images: ["out/cat.png", join(home, "dog.jpg")] }), /r-1/);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [
     {
-      agent: "main",
-      text: "描いたよ",
+      text: "",
       images: [
         { name: "cat.png", data: png.toString("base64") },
         { name: "dog.jpg", data: jpeg.toString("base64") },
@@ -87,7 +126,7 @@ test("reply sends nothing when an image cannot be read, and says which", async (
   await assert.rejects(call("reply", { text: "見て", images: ["ok.png", "missing.png"] }), /missing\.png/);
   await assert.rejects(call("reply", { text: "見て", images: ["folder"] }), /folder/);
   await assert.rejects(call("reply", { text: "見て", images: ["1", "2", "3", "4", "5"] }), /at most 4/);
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), []);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), []);
 });
 
 test("reply sends nothing for an image over the size limit, and does not read it", async () => {
@@ -95,10 +134,10 @@ test("reply sends nothing for an image over the size limit, and does not read it
   writeFileSync(join(home, "huge.png"), "");
   truncateSync(join(home, "huge.png"), REPLY_IMAGE_MAX_BYTES + 1);
   await assert.rejects(call("reply", { text: "見て", images: ["huge.png"] }), /huge\.png/);
-  assert.deepEqual(fake.sent("POST", "/v1/replies"), []);
+  assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), []);
 });
 
-test("reply gives the backend's refusal of an image as its error", async () => {
+test("reply gives the house's refusal of an image as its error", async () => {
   fake.refuseReplies = "not sent: image 1 (notes.png) is not a PNG, JPEG, GIF or WebP image";
   writeFileSync(join(home, "notes.png"), "just text");
   await assert.rejects(call("reply", { text: "見て", images: ["notes.png"] }), /notes\.png\) is not a PNG/);

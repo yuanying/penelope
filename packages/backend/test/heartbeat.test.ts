@@ -37,10 +37,10 @@ function setup(
     timeZone: "UTC",
     redeliverMs: 5 * 60_000,
   });
-  const conversation = new Conversation(db, { now: clock.now });
+  const conversation = new Conversation(db);
   const record = new ActivityRecord(db, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const inbox = new Inbox(db, queue, {
-    assets: new Assets(db, path.join(dir, "assets"), { now: clock.now }),
+    assets: new Assets(path.join(dir, "assets")),
     now: clock.now,
     limits: { maxOpenTasks: 3, deadlineMs: 120 * 60_000 },
   });

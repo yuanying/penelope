@@ -44,16 +44,19 @@ const OWNER_ID = Number(env("OUTSIDE_OWNER_GITHUB_ID"));
 
 const MODEL = "model.example.com";
 const HELPER = "helper.example.com";
+const HOUSE = "house.example.com";
+const HOUSE_AGENT_TOKEN = secret("OUTSIDE_SENDER_TOKEN_FILE");
+const HOUSE_SURROGATE = env("OUTSIDE_HOUSE_SURROGATE");
 const GITHUB = "github.com";
 const GITHUB_API = "api.github.com";
 const PLAIN = "plain.example.net";
 /** An app under the Sentinel's wildcard registration. */
 const APP = "a.apps.example.com";
-const NAMES = new Set([MODEL, HELPER, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
+const NAMES = new Set([MODEL, HELPER, HOUSE, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
 const fakeSlack = slack({ app: secret("OUTSIDE_SLACK_APP_TOKEN_FILE"), bot: secret("OUTSIDE_SLACK_BOT_TOKEN_FILE") });
 const fakeCluster = cluster({
   backend: secret("OUTSIDE_KUBE_TOKEN_FILE"),
-  sender: secret("OUTSIDE_SENDER_TOKEN_FILE"),
+  sender: HOUSE_AGENT_TOKEN,
   stranger: secret("OUTSIDE_STRANGER_TOKEN_FILE"),
 });
 
@@ -170,6 +173,17 @@ function githubApi(request: http.IncomingMessage, response: http.ServerResponse)
   json(response, 200, { id: OWNER_ID, login: "e2e-owner" });
 }
 
+function house(request: http.IncomingMessage, response: http.ServerResponse): void {
+  const proxy = http.request({
+    hostname: "127.0.0.1", port: 8080, method: request.method, path: request.url, headers: request.headers,
+  }, (upstream) => {
+    response.writeHead(upstream.statusCode!, upstream.headers);
+    upstream.pipe(response);
+  });
+  proxy.on("error", () => json(response, 502, { error: "house not available" }));
+  request.pipe(proxy);
+}
+
 function outside(scheme: "https" | "http") {
   return (request: http.IncomingMessage, response: http.ServerResponse) => {
     const host = hostOf(request);
@@ -179,11 +193,12 @@ function outside(scheme: "https" | "http") {
       host,
       method: request.method ?? "",
       path: (request.url ?? "").split("?")[0]!,
-      credential: credentialOf(request, MODEL_KEY, MODEL_SURROGATE),
+      credential: host === HOUSE ? credentialOf(request, HOUSE_AGENT_TOKEN, HOUSE_SURROGATE) : credentialOf(request, MODEL_KEY, MODEL_SURROGATE),
     });
     const handle = async () => {
       if (scheme === "https" && host === MODEL) return model(request, response);
       if (scheme === "https" && host === HELPER) return helper(request, response);
+      if (scheme === "https" && host === HOUSE) return house(request, response);
       if (scheme === "https" && host === GITHUB) return github(request, response);
       if (scheme === "https" && host === GITHUB_API) return githubApi(request, response);
       if (scheme === "https" && host === KUBERNETES) return fakeCluster.tokenReview(request, await body(request), response);

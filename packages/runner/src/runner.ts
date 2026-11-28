@@ -73,12 +73,14 @@ import {
   verifierSystemPrompt,
 } from "./prompts.ts";
 import { SubAgents } from "./subagents.ts";
+import type { HouseConnection } from "./house.ts";
 import { backendTools, jobTools, subAgentTools } from "./tools.ts";
 import { formatEvents, withRunnerNotes } from "./turn-input.ts";
 
 export interface RunnerOptions {
   config: Config;
   backend: Backend;
+  house?: HouseConnection;
   modelRuntime: ModelRuntime;
   settings: () => SettingsManager;
   imageLimits?: ReadonlyMap<string, number>;
@@ -129,6 +131,7 @@ const utcDay = (time: string): number => Math.floor(Date.parse(time) / 86_400_00
 export class Runner {
   private readonly config: Config;
   private readonly backend: Backend;
+  private readonly house: HouseConnection | undefined;
   private readonly setup: PiSetup;
   private readonly log: (line: string) => void;
   private readonly places: Places;
@@ -155,6 +158,7 @@ export class Runner {
   constructor(options: RunnerOptions) {
     this.config = options.config;
     this.backend = options.backend;
+    this.house = options.house;
     this.log = options.log ?? ((line) => process.stderr.write(`${line}\n`));
     this.backend.beforeTurnEnd(() => shareMemory(this.config.memoryDir, this.log));
     this.extensionTrials = new MemoryExtensionTrials(join(this.config.home, ".penelope-extension-trials.json"), this.log);
@@ -180,7 +184,16 @@ export class Runner {
     });
     this.setup = {
       ...pi,
-      tools: [...backendTools(options.backend, { home: options.config.home, turn: () => this.turnId }), ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs)],
+      tools: [
+        ...backendTools(this.backend, {
+          home: this.config.home,
+          ...(this.house ? { house: this.house } : {}),
+          recordHouseReply: (speech_id) => {
+            if (this.turnId) this.send({ kind: "house_reply", turn_id: this.turnId, at: new Date().toISOString(), speech_id });
+          },
+        }),
+        ...subAgentTools(this.subAgents), ...jobTools(this.jobs, options.config.jobs),
+      ],
       extensions: [
         foldExtension({
           folding: () => options.config.turnFold,
@@ -234,6 +247,7 @@ export class Runner {
     const connectors = await this.connectors();
     return systemPrompt(this.config.identity, this.places, files, {
       folding: this.config.turnFold,
+      house: this.house !== undefined,
       slackSources: this.config.slack.sources,
       ...(connectors ? { connectors } : {}),
     });

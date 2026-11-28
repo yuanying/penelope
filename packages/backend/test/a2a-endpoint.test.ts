@@ -46,7 +46,7 @@ async function setup(t: { after: (fn: () => void | Promise<void>) => void }, { d
     redeliverMs: 5 * MINUTE,
   });
   const assetsDir = path.join(dir, "assets");
-  const assets = new Assets(db, assetsDir, { now: clock.now });
+  const assets = new Assets(assetsDir);
   const inbox = new Inbox(db, queue, { assets, now: clock.now, limits: { deadlineMs: 24 * 60 * MINUTE, maxOpenTasks: 3 } });
   let base = "";
   const server = await listenTcp(

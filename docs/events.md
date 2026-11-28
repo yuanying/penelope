@@ -180,7 +180,7 @@ runner は sandbox 向けの口で出来事を受け取り（[sandbox-api.md](sa
 | 欄 | 中身 |
 | --- | --- |
 | `agent` | その出来事を受けるエージェント。省けば `main`。今は `main` だけなので、いつも省く（サブエージェントのための余地） |
-| `seq` | backend の順番。`reply` の `in_reply_to` はこれを取る |
+| `seq` | backend の順番。A2A の `reply_to_agent` の `in_reply_to` はこれを取る |
 | `source`・`stream` | 封筒のもの。`stream` が無ければ省く |
 | `delivery` | `now` か `batch` |
 | `occurred_at` | 配送時の値をそのまま載せる（[sandbox-api.md](sandbox-api.md) の「出来事を取る」） |

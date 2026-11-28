@@ -1,7 +1,8 @@
 import timers from "node:timers/promises";
 
-import type { HouseDelivery, HouseResident, HouseSync, HouseSyncResult, HouseView } from "@penelope/contract";
+import { EVENT_PATH_SEGMENT, type HouseConversationDelivery, type HouseConversationSyncResult, type HouseImage, type HouseResident, type HouseSync, type HouseView, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, REPLY_IMAGE_TYPES } from "@penelope/contract";
 
+import type { IntakeFile } from "../intake.ts";
 import { type ConnectionIO, type ConnectionPlugin, isObject, onlyKnown, type PluginEvent, readKey, SettingsError } from "../plugin.ts";
 import { summaryLine } from "./text.ts";
 
@@ -10,20 +11,15 @@ const MAX_RETRY_MS = 30_000;
 const REQUEST_MS = 5_000;
 const HEARTBEAT_BYTES = 4 * 1024;
 const HEARTBEAT_MOOD_CHARS = 32;
-const RESIDENT_ID = /^[a-z0-9_-][a-z0-9._-]{0,63}$/;
 
 export const house: ConnectionPlugin = {
   name: "house",
   kind: "connection",
   create(settings, env) {
-    onlyKnown(settings, ["url", "token_file", "owner_id"]);
+    onlyKnown(settings, ["url", "token_file"]);
     const url = typeof settings.url === "string" && URL.parse(settings.url);
     if (!url || url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
       throw new SettingsError("url", "must be an HTTPS origin");
-    }
-    const ownerId = settings.owner_id;
-    if (ownerId !== undefined && (typeof ownerId !== "string" || !RESIDENT_ID.test(ownerId))) {
-      throw new SettingsError("owner_id", "must be a house resident ID");
     }
     const token = () => {
       const value = readKey("token_file", settings.token_file, env);
@@ -35,7 +31,7 @@ export const house: ConnectionPlugin = {
     return {
       start(io) {
         const stop = new AbortController();
-        const running = poll(io, endpoint, token, ownerId, stop.signal).catch(() => {
+        const running = poll(io, endpoint, token, stop.signal).catch(() => {
           io.log("house connection stopped after an unexpected error");
         });
         return { async stop() { stop.abort(); await running; } };
@@ -44,7 +40,7 @@ export const house: ConnectionPlugin = {
   },
 };
 
-async function poll(io: ConnectionIO, endpoint: URL, token: () => string, ownerId: string | undefined, stop: AbortSignal) {
+async function poll(io: ConnectionIO, endpoint: URL, token: () => string, stop: AbortSignal) {
   let ack: string[] = [];
   let retryMs = POLL_MS;
   let connected = false;
@@ -52,14 +48,16 @@ async function poll(io: ConnectionIO, endpoint: URL, token: () => string, ownerI
   try {
     while (!stop.aborted) {
       let nextMs = POLL_MS;
-      let result: HouseSyncResult | undefined;
+      let result: HouseConversationSyncResult | undefined;
+      let credential = "";
       try {
         const status = await io.readStatus();
         if (stop.aborted) break;
         if (!status) throw new Error("backend status is unavailable");
         const { mood, sleepiness, sleep: current } = status;
         const sleep = current.state === "awake" ? { state: current.state } : { state: current.state, wake_at: current.wake_at };
-        result = await sync(endpoint, token(), { status: { mood, sleep, sleepiness }, ack }, stop);
+        credential = token();
+        result = await sync(endpoint, credential, { protocol: 2, status: { mood, sleep, sleepiness }, ack }, stop);
       } catch (error) {
         if (stop.aborted) break;
         connected = false;
@@ -80,8 +78,23 @@ async function poll(io: ConnectionIO, endpoint: URL, token: () => string, ownerI
         if (problem !== noteProblem) io.log(problem ?? "house heartbeat note restored");
         noteProblem = problem;
         for (const pending of result.pending) {
-          if (stop.aborted || !(await io.deliver([envelope(pending, result.house.you, ownerId)]))) break;
-          ack.push(pending.event.id);
+          if (stop.aborted) break;
+          const { event } = pending;
+          if (event.actor.kind === "agent" && event.actor.id === result.house.you) {
+            ack.push(event.id);
+            continue;
+          }
+          const files: IntakeFile[] = [];
+          try {
+            if (event.kind === "speech") {
+              for (const image of event.images ?? []) files.push(await downloadImage(endpoint, credential, image, stop));
+            }
+          } catch (error) {
+            if (!stop.aborted) io.log(`cannot download a house attachment (${error instanceof Error ? error.message : "request failed"})`);
+            break;
+          }
+          if (stop.aborted || !(await io.deliver([{ ...envelope(pending), ...(files.length ? { files } : {}) }]))) break;
+          ack.push(event.id);
         }
       }
       if (!stop.aborted) await timers.setTimeout(nextMs, undefined, { signal: stop }).catch((error) => { if (!stop.aborted) throw error; });
@@ -118,7 +131,7 @@ function requestError(error: unknown, timedOut: boolean): Error {
   return new Error(typeof code === "string" && /^[A-Z][A-Z0-9_]{0,63}$/.test(code) ? `house request failed: ${code}` : "house request failed");
 }
 
-async function sync(endpoint: URL, token: string, body: HouseSync, stop: AbortSignal): Promise<HouseSyncResult> {
+async function sync(endpoint: URL, token: string, body: HouseSync, stop: AbortSignal): Promise<HouseConversationSyncResult> {
   const timeout = AbortSignal.timeout(REQUEST_MS);
   const response = await fetch(endpoint, {
     method: "POST",
@@ -134,38 +147,85 @@ async function sync(endpoint: URL, token: string, body: HouseSync, stop: AbortSi
   const result = await response.json().catch((error: unknown) => {
     if (error instanceof SyntaxError) throw new Error("house did not return a sync result");
     throw requestError(error, timeout.aborted);
-  }) as HouseSyncResult | null;
-  if (typeof result?.house?.you !== "string" || !Array.isArray(result.house.rooms) || !Array.isArray(result.house.away) ||
-    !Array.isArray(result.pending) || result.pending.length > 50 ||
-    result.pending.some((pending) => !pending?.event?.id || !pending.event.room || !pending.event.actor)) {
-    throw new Error("house did not return a sync result");
-  }
-  if (result.pending.some(({ event }) => !["speech", "enter", "leave"].includes(event.kind))) {
-    throw new Error("house returned an unsupported event kind");
+  }) as HouseConversationSyncResult | null;
+  if (result?.protocol !== 2 || typeof result.house?.you !== "string" || !Array.isArray(result.house.rooms) || !Array.isArray(result.house.away) ||
+    !Array.isArray(result.pending) || result.pending.length > 50 || !result.pending.every(validDelivery)) {
+    throw new Error("house did not return a protocol 2 sync result");
   }
   return result;
 }
 
-function envelope({ event, delivery, answer_via }: HouseDelivery, you: string, ownerId: string | undefined): PluginEvent {
-  const { actor, room } = event;
-  const owner = actor.kind === "person" && actor.id === ownerId;
+function validDelivery(pending: HouseConversationDelivery): boolean {
+  const event = pending?.event;
+  if (!event || typeof event.id !== "string" || !event.id ||
+    typeof event.actor?.id !== "string" || typeof event.actor.name !== "string" || !["agent", "person"].includes(event.actor.kind) ||
+    typeof pending.stream !== "string" || !EVENT_PATH_SEGMENT.test(pending.stream) ||
+    typeof pending.owner !== "boolean" || !["now", "batch"].includes(pending.delivery)) return false;
+  if ("room" in event) {
+    if (typeof event.room?.name !== "string" || typeof event.room.id !== "string") return false;
+    if (event.kind === "enter" || event.kind === "leave") return true;
+    if (event.kind !== "speech" || !Array.isArray(event.to) || !event.to.every((id) => typeof id === "string")) return false;
+  } else if (typeof event.dm?.agent_id !== "string" || typeof event.dm.owner_id !== "string") return false;
+  return event.kind === "speech" && typeof event.text === "string" &&
+    (event.images === undefined || (Array.isArray(event.images) && event.images.length <= REPLY_IMAGES_MAX && event.images.every(validImage)));
+}
+
+function validImage(image: HouseImage): boolean {
+  return typeof image?.id === "string" && image.id !== "" && image.id !== "." && image.id !== ".." &&
+    typeof image.name === "string" && REPLY_IMAGE_TYPES.includes(image.mime_type) &&
+    Number.isSafeInteger(image.size) && image.size > 0 && image.size <= REPLY_IMAGE_MAX_BYTES;
+}
+
+async function downloadImage(endpoint: URL, token: string, image: HouseImage, stop: AbortSignal): Promise<IntakeFile> {
+  const url = new URL(`/v1/agent/images/${encodeURIComponent(image.id)}`, endpoint);
+  const timeout = AbortSignal.timeout(REQUEST_MS);
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { authorization: `Bearer ${token}` },
+    redirect: "manual",
+    signal: AbortSignal.any([stop, timeout]),
+  }).catch((error: unknown) => { throw requestError(error, timeout.aborted); });
+  if (response.status !== 200 || !response.body || response.headers.get("content-type") !== image.mime_type) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`invalid house image response (HTTP ${response.status})`);
+  }
+
+  const reader = response.body.getReader();
+  const data = new Uint8Array(image.size);
+  let offset = 0;
+  try {
+    for (;;) {
+      const part = await reader.read();
+      if (part.done) break;
+      if (offset + part.value.length > data.length) throw new Error("house image size did not match the delivery");
+      data.set(part.value, offset);
+      offset += part.value.length;
+    }
+    if (offset !== data.length) throw new Error("house image size did not match the delivery");
+  } finally {
+    await reader.cancel().catch(() => {});
+  }
+  return { name: image.id, type: image.mime_type, data };
+}
+
+function envelope({ event, stream, owner, delivery, answer_via }: HouseConversationDelivery): PluginEvent {
+  const { actor } = event;
   const marks = [`${actor.kind} ${actor.id}`];
   if (owner) marks.push("owner");
-  if (actor.id === you) marks.push("you");
-  if (event.kind === "speech" && event.to.length > 0) {
+  if (event.kind === "speech" && "room" in event && event.to.length > 0) {
     const list = event.to.join(", ");
     marks.push(`to ${list.length <= 72 ? list : `${event.to[0]} +${event.to.length - 1} more`}`);
   }
-  const action = event.kind === "speech" ? `spoke in ${room.name}` :
-    event.kind === "enter" ? `entered ${room.name}` : `left ${room.name}`;
+  const action = !("room" in event) ? "spoke directly to you" : event.kind === "speech" ? `spoke in ${event.room.name}` :
+    event.kind === "enter" ? `entered ${event.room.name}` : `left ${event.room.name}`;
   const summary = `[${marks.join(", ")}] ${actor.name} ${action}`;
   return {
     id: event.id,
     occurred_at: event.occurred_at,
-    stream: room.id,
+    stream,
     delivery,
     summary: summaryLine(summary.replace(/[\u2028\u2029]+/g, " ")),
     payload: { ...event, owner },
-    ...(answer_via?.command === "house say" ? { answer_via: { command: "house say" } } : {}),
+    ...(answer_via?.tool === "reply" ? { answer_via: { tool: "reply" } } : {}),
   };
 }

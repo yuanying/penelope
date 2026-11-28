@@ -1,42 +1,12 @@
-import { randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 
-import type { Activity, AgentId, AgentState, ReplyRequest } from "@penelope/contract";
-
-import type { Assets, CheckedImage } from "./assets.ts";
-import { transaction } from "./db.ts";
-import { iso } from "./time.ts";
+import type { Activity, AgentId, AgentState } from "@penelope/contract";
 
 export class Conversation {
   private readonly db: DatabaseSync;
-  private readonly now: () => number;
-  private readonly assets: Assets | undefined;
 
-  /** Without `assets`, a reply carries no images. */
-  constructor(db: DatabaseSync, { now, assets }: { now: () => number; assets?: Assets }) {
+  constructor(db: DatabaseSync) {
     this.db = db;
-    this.now = now;
-    this.assets = assets;
-  }
-
-  /** Stores a legacy runner's reply and its image copies in one transaction. */
-  reply(request: Omit<ReplyRequest, "images">, images: readonly CheckedImage[] = []): { id: string } {
-    const id = randomUUID();
-    const at = iso(this.now());
-    if (images.length > 0 && this.assets === undefined) throw new Error("this conversation keeps no images");
-    const stored = images.length === 0 ? [] : this.assets!.write(images);
-    try {
-      transaction(this.db, () => {
-        this.db
-          .prepare("INSERT INTO history (id, kind, agent, at, text, expression, in_reply_to, turn_id) VALUES (?, 'agent', ?, ?, ?, ?, ?, ?)")
-          .run(id, request.agent, at, request.text, request.expression ?? null, request.in_reply_to ?? null, request.turn_id ?? null);
-        if (stored.length > 0) this.assets!.record(id, request.agent, stored);
-      });
-    } catch (error) {
-      this.assets?.discard(stored);
-      throw error;
-    }
-    return { id };
   }
 
   activities(agent: AgentId, activities: readonly Activity[]): void {
