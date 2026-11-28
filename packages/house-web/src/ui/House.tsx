@@ -25,7 +25,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const wide = useMediaQuery(WIDE);
   const touch = useMediaQuery(TOUCH) || phone;
   const [route, go] = useRoute();
-  const [entryRequest, setEntryRequest] = useState<{ room: string }>();
+  const [entryRoom, setEntryRoom] = useState<string>();
   const [writings, setWritings] = useState<ReadonlyMap<string, Writing>>(new Map());
   const writers = useRef(new Map<string, (change: (writing: Writing) => Writing) => void>());
   /** The way to change what is written for one room: the same function for the same room, whoever calls it later. */
@@ -42,9 +42,14 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const swapped = peeked !== undefined && (phone || !wide || peeked.id === mine?.id);
   const selected = route.at === "talk" ? house.rooms.find(({ id }) => id === route.room) : undefined;
   const conversation = selected ?? mine;
+  const notice = snapshot.notice;
+  const entryFailed = notice?.kind === "full" || notice?.kind === "enter-failed";
+  if (entryRoom !== undefined && (entryRoom === mine?.id || (entryFailed && notice.room === entryRoom))) {
+    setEntryRoom(undefined);
+  }
   const access =
     conversation !== undefined && conversation.id === mine?.id ? "member"
-    : entryRequest !== undefined && entryRequest.room === conversation?.id ? "entering"
+    : entryRoom !== undefined && entryRoom === conversation?.id ? "entering"
     : "read-only";
   const talkShown = access === "member" && (phone ? route.at === "talk" : !swapped);
   const count = unread(snapshot);
@@ -120,11 +125,10 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     go({ at: "plan" });
   };
   const enter = (room: string) => {
-    const attempt = { room };
-    setEntryRequest(attempt);
+    setEntryRoom(room);
     want("room");
     go({ at: "talk", room }, route.at === "peek");
-    void session.enter(room).then(() => setEntryRequest((current) => (current === attempt ? undefined : current)));
+    void session.enter(room);
   };
   const leave = () => {
     want(phone ? "plan" : "room");
@@ -136,9 +140,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
 
   const residents = residentsOf(house);
   const shared = { you: house.you, residents, undelivered: snapshot.undelivered, phone, line: snapshot.line, onRetry: () => session.retry() };
-  const notice = snapshot.notice;
   const nameOf = (room: string) => house.rooms.find(({ id }) => id === room)?.name ?? room;
-  const entryFailed = notice?.kind === "full" || notice?.kind === "enter-failed";
   const noticeInRoom = entryFailed && notice.room === selected?.id;
   const noticeTitle =
     notice === undefined ? undefined
@@ -147,25 +149,22 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     : notice.kind === "enter-failed" ? words.enterFailed(nameOf(notice.room))
     : notice.kind === "failed" ? words.failed
     : words.logoutUnconfirmed;
-  const notices = (
-    <div className={noticeInRoom ? undefined : "house-notices"} role="status" aria-live="polite">
-      {notice ? (
-        <Banner
-          status={notice.kind === "failed" || notice.kind === "logout-unconfirmed" || notice.kind === "enter-failed" ? "error" : "warning"}
-          title={noticeTitle}
-          elevation="med"
-          isDismissable
-          dismissLabel={words.dismiss}
-          onDismiss={() => session.dismiss()}
-          {...(notice.kind === "logout-unconfirmed"
-            ? { endContent: <Button label={words.logoutAgain} variant="secondary" size="sm" onClick={() => void session.logout()} /> }
-            : entryFailed
-              ? { endContent: <Button label={words.backToPlan} variant="secondary" size="sm" onClick={backFromNotice} /> }
-              : {})}
-        />
-      ) : null}
-    </div>
-  );
+  const noticeBanner = notice ? (
+    <Banner
+      status={notice.kind === "failed" || notice.kind === "logout-unconfirmed" || notice.kind === "enter-failed" ? "error" : "warning"}
+      title={noticeTitle}
+      elevation="med"
+      isDismissable
+      dismissLabel={words.dismiss}
+      onDismiss={() => session.dismiss()}
+      {...(notice.kind === "logout-unconfirmed"
+        ? { endContent: <Button label={words.logoutAgain} variant="secondary" size="sm" onClick={() => void session.logout()} /> }
+        : entryFailed
+          ? { endContent: <Button label={words.backToPlan} variant="secondary" size="sm" onClick={backFromNotice} /> }
+          : {})}
+    />
+  ) : undefined;
+  const notices = <div className="house-notices" role="status" aria-live="polite">{noticeInRoom ? undefined : noticeBanner}</div>;
   // Past what stands before the conversation on the screen now. On a phone's floor that is the way into it.
   const skip = (
     <a
@@ -204,7 +203,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       narrow={phone || peeked !== undefined}
       room={conversation}
       access={access}
-      entryNotice={noticeInRoom ? notices : undefined}
+      entryNotice={noticeInRoom ? noticeBanner : undefined}
       log={conversation === undefined ? undefined : snapshot.logs.get(conversation.id)}
       touch={touch}
       writing={(mine === undefined ? undefined : writings.get(mine.id)) ?? NOTHING_WRITTEN}
@@ -239,7 +238,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     return (
       <main ref={root} className="house house-phone">
         {skip}
-        {noticeInRoom ? null : notices}
+        {notices}
         <div className="house-plan" inert={covered}>
           {plan}
         </div>
@@ -250,7 +249,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   return (
     <main ref={root} className={peeked !== undefined && !swapped ? "house house-pc house-side" : "house house-pc"}>
       {skip}
-      {noticeInRoom ? null : notices}
+      {notices}
       <div className="house-plan">{plan}</div>
       {peekPane}
       {swapped ? null : myRoomPane}

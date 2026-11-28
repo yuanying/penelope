@@ -138,11 +138,11 @@ export function MyRoom({ room, access, entryNotice, log, touch, writing, onWriti
         bottom={
           <div className="room-bottom">
             <LineNotice line={line} onRetry={onRetry} />
-            {entryNotice}
+            <div className="room-entry-status" role="status">
+              {entryNotice ?? (member ? null : <p className="room-reading">{access === "entering" ? words.entering : words.readOnlyBody}</p>)}
+            </div>
             {member ? (
               <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
-            ) : entryNotice === undefined ? (
-              <p className="room-reading" role="status">{access === "entering" ? words.entering : words.readOnlyBody}</p>
             ) : null}
           </div>
         }

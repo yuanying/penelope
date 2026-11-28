@@ -47,6 +47,11 @@ function Capacity({ room }: { room: Room }) {
 
 export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
   const myRoom = house.rooms.find(({ id }) => id === mine);
+  const unreadBadge = unread > 0 ? (
+    <span className="unread" aria-hidden>
+      {unread > 99 ? "99+" : unread}
+    </span>
+  ) : null;
   return (
     <div className="plan">
       <div className="plan-scroll">
@@ -95,7 +100,16 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
                   {here ? (
                     <>
                       <span className="tile-tag tile-tag-here">{words.here}</span>
-                      {openTalkFromTile ? <Button label={words.openTalk} variant="secondary" size={phone ? "lg" : "sm"} onClick={onOpenTalk} /> : null}
+                      {openTalkFromTile ? (
+                        <Button
+                          label={words.openTalk}
+                          aria-label={withUnread(words.openTalk, phone ? 0 : unread)}
+                          endContent={phone ? undefined : unreadBadge}
+                          variant="secondary"
+                          size={phone ? "lg" : "sm"}
+                          onClick={onOpenTalk}
+                        />
+                      ) : null}
                     </>
                   ) : (
                     <>
@@ -163,11 +177,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
                   )}
                 </span>
               </span>
-              {unread > 0 ? (
-                <span className="unread" aria-hidden>
-                  {unread > 99 ? "99+" : unread}
-                </span>
-              ) : null}
+              {unreadBadge}
               <ForwardIcon width={18} height={18} />
             </button>
           )}

@@ -181,9 +181,6 @@ time,
   width: max-content;
   max-width: calc(100% - 24px);
 }
-.house-notices:empty {
-  display: none;
-}
 
 /* On a phone, what is pressed is at least 44px high. */
 .house-phone .tile-foot .astryx-button,
@@ -701,6 +698,9 @@ button.plan-dock:hover {
 }
 .house-phone .room-bottom {
   padding-bottom: env(safe-area-inset-bottom);
+}
+.room-entry-status:empty {
+  position: absolute;
 }
 .room-nowhere {
   flex: 1;

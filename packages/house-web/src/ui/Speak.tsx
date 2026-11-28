@@ -7,7 +7,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { type ChatComposerTrigger, ChatComposer, ChatComposerInput, ChatSendButton } from "@astryxdesign/core/Chat";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import { type KeyboardEvent, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { HousePersonOccupant } from "@penelope/contract";
 
@@ -65,6 +65,19 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
     void say(text, to.map(({ id, name }) => ({ id, name })));
   };
   const without = (speech: Unsent) => onWriting((now) => ({ ...now, unsent: now.unsent.filter((each) => each !== speech) }));
+
+  const input = useRef<HTMLDivElement>(null);
+  const previousCandidates = useRef(candidates);
+  useLayoutEffect(() => {
+    const lostCandidate = previousCandidates.current.some(({ id }) => !candidates.some((resident) => resident.id === id));
+    previousCandidates.current = candidates;
+    if (lostCandidate) {
+      // Astryx keeps open search results until the query changes. Escape dismisses them without touching the draft or caret.
+      input.current?.querySelector('[role="combobox"][aria-expanded="true"]')?.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+      );
+    }
+  }, [candidates]);
 
   // Astryx keeps the trigger and the candidates of a menu that is open, so what a candidate shows of the
   // resident is read at each drawing from here, not from what the menu was opened with.
@@ -144,6 +157,7 @@ export function Speak({ room, others, online, touch, writing, onWriting, onSay }
           : {})}
         input={
           <ChatComposerInput
+            ref={input}
             label={words.speakIn(room.name)}
             placeholder={words.speakPlaceholder(room.name)}
             triggers={triggers}
