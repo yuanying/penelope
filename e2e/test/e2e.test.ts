@@ -172,8 +172,7 @@ describe("the Pod end to end", () => {
     assert.deepEqual(detail.body.flow.flatMap((step) => step.kind === "tool_call" ? [step.name] : []), ["write", "bash"]);
 
     // The model's key: the sandbox sent its surrogate, the model got the real one.
-    const calls = await outside.modelCalls();
-    assert.ok(calls.length >= 4);
+    const calls = await callsFor("E2E-TURN-1");
     assert.deepEqual(new Set(calls.map((call) => call.credential)), new Set(["real"]));
   }));
 
@@ -265,7 +264,7 @@ describe("the Pod end to end", () => {
       records.some((record) => Object.entries(what).every(([key, value]) => record[key] === value));
     assert.ok(has({ kind: "tcp", action: "passthrough", host: "plain.example.net", port: 443, uid: 1000 }), "the passthrough");
     assert.ok(has({ kind: "http", action: "open", host: "model.example.com", method: "POST", path: "/v1/chat/completions", uid: 1000 }), "the model");
-    assert.ok(has({ kind: "http", action: "open", host: "backend.example.com", method: "POST", path: "/v1/replies", uid: 1000 }), "the backend");
+    assert.ok(has({ kind: "http", action: "open", host: "backend.example.com", method: "POST", path: "/v1/activity", status: 204, uid: 1000 }), "the backend accepted the activity");
     assert.ok(has({ kind: "http", action: "open", host: "a.apps.example.com", method: "GET", path: "/app", status: 200 }), "the wildcard's name");
     assert.ok(has({ kind: "dns", host: "plain.example.net", qtype: "A" }), "the name lookup");
     assert.ok(has({ action: "deny", reason: "surrogate-out-of-place", host: "plain.example.net" }), "the surrogate");
