@@ -9,6 +9,12 @@ import { FakeBackend } from "./fake-backend.ts";
 
 afterEach(() => cleanup());
 
+it("opens the memory page at the root address", async () => {
+  const backend = new FakeBackend();
+  render(<App fetch={backend.fetch} />);
+  assert.ok(await screen.findByRole("region", { name: "記憶" }));
+});
+
 it("names the personal page after the deployment's agent", async () => {
   const backend = new FakeBackend();
   backend.agent = { name: "Kestrel" };

@@ -3,7 +3,6 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
-import { Assets } from "../src/assets.ts";
 import { MIGRATIONS, openDatabase, transaction } from "../src/db.ts";
 import { tempDir } from "./support.ts";
 
@@ -41,8 +40,8 @@ describe("the database", () => {
     raw.exec("INSERT INTO assets (id, kind, mime_type, size, name, file, agent, created_at, reply_id, position) VALUES ('a-1', 'image', 'image/png', 4, 'a.png', 'a-1.png', 'main', 't', 'r-1', 0)");
     raw.close();
     const db = openDatabase(file);
-    const assets = new Assets(db, tempDir(t), { now: Date.now });
-    assert.deepEqual(assets.ofMessages(["r-1"]).get("r-1"), [{ id: "a-1", mime_type: "image/png", size: 4, name: "a.png" }]);
+    const image = db.prepare("SELECT id, mime_type, size, name, file FROM assets WHERE message_id = ?").get("r-1");
+    assert.deepEqual({ ...image }, { id: "a-1", mime_type: "image/png", size: 4, name: "a.png", file: "a-1.png" });
     db.close();
   });
 

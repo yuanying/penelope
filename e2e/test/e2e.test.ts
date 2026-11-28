@@ -287,6 +287,7 @@ describe("the Pod end to end", () => {
     );
     assert.equal(found.stdout, "");
     assert.match(exec("sandbox", "cat /proc/1/environ | tr '\\0' '\\n'").stdout, new RegExp(`PENELOPE_BACKEND_TOKEN=${BACKEND_SURROGATE}`));
+    exec("sandbox", "test ! -e /var/lib/penelope");
     // The intake's and the Sentinel's sockets are not in the sandbox.
     assert.equal(exec("sandbox", "ls /run/penelope 2>&1; true").stdout.includes("intake"), false);
     // The backend's port for the UI is reached over loopback, and asks for the same login.

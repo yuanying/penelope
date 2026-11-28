@@ -1,7 +1,4 @@
-// One row of the activity record on a page of its own (docs/design/README.md,
-// 15): a turn with its recorded flow, a night with its four
-// steps, or a closed sub-agent with its turns. Each has an address, so that
-// a reply in the conversation opens the turn that sent it.
+// Detail pages for a turn, a night, or a sub-agent.
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Code } from "@astryxdesign/core/Code";
