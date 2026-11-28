@@ -70,7 +70,7 @@ The `Makefile` is the entry point for both languages, and CI only calls its targ
 port with `PORT=`) over a mock of the backend's API, and rebuilds and reloads the open pages when a file under `src/` or
 `public/` changes. There is no login. The avatar is one of `assets/avatars/` (`AVATAR=natsumi`; penelope by default). The made-up data comes in scenes (`packages/web/dev/scenes.ts`; it prints them on
 start): open `/?scene=<name>` to pick one, which the browser keeps in a cookie and which starts over each time it is
-picked. What is changed through the UI (a message, a removed schedule) lasts until then. The fixtures are typed with
+picked. What is changed through the UI (a saved memory edit or model setting) lasts until then. The fixtures are typed with
 `packages/contract`, so a change to the API fails the type check until they follow it.
 
 ### The house's screen over a made-up house

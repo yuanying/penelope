@@ -477,8 +477,7 @@ spec:
         emptyDir:
           medium: Memory
           sizeLimit: 1Mi
-      # The backend's keys: github-client-secret, and web-push-vapid-key when
-      # Web Push is on. Readable by the backend (1001).
+      # The GitHub client secret, readable by the backend (1001).
       - name: backend-secrets
         secret:
           secretName: penelope-backend

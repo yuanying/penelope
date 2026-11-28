@@ -5,7 +5,7 @@ import type { AddressInfo } from "node:net";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type StreamEvent } from "@penelope/contract";
+import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX } from "@penelope/contract";
 
 import { Inbox } from "../src/a2a/inbox.ts";
 import { SubAgents } from "../src/agents.ts";
@@ -13,7 +13,6 @@ import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
 import { ModelSettings } from "../src/model-settings.ts";
-import { Feed } from "../src/feed.ts";
 import { Heartbeat } from "../src/heartbeat.ts";
 import { close, listenTcp } from "../src/http.ts";
 import { MemoryView } from "../src/memory-view.ts";
@@ -46,20 +45,17 @@ async function setup(
     timeZone,
     redeliverMs: 300_000,
   });
-  const feed = new Feed();
-  const streamed: StreamEvent[] = [];
-  feed.subscribe(undefined, (_id, event) => streamed.push(event));
   const assetsDir = path.join(dir, "assets");
   const assets = new Assets(db, assetsDir, { now: clock.now });
-  const conversation = new Conversation(db, feed, { now: clock.now, assets });
-  const agents = new SubAgents(db, feed, conversation, { now: clock.now });
+  const conversation = new Conversation(db, { now: clock.now, assets });
+  const agents = new SubAgents(db, { now: clock.now });
   const memoryDir = path.join(dir, "memory");
   mkdirSync(memoryDir);
   const memory = new Memory(memoryDir, { name: "penelope-backend", email: "backend@penelope.invalid" });
   const memoryView = new MemoryView(memoryDir, db, { now: clock.now, timeZone });
   const schedules = new Schedules(db, { now: clock.now, timeZone });
   const inbox = new Inbox(db, queue, { assets, now: clock.now, limits: { deadlineMs: 86_400_000, maxOpenTasks: 3 } });
-  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone, sleepReportTimeoutMs: 60 * 60_000 });
+  const record = new ActivityRecord(db, { now: clock.now, timeZone, sleepReportTimeoutMs: 60 * 60_000 });
   const modelSettings = new ModelSettings(db, clock.now);
   const sleepiness = new Sleepiness(db, clock.now, timeZone);
   const logs: string[] = [];
@@ -80,7 +76,7 @@ async function setup(
   });
   const call = (pathname: string, options: Ask = {}) =>
     ask({ port }, pathname, { ...options, headers: { connection: "close", authorization: `Bearer ${TOKEN}`, ...options.headers } });
-  return { queue, conversation, agents, record, streamed, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, logs, inbox, db, feed, clock, assets, assetsDir, modelSettings };
+  return { queue, conversation, record, memoryDir, memoryView, sourcesDir: path.join(dir, "sources"), call, logs, inbox, db, clock, assets, assetsDir, modelSettings };
 }
 
 /** The first bytes of each kind of image a reply may carry, followed by `padding` zero bytes. */
@@ -434,20 +430,12 @@ describe("the sandbox's API", () => {
   });
 
   describe("replies", () => {
-    it("are kept in the history and sent down the stream", async (t) => {
-      const { call, conversation, streamed } = await setup(t);
-      const answer = await call("/v1/replies", { json: { agent: "main", text: "done", in_reply_to: 3 } });
+    it("counts a legacy reply against the turn the runner names", async (t) => {
+      const { call, record } = await setup(t);
+      await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-1", result: "done" } });
+      const answer = await call("/v1/replies", { json: { agent: "main", text: "done", turn_id: "t-1" } });
       assert.equal(answer.status, 201);
-      const { id } = answer.json();
-      assert.equal(conversation.page().entries[0]?.id, id);
-      assert.equal(streamed[0]?.event, "reply");
-    });
-
-    it("are tied to the turn the runner names", async (t) => {
-      const { call, conversation } = await setup(t);
-      await call("/v1/replies", { json: { agent: "main", text: "done", turn_id: "t-1" } });
-      const [entry] = conversation.page().entries;
-      assert.equal(entry?.kind === "agent" && entry.turn_id, "t-1");
+      assert.equal(record.turn("t-1").turn.replies, 1);
     });
 
     it("are refused without text", async (t) => {
@@ -458,19 +446,16 @@ describe("the sandbox's API", () => {
   });
 
   describe("replies with images", () => {
-    it("keep a copy of each image, tied to the reply, in the history and down the stream", async (t) => {
+    it("keep a copy of each image in the order sent", async (t) => {
       // Guards against: an image the owner is not shown, shown in another order, or read from the sandbox's file later.
-      const { call, conversation, streamed, assets } = await setup(t);
+      const { call, assets } = await setup(t);
       const sent = [image.png(100), image.jpeg(), image.gif(), image.webp()];
       const answer = await call("/v1/replies", {
         json: { agent: "main", text: "描いたよ", images: sent.map((bytes, i) => upload(`draw-${i}.img`, bytes)) },
       });
       assert.equal(answer.status, 201, answer.text);
       const { id } = answer.json();
-      const [entry] = conversation.page().entries;
-      assert.equal(entry?.id, id);
-      assert.equal(entry?.kind, "agent");
-      const images = entry?.kind === "agent" ? (entry.images ?? []) : [];
+      const images = assets.ofMessages([id]).get(id) ?? [];
       assert.deepEqual(
         images.map(({ mime_type, size, name }) => ({ mime_type, size, name })),
         [
@@ -487,27 +472,17 @@ describe("the sandbox's API", () => {
         assert.equal(found.mime_type, kept.mime_type);
         assert.deepEqual(readFileSync(found.file), sent[i]);
       });
-      const reply = streamed.find((event) => event.event === "reply");
-      assert.deepEqual(reply?.event === "reply" ? reply.data.images : undefined, images);
-    });
-
-    it("leave out the images of a reply that has none", async (t) => {
-      const { call, conversation, streamed } = await setup(t);
-      assert.equal((await call("/v1/replies", { json: { agent: "main", text: "x", images: [] } })).status, 201);
-      const [entry] = conversation.page().entries;
-      assert.ok(entry && !("images" in entry));
-      assert.ok(streamed[0]?.event === "reply" && !("images" in streamed[0].data));
     });
 
     it("take four images of the largest size in one reply", async (t) => {
       // Guards against: a body limit that refuses what the limits of the images allow.
-      const { call, conversation } = await setup(t);
+      const { call, assets } = await setup(t);
       const largest = image.png(REPLY_IMAGE_MAX_BYTES - 8);
       const images = Array.from({ length: REPLY_IMAGES_MAX }, (_, i) => upload(`big-${i}.png`, largest));
       const answer = await call("/v1/replies", { json: { agent: "main", text: "大きいよ", images } });
       assert.equal(answer.status, 201, answer.text.slice(0, 200));
-      const [entry] = conversation.page().entries;
-      assert.equal(entry?.kind === "agent" ? entry.images?.length : 0, REPLY_IMAGES_MAX);
+      const { id } = answer.json();
+      assert.equal(assets.ofMessages([id]).get(id)?.length, REPLY_IMAGES_MAX);
     });
 
     for (const [why, images, said] of [
@@ -521,48 +496,28 @@ describe("the sandbox's API", () => {
     ] as const) {
       it(`are refused whole, text and all, for ${why}`, async (t) => {
         // Guards against: a reply that reaches the owner with an image missing, or a copy kept of what was refused.
-        const { call, conversation, streamed, assetsDir } = await setup(t);
+        const { call, db, assetsDir } = await setup(t);
         const answer = await call("/v1/replies", { json: { agent: "main", text: "見て", images } });
         assert.equal(answer.status, 400);
         assert.match(answer.json().error, said);
-        assert.deepEqual(conversation.page().entries, []);
-        assert.deepEqual(streamed, []);
+        assert.deepEqual(db.prepare("SELECT id FROM history").all(), []);
         assert.deepEqual(existsSync(assetsDir) ? readdirSync(assetsDir) : [], []);
       });
     }
 
     it("are refused whole with 500 when the copies cannot be written", async (t) => {
       // Guards against: a reply that reaches the owner without the images it said it had.
-      const { call, conversation, streamed, assetsDir } = await setup(t);
+      const { call, db, assetsDir } = await setup(t);
       writeFileSync(assetsDir, "not a directory");
       const answer = await call("/v1/replies", { json: { agent: "main", text: "見て", images: [upload("a.png", image.png())] } });
       assert.equal(answer.status, 500);
       assert.match(answer.json().error, /images/);
-      assert.deepEqual(conversation.page().entries, []);
-      assert.deepEqual(streamed, []);
+      assert.deepEqual(db.prepare("SELECT id FROM history").all(), []);
     });
   });
 
   describe("activity", () => {
     const at = "2026-11-14T09:00:00Z";
-    it("is sent down the stream", async (t) => {
-      const { call, streamed } = await setup(t);
-      const activities = [
-        { kind: "turn_start", at, turn_id: "t-1" },
-        { kind: "thinking", at, turn_id: "t-1", text: "hm" },
-        { kind: "tool_call", at, turn_id: "t-1", call_id: "c-1", name: "bash", arguments: { command: "ls" } },
-        { kind: "tool_result", at, turn_id: "t-1", call_id: "c-1", is_error: false, output: "a\n" },
-        { kind: "message", at, turn_id: "t-1", text: "done" },
-        { kind: "turn_end", at, turn_id: "t-1" },
-      ];
-      const answer = await call("/v1/activity", { json: { agent: "main", activities } });
-      assert.equal(answer.status, 204);
-      assert.deepEqual(
-        streamed.filter((e) => e.event === "activity").map((e) => e.event === "activity" && e.data.activity),
-        activities,
-      );
-    });
-
     it("is refused when a block is not one of the kinds", async (t) => {
       const { call } = await setup(t);
       for (const activity of [
@@ -579,14 +534,13 @@ describe("the sandbox's API", () => {
     });
 
     it("keeps none of a request with one block of the wrong shape", async (t) => {
-      // Guards against: part of a refused request in the record and the stream (docs/sandbox-api.md).
-      const { call, streamed } = await setup(t);
+      const { call, record } = await setup(t);
       const activities = [
         { kind: "turn_start", at, turn_id: "t-1" },
         { kind: "thinking", at, turn_id: "t-1" },
       ];
       assert.equal((await call("/v1/activity", { json: { agent: "main", activities } })).status, 400);
-      assert.deepEqual(streamed, []);
+      assert.deepEqual(record.day({ day: "2026-11-14" }).rows, []);
     });
   });
 
@@ -655,12 +609,6 @@ describe("the sandbox's API", () => {
       await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-denied" } });
 
       assert.deepEqual(logs, ["memory: a turn could not be committed: git add: permission denied (affected=1)"]);
-    });
-
-    it("sets the agent waiting", async (t) => {
-      const { call, streamed } = await setup(t);
-      await call("/v1/turns/end", { json: { agent: "main", turn_id: "t-9" } });
-      assert.deepEqual(streamed, [{ event: "state", data: { agent: "main", state: "waiting" } }]);
     });
 
     it("keeps how the turn went and what it was given for the record", async (t) => {
@@ -848,35 +796,18 @@ describe("the sandbox's API", () => {
       activities: [{ kind, at, turn_id: "t-1", ...extra }],
     });
 
-    it("are kept as the runner says, sent down the stream, and listed until closed", async (t) => {
-      const { call, agents, streamed } = await setup(t);
+    it("records the sub-agent's purpose and closure for the activity record", async (t) => {
+      const { call, record } = await setup(t);
       assert.equal((await call("/v1/agents", { json: started })).status, 204);
-      const t0 = "2026-11-14T09:00:00.000Z";
-      assert.deepEqual(agents.list(), [{ agent: "review-pr-22", purpose: "review PR 22", state: "waiting", started_at: t0, state_since: t0 }]);
-      assert.deepEqual(streamed, [{ event: "agent", data: started }]);
-
+      assert.equal(record.subAgent(started.agent).sub_agent.closed_at, undefined);
       assert.equal((await call("/v1/agents", { json: { ...started, closed: true } })).status, 204);
-      assert.deepEqual(agents.list(), []);
-      assert.deepEqual(streamed.at(-1), { event: "agent", data: { ...started, closed: true } });
-    });
-
-    it("are kept with the last status the runner sent, across a restart of the backend", async (t) => {
-      const { call, db, feed, conversation, clock } = await setup(t);
-      await call("/v1/agents", { json: started });
-      clock.advance(5);
-      await call("/v1/agents", { json: { ...started, purpose: "review PR 22 again" } });
-      await call("/v1/agents", { json: { agent: "dig-logs", purpose: "dig the logs", closed: false } });
-      await call("/v1/agents", { json: { agent: "dig-logs", purpose: "dig the logs", closed: true } });
-      const again = new SubAgents(db, feed, new Conversation(db, feed, { now: clock.now }), { now: clock.now });
-      const t0 = "2026-11-14T09:00:00.000Z";
-      assert.deepEqual(again.list(), [
-        { agent: "review-pr-22", purpose: "review PR 22 again", state: "waiting", started_at: t0, state_since: t0 },
-      ]);
-      assert.equal(conversation.stateOf("review-pr-22").state, "waiting");
+      const { sub_agent } = record.subAgent(started.agent);
+      assert.equal(sub_agent.purpose, started.purpose);
+      assert.ok(sub_agent.closed_at);
     });
 
     it("are refused as main, under a name of another shape, or without a purpose or closed", async (t) => {
-      const { call, agents, streamed } = await setup(t);
+      const { call } = await setup(t);
       for (const body of [
         { ...started, agent: "main" },
         { ...started, agent: "Review" },
@@ -893,14 +824,12 @@ describe("the sandbox's API", () => {
         assert.equal(answer.status, 400, JSON.stringify(body));
         assert.equal(typeof answer.json().error, "string");
       }
-      assert.deepEqual(agents.list(), []);
-      assert.deepEqual(streamed, []);
       assert.equal((await call("/v1/agents")).status, 405);
     });
 
     it("cannot reply, answer an A2A task or touch the schedules", async (t) => {
       // Guards against: a sub-agent's words reaching the owner or another agent (ADR-0022).
-      const { call, conversation } = await setup(t);
+      const { call } = await setup(t);
       const agent = "review-pr-22";
       for (const [pathname, options] of [
         ["/v1/replies", { json: { agent, text: "done" } }],
@@ -914,7 +843,6 @@ describe("the sandbox's API", () => {
         assert.equal(answer.status, 400, pathname);
         assert.equal(typeof answer.json().error, "string");
       }
-      assert.deepEqual(conversation.page().entries, []);
     });
 
     it("tell the main agent they stopped by events to herself, under their own stream", async (t) => {
@@ -950,104 +878,39 @@ describe("the sandbox's API", () => {
       assert.deepEqual((await call("/v1/events?agent=main&wait=0")).json(), { events: [] });
     });
 
-    it("send their activity down the stream and are thinking until their turn ends", async (t) => {
-      const { call, agents, streamed } = await setup(t);
-      await call("/v1/agents", { json: started });
-      const startedAt = "2026-11-14T09:01:00Z";
-      const turn = (kind: string, when: string, extra = {}) => ({
-        agent: "review-pr-22",
-        activities: [{ kind, at: when, turn_id: "t-1", ...extra }],
-      });
-      assert.equal((await call("/v1/activity", { json: turn("turn_start", startedAt) })).status, 204);
-      assert.deepEqual(agents.list()[0]?.state, "thinking");
-      assert.equal(agents.list()[0]?.state_since, startedAt);
-      assert.equal(agents.list()[0]?.started_at, "2026-11-14T09:00:00.000Z");
-      await call("/v1/activity", { json: turn("message", "2026-11-14T09:02:00Z", { text: "so" }) });
-      assert.equal(agents.list()[0]?.state_since, startedAt, "a block of the same turn does not move it");
-      assert.deepEqual(streamed.slice(1, 3), [
-        { event: "state", data: { agent: "review-pr-22", state: "thinking" } },
-        { event: "activity", data: { agent: "review-pr-22", activity: { kind: "turn_start", at: startedAt, turn_id: "t-1" } } },
-      ]);
-      await call("/v1/activity", { json: turn("turn_end", "2026-11-14T09:03:00Z") });
-      assert.deepEqual(agents.list()[0]?.state, "waiting");
-      assert.equal(agents.list()[0]?.state_since, "2026-11-14T09:03:00Z");
-      assert.deepEqual(streamed.at(-1), { event: "state", data: { agent: "review-pr-22", state: "waiting" } });
-    });
-
-    it("are waiting at the end of their turn and have /memory committed under their name", async (t) => {
-      const { call, agents, memoryDir, streamed } = await setup(t);
+    it("have /memory committed under their name", async (t) => {
+      const { call, memoryDir } = await setup(t);
       await call("/v1/agents", { json: started });
       await call("/v1/activity", { json: block("review-pr-22", "turn_start") });
       writeFileSync(path.join(memoryDir, "notes.md"), "# notes\n");
       // The runner sends the turn_end block before the end of the turn.
       await call("/v1/activity", { json: block("review-pr-22", "turn_end") });
       assert.equal((await call("/v1/turns/end", { json: { agent: "review-pr-22", turn_id: "t-1" } })).status, 204);
-      assert.equal(agents.list()[0]?.state, "waiting");
-      assert.deepEqual(streamed.at(-1), { event: "state", data: { agent: "review-pr-22", state: "waiting" } });
       const log = execFileSync("git", ["-c", `safe.directory=${memoryDir}`, "log", "--format=%s%n%b"], { cwd: memoryDir, encoding: "utf8" });
       assert.equal(log.trim(), "Turn t-1\nAgent: review-pr-22");
     });
 
-    it("keep their state and since when across a restart of the backend", async (t) => {
-      // Guards against: a sub-agent shown as waiting since the restart when it has waited since yesterday.
-      const { call, db, feed, clock } = await setup(t);
-      await call("/v1/agents", { json: started });
-      await call("/v1/activity", { json: block("review-pr-22", "turn_start") });
-      await call("/v1/activity", { json: { agent: "review-pr-22", activities: [{ kind: "turn_end", at: "2026-11-14T09:01:00Z", turn_id: "t-1" }] } });
-      clock.advance(24 * 60);
-      const agents = new SubAgents(db, feed, new Conversation(db, feed, { now: clock.now }), { now: clock.now });
-      assert.deepEqual(agents.list()[0], {
-        agent: "review-pr-22",
-        purpose: "review PR 22",
-        state: "waiting",
-        started_at: "2026-11-14T09:00:00.000Z",
-        state_since: "2026-11-14T09:01:00Z",
-      });
-    });
-
-    it("are listed by their last turn_start or turn_end, whatever else came", async (t) => {
-      const { call, agents, conversation, streamed } = await setup(t);
-      await call("/v1/agents", { json: started });
-      conversation.activities("review-pr-22", [{ kind: "thinking", at, turn_id: "t-1", text: "hm" }]);
-      assert.equal(agents.list()[0]?.state, "waiting");
-      assert.equal(streamed.at(-1)?.event, "activity", "no state for a block other than a turn's start or end");
-      conversation.activities("review-pr-22", [{ kind: "turn_start", at, turn_id: "t-2" }]);
-      await call("/v1/turns/end", { json: { agent: "review-pr-22", turn_id: "t-2" } });
-      assert.deepEqual(streamed.at(-1), { event: "state", data: { agent: "review-pr-22", state: "waiting" } });
-      assert.equal(agents.list()[0]?.state, "thinking", "the end of a turn alone is not in the record");
-    });
-
-    it("are not listed when only their activity came, and are listed with their state once the runner names them", async (t) => {
-      const { call, agents, streamed } = await setup(t);
-      assert.equal((await call("/v1/activity", { json: block("dig-logs", "turn_start") })).status, 204);
-      assert.equal(streamed.at(-1)?.event, "activity");
-      assert.deepEqual(agents.list(), []);
-      await call("/v1/agents", { json: { agent: "dig-logs", purpose: "dig the logs", closed: false } });
-      assert.deepEqual(agents.list().map((agent) => agent.state), ["thinking"]);
-    });
-
     it("cannot send activity or end a turn under a name of another shape", async (t) => {
-      const { call, streamed } = await setup(t);
+      const { call } = await setup(t);
       assert.equal((await call("/v1/activity", { json: block("Dig", "turn_start") })).status, 400);
       assert.equal((await call("/v1/turns/end", { json: { agent: "a b", turn_id: "t-1" } })).status, 400);
-      assert.deepEqual(streamed, []);
     });
   });
 
   it("answers 413 to a body over the 16 MiB of the spec, and keeps none of it", async (t) => {
     // Guards against: a sandbox that can make the backend read and keep a body of any size.
-    const { call, streamed } = await setup(t);
+    const { call, record } = await setup(t);
     const answer = await call("/v1/activity", { json: { agent: "main", activities: [], padding: "x".repeat(16 * 1024 * 1024) } });
     assert.equal(answer.status, 413);
-    assert.deepEqual(streamed, []);
+    assert.deepEqual(record.day({ day: "2026-11-14" }).rows, []);
   });
 
   it("answers 413 to a reply over the 64 MiB of the spec, and keeps none of it", async (t) => {
     // Guards against: a reply's images making the backend read and keep a body of any size.
-    const { call, conversation } = await setup(t);
+    const { call, db } = await setup(t);
     const answer = await call("/v1/replies", { json: { agent: "main", text: "x".repeat(64 * 1024 * 1024) } });
     assert.equal(answer.status, 413);
-    assert.deepEqual(conversation.page().entries, []);
+    assert.deepEqual(db.prepare("SELECT id FROM history").all(), []);
   });
 
   it("answers 404 to a path it does not have", async (t) => {

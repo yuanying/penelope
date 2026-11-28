@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { createECDH, generateKeyPairSync } from "node:crypto";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import path from "node:path";
@@ -10,8 +9,6 @@ import { describe, it } from "node:test";
 import { startBackend } from "../src/app.ts";
 import { loadConfig } from "../src/config.ts";
 import { openDatabase } from "../src/db.ts";
-import { PushSubscriptions } from "../src/push/notifier.ts";
-import type { WebPushRequest } from "../src/push/web-push.ts";
 import { run } from "../src/main.ts";
 import { ask, tempDir } from "./support.ts";
 
@@ -61,7 +58,7 @@ describe("the backend", () => {
     // The UI's port answers, and without a login it lets no one in.
     const ui = { port: backend.port };
     assert.equal((await ask(ui, "/healthz")).status, 200);
-    assert.equal((await ask(ui, "/api/history")).status, 401);
+    assert.equal((await ask(ui, "/api/record/unseen")).status, 401);
   });
 });
 
@@ -123,52 +120,6 @@ describe("the backend's avatar", () => {
     const end = await ask({ socketPath: config.sandboxSocket }, "/v1/turns/end", { headers: { authorization: "Bearer real-token" }, json: { agent: "main", turn_id: "t-1" } });
     assert.equal(end.status, 204);
     assert.ok((await ask(ui, "/api/agent/icons/happy")).body.includes("happy"));
-  });
-});
-
-describe("the backend with Web Push", () => {
-  it("sends a notice of a reply to the subscriptions, and has the UI subscribe with its key", async (t) => {
-    const dir = tempDir(t);
-    writeFileSync(path.join(dir, "token"), "real-token\n");
-    writeFileSync(path.join(dir, "vapid.pem"), generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" }));
-    const config = loadConfig(
-      {
-        PENELOPE_DATABASE: path.join(dir, "state/backend.sqlite"),
-        PENELOPE_SOURCES_DIR: path.join(dir, "sources"),
-        PENELOPE_MEMORY_DIR: path.join(dir, "memory"),
-        PENELOPE_INTAKE_SOCKET: path.join(dir, "intake/backend.sock"),
-        PENELOPE_SANDBOX_SOCKET: path.join(dir, "sandbox/backend.sock"),
-        PENELOPE_LISTEN: "127.0.0.1:0",
-        PENELOPE_SANDBOX_TOKEN_FILE: path.join(dir, "token"),
-        PENELOPE_PUBLIC_URL: "https://penelope.example.com",
-        PENELOPE_WEB_PUSH_VAPID_KEY_FILE: path.join(dir, "vapid.pem"),
-        PENELOPE_AGENT_NAME: "Iris",
-      },
-      (file) => execFileSync("cat", [file], { encoding: "utf8" }),
-    );
-    const sent: WebPushRequest[] = [];
-    let answered = () => {};
-    const done = new Promise<void>((resolve) => (answered = resolve));
-    const backend = await startBackend(config, {
-      log: () => {},
-      sendWebPush: async (request) => {
-        sent.push(request);
-        answered();
-        return 201;
-      },
-    });
-    t.after(() => backend.close());
-    // A browser's subscription, as the owner's session would have registered it.
-    const db = openDatabase(config.databasePath);
-    t.after(() => db.close());
-    const browser = createECDH("prime256v1");
-    browser.generateKeys();
-    new PushSubscriptions(db, { now: Date.now }).save({ kind: "web-push", endpoint: "https://push.example.com/send/1", p256dh: browser.getPublicKey(), auth: Buffer.alloc(16, 3) });
-
-    const reply = await ask({ socketPath: config.sandboxSocket }, "/v1/replies", { headers: { authorization: "Bearer real-token" }, json: { agent: "main", text: "seen" } });
-    assert.equal(reply.status, 201);
-    await done;
-    assert.deepEqual(sent.map((request) => request.endpoint), ["https://push.example.com/send/1"]);
   });
 });
 

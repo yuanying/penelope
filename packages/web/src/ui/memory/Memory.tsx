@@ -11,7 +11,7 @@ import { EditMemory, type EditTarget } from "./Edit.tsx";
 import { FileView, HomeView, SearchView } from "./files.tsx";
 import { HOME, MemoryScope, memoryHash, ReadBody, TZ, useReading } from "./shared.tsx";
 
-export function MemoryPlace({ api, onUnauthorized, page, topInset }: { api: Api; onUnauthorized: () => void; page: MemoryPage | undefined; topInset: boolean }) {
+export function MemoryPlace({ api, onUnauthorized, page, readOnly }: { api: Api; onUnauthorized: () => void; page: MemoryPage | undefined; readOnly: boolean }) {
   const onFail = useCallback((error: unknown) => { if (error instanceof Unauthorized) onUnauthorized(); }, [onUnauthorized]);
   const address = page ? memoryHash(page) : HOME;
   const [reload, setReload] = useState(0);
@@ -40,7 +40,7 @@ export function MemoryPlace({ api, onUnauthorized, page, topInset }: { api: Api;
       window.dispatchEvent(new HashChangeEvent("hashchange"));
     } else setNotice(address);
   };
-  const beginEdit = !topInset && overview?.value?.can_edit ? begin : undefined;
+  const beginEdit = !readOnly && overview?.value?.can_edit ? begin : undefined;
   const scope = useMemo(() => ({ api, overview: overview?.value, onFail, beginEdit }), [api, overview, onFail, beginEdit]);
   const ready = overview !== undefined;
   const kind = page?.kind ?? "home";
@@ -56,7 +56,7 @@ export function MemoryPlace({ api, onUnauthorized, page, topInset }: { api: Api;
   const search = visited.search?.kind === "search" ? visited.search : undefined;
 
   return <MemoryScope.Provider value={scope}>
-    <section className={`memory-place${topInset ? " memory-inset" : ""}`} aria-label="記憶">
+    <section className="memory-place" aria-label="記憶">
       <header className="memory-header">
         {/* A file, a change and a history have a heading of their own: there this is the name of the place. */}
         {list ? <Heading level={1}>記憶</Heading> : <p className="memory-title">記憶</p>}

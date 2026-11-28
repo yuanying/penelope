@@ -39,7 +39,6 @@ import {
   type TurnResult,
 } from "@penelope/contract";
 
-import type { Feed } from "./feed.ts";
 import { iso } from "./time.ts";
 
 const DAY_MS = 86_400_000;
@@ -48,7 +47,6 @@ const PRUNE_BATCH = 500;
 /** How often the old is removed. */
 const PRUNE_EVERY_MS = 3_600_000;
 /** Unreported sleep requests can cross the failure deadline without an event. */
-const UNSEEN_EVERY_MS = 15_000;
 /** Turns of a sub-agent on one page. */
 export const SUB_AGENT_PAGE = 20;
 
@@ -128,21 +126,17 @@ const SUB_AGENT_SELECT = `
 
 export class ActivityRecord {
   private readonly db: DatabaseSync;
-  private readonly feed: Feed;
   private readonly now: () => number;
   private readonly timeZone: string;
   private readonly sleepReportTimeoutMs: number;
   private readonly owner: string;
   private readonly log: (line: string) => void;
-  private lastUnseen: number | undefined;
 
   constructor(
     db: DatabaseSync,
-    feed: Feed,
     options: { now: () => number; timeZone: string; sleepReportTimeoutMs: number; owner?: number; log?: (line: string) => void },
   ) {
     this.db = db;
-    this.feed = feed;
     this.now = options.now;
     this.timeZone = options.timeZone;
     this.sleepReportTimeoutMs = options.sleepReportTimeoutMs;
@@ -195,7 +189,6 @@ export class ActivityRecord {
     if (end.night !== undefined) {
       this.db.prepare("UPDATE turns SET night_seq = ?, stage = ? WHERE turn_id = ?").run(end.night.seq, end.night.stage, end.turn_id);
     }
-    if (end.result === "failed") this.publishUnseen();
   }
 
   /** The numbers measured after committing a night turn; no paths or contents. */
@@ -231,7 +224,6 @@ export class ActivityRecord {
     } else if (kept !== null) {
       this.db.prepare("UPDATE session_rotations SET at = ?, stages = ?, started_at = ?, failed = ? WHERE row = ?").run(now, kept, started, failed, before.row);
     }
-    this.publishUnseen();
   }
 
   /** Copy counts for this attempt only: an earlier attempt may have reached a stage this one did not. */
@@ -276,7 +268,7 @@ export class ActivityRecord {
       return;
     }
     const failed = job.end === "timed-out" || job.end === "signaled" || (job.end === "exited" && (job.exit_code ?? 0) !== 0);
-    const added = this.db
+    this.db
       .prepare(
         `INSERT OR IGNORE INTO record_jobs (id, command, started_at, ended_at, seconds, end_kind, exit_code, signal, failed, received_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -293,7 +285,6 @@ export class ActivityRecord {
         failed ? 1 : 0,
         iso(this.now()),
       );
-    if (failed && Number(added.changes) > 0) this.publishUnseen();
   }
 
   /** The turn a reply belongs to: the one the runner names, else the main agent's turn under way. */
@@ -364,10 +355,7 @@ export class ActivityRecord {
       }
     }
     const expired = flow.length === 0 && Date.parse(row.at) < this.now() - RECORD_FLOW_DAYS * DAY_MS;
-    const replies = (this.db.prepare("SELECT row, id, at, text FROM history WHERE turn_id = ? ORDER BY row").all(turnId) as Array<{ row: number; id: string; at: string; text: string }>).map(
-      ({ row: line, id, at, text }) => ({ id, at, text, history_before: String(line + 1) }),
-    );
-    return { turn: turnOf(row), flow, expired, replies };
+    return { turn: turnOf(row), flow, expired };
   }
 
   /** The whole output of one tool's result in a turn. */
@@ -445,7 +433,6 @@ export class ActivityRecord {
     this.db
       .prepare("INSERT INTO record_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value")
       .run(`seen:${this.owner}`, iso(this.now()));
-    this.publishUnseen();
     return { unseen, previous_seen_at: previous };
   }
 
@@ -481,7 +468,6 @@ export class ActivityRecord {
     }
   }
 
-  /** Removes the old now and every hour, and sends the number of unseen failures down the feed when it changes. */
   start(): () => void {
     let pruning = false;
     const prune = () => {
@@ -493,33 +479,8 @@ export class ActivityRecord {
     };
     prune();
     const pruneTimer = setInterval(prune, PRUNE_EVERY_MS);
-    const unseenTimer = setInterval(() => this.publishUnseen(), UNSEEN_EVERY_MS);
     pruneTimer.unref();
-    unseenTimer.unref();
-    this.lastUnseen = this.unseenOrUndefined();
-    return () => {
-      clearInterval(pruneTimer);
-      clearInterval(unseenTimer);
-    };
-  }
-
-  /** Sends the number down the feed when it is not what was sent last. */
-  publishUnseen(): void {
-    const unseen = this.unseenOrUndefined();
-    if (unseen === undefined || unseen === this.lastUnseen) return;
-    this.lastUnseen = unseen;
-    this.feed.publish({ event: "record", data: { unseen } });
-  }
-
-  // ── Inside ──
-
-  private unseenOrUndefined(): number | undefined {
-    try {
-      return this.unseen();
-    } catch (error) {
-      this.log(`record: the unseen failures could not be counted: ${error instanceof Error ? error.message : String(error)}`);
-      return undefined;
-    }
+    return () => clearInterval(pruneTimer);
   }
 
   private state(key: string): string | undefined {

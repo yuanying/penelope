@@ -3,7 +3,7 @@
 //   :53/udp   a name server for the test's names, all of them this container
 //   :443      HTTPS, by Host: the model's API, GitHub's OAuth and API, the
 //             cluster's API server and gated's keys, an app under the
-//             Sentinel's wildcard registration, a browser's push service,
+//             Sentinel's wildcard registration,
 //             a host the Sentinel passes through, and Slack's Web API,
 //             Socket Mode and files
 //   :80       plain HTTP for the host the Sentinel passes through
@@ -49,9 +49,7 @@ const GITHUB_API = "api.github.com";
 const PLAIN = "plain.example.net";
 /** An app under the Sentinel's wildcard registration. */
 const APP = "a.apps.example.com";
-/** A browser's push service, which the backend posts the notices of the replies to itself. */
-const PUSH = "push.example.com";
-const NAMES = new Set([MODEL, HELPER, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, PUSH, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
+const NAMES = new Set([MODEL, HELPER, GITHUB, GITHUB_API, PLAIN, KUBERNETES, GATED, APP, "backend.example.com", SLACK, SLACK_SOCKET, SLACK_FILES]);
 const fakeSlack = slack({ app: secret("OUTSIDE_SLACK_APP_TOKEN_FILE"), bot: secret("OUTSIDE_SLACK_BOT_TOKEN_FILE") });
 const fakeCluster = cluster({
   backend: secret("OUTSIDE_KUBE_TOKEN_FILE"),
@@ -61,14 +59,11 @@ const fakeCluster = cluster({
 
 type Credential = "real" | "surrogate" | "none" | "other";
 type Seen = { at: string; scheme: "https" | "http"; host: string; method: string; path: string; credential: Credential };
-/** A push as the push service took it: the encrypted body, kept for the test to open with the browser's key. */
-type Push = { at: string; path: string; authorization: string; encoding: string; ttl: string; body: string };
 type ModelCall = { at: string; credential: Credential; stream: boolean; messages: ChatMessage[]; tools: string[] };
 
 const seen: Seen[] = [];
 const modelCalls: ModelCall[] = [];
 const lookups: Lookup[] = [];
-const pushes: Push[] = [];
 /** OAuth codes handed out, by code: the PKCE challenge and where they go back to. */
 const codes = new Map<string, { challenge: string; redirectUri: string }>();
 const tokens = new Set<string>();
@@ -92,23 +87,6 @@ async function bytes(request: http.IncomingMessage): Promise<Buffer> {
   const parts: Buffer[] = [];
   for await (const part of request) parts.push(part as Buffer);
   return Buffer.concat(parts);
-}
-
-/** Takes a push to a subscription under /send/, and says one under /send/gone- is no more (410), as a push service does for an ended one. */
-async function pushService(request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
-  const body = await bytes(request);
-  const path = (request.url ?? "").split("?")[0]!;
-  if (request.method !== "POST" || !path.startsWith("/send/")) return json(response, 404, { error: "not found" });
-  pushes.push({
-    at: new Date().toISOString(),
-    path,
-    authorization: request.headers.authorization ?? "",
-    encoding: request.headers["content-encoding"] ?? "",
-    ttl: String(request.headers.ttl ?? ""),
-    body: body.toString("base64url"),
-  });
-  response.writeHead(path.startsWith("/send/gone-") ? 410 : 201);
-  response.end();
 }
 
 function json(response: http.ServerResponse, status: number, value: unknown): void {
@@ -212,7 +190,6 @@ function outside(scheme: "https" | "http") {
       if (scheme === "https" && host === GATED) return fakeCluster.gatedKeys(request, response);
       if (scheme === "https" && host === SLACK) return fakeSlack.api(request, await body(request), response);
       if (scheme === "https" && host === SLACK_FILES) return fakeSlack.file(request, await bytes(request), response);
-      if (scheme === "https" && host === PUSH) return pushService(request, response);
       if (scheme === "https" && host === APP) {
         await body(request);
         response.writeHead(200, { "content-type": "text/plain" });
@@ -248,7 +225,6 @@ async function control(request: http.IncomingMessage, response: http.ServerRespo
   }
   if (request.method === "GET" && url.pathname === "/seen") return json(response, 200, { seen, lookups });
   if (request.method === "GET" && url.pathname === "/model") return json(response, 200, { calls: modelCalls });
-  if (request.method === "GET" && url.pathname === "/pushes") return json(response, 200, { pushes });
   if (request.method === "GET" && url.pathname === "/reviews") return json(response, 200, { reviews: fakeCluster.reviews });
   if (request.method === "POST" && url.pathname === "/assertion") {
     // What gated would put on a call of the subject to the host, in place of the token it took.

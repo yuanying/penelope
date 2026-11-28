@@ -1,5 +1,5 @@
 // One row of the activity record on a page of its own (docs/design/README.md,
-// 15): a turn with its flow and the replies it sent, a night with its four
+// 15): a turn with its recorded flow, a night with its four
 // steps, or a closed sub-agent with its turns. Each has an address, so that
 // a reply in the conversation opens the turn that sent it.
 import { Banner } from "@astryxdesign/core/Banner";
@@ -8,16 +8,13 @@ import { Code } from "@astryxdesign/core/Code";
 import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { Heading } from "@astryxdesign/core/Heading";
-import { Link } from "@astryxdesign/core/Link";
-import { Markdown } from "@astryxdesign/core/Markdown";
 import { type ReactNode, useEffect, useState } from "react";
 
 import type { Activity, MemoryChange, RecordFlowItem, RecordNightResponse, RecordSubAgentResponse, RecordTurn, RecordTurnResponse } from "@penelope/contract";
 
 import { type Api, Refused } from "../model/api.ts";
 import { ChevronLeftIcon } from "./icons.tsx";
-import { markdownLinks } from "./links.tsx";
-import { FlowLine } from "./Now.tsx";
+import { FlowLine } from "./FlowLine.tsx";
 import { dateTimeOf, failedStageOf, headlineText, isFresh, nightTitle, nightWarnings, spanOf, stagesOf } from "./record.ts";
 import { Counts, writerName } from "./memory/shared.tsx";
 import { RecordMark, RecordRowView, StageMark, StageMemory } from "./RecordRow.tsx";
@@ -138,7 +135,7 @@ function turnFacts(turn: RecordTurn): Array<[string, string]> {
 }
 
 function TurnPage({ api, data }: { api: Api; data: RecordTurnResponse }) {
-  const { turn, flow, expired, replies } = data;
+  const { turn, flow, expired } = data;
   return (
     <>
       <Head title={headlineText(turn)} mark={<RecordMark mark={TURN_MARKS[turn.result]} />} result={TURN_RESULTS[turn.result]} reason={turn.reason} bad={turn.result === "failed"} />
@@ -151,33 +148,18 @@ function TurnPage({ api, data }: { api: Api; data: RecordTurnResponse }) {
           <h2>{w.flow}</h2>
           <ol className="flow">
             {flow.map((item, index) => (
-              <FlowLine key={index} item={item} all={flow} result={(call, all) => <StoredResult api={api} turn={turn.id} call={call} all={all} />} />
+              <FlowLine key={index} item={item} result={(call) => <StoredResult api={api} turn={turn.id} call={call} all={flow} />} />
             ))}
           </ol>
         </section>
       )}
-      <section className="record-section" aria-label={w.replies}>
-        <h2>{w.replies}</h2>
-        {replies.length === 0 ? (
-          <p className="muted">{w.noReplies}</p>
-        ) : (
-          replies.map((reply) => (
-            <div key={reply.id} className="record-reply">
-              <Markdown {...markdownLinks}>{reply.text}</Markdown>
-              <Link href={hashOf({ place: "talk", reply: { id: reply.id, before: reply.history_before } })} color="secondary" hasUnderline>
-                {w.toTalk}
-              </Link>
-            </div>
-          ))
-        )}
-      </section>
     </>
   );
 }
 
 /** A tool's result kept by the record: folded with its size, and read from the backend when it is opened. */
-function StoredResult({ api, turn, call, all }: { api: Api; turn: string; call: Extract<Activity, { kind: "tool_call" }>; all: readonly unknown[] }) {
-  const result = (all as RecordFlowItem[]).find((item): item is Extract<RecordFlowItem, { kind: "tool_result" }> => item.kind === "tool_result" && item.call_id === call.call_id);
+function StoredResult({ api, turn, call, all }: { api: Api; turn: string; call: Extract<Activity, { kind: "tool_call" }>; all: readonly RecordFlowItem[] }) {
+  const result = all.find((item): item is Extract<RecordFlowItem, { kind: "tool_result" }> => item.kind === "tool_result" && item.call_id === call.call_id);
   const [output, setOutput] = useState<{ text: string } | { gone: true } | { failed: true } | undefined>(undefined);
   if (result === undefined) return null;
   const label = (result.is_error ? w.openErrorResult : w.openResult)(result.lines, sizeOf(result.bytes));

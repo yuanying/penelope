@@ -17,7 +17,7 @@ ca outside-ca "penelope e2e outside CA"
 
 openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj "/CN=outside" \
   -keyout outside.key -out outside.csr 2>/dev/null
-printf 'subjectAltName=DNS:model.example.com,DNS:github.com,DNS:api.github.com,DNS:plain.example.net,DNS:kubernetes.example.com,DNS:auth.example.com,DNS:a.apps.example.com,DNS:slack.com,DNS:wss-primary.slack.com,DNS:files.slack.com,DNS:push.example.com,DNS:helper.example.com\nextendedKeyUsage=serverAuth\n' > outside.ext
+printf 'subjectAltName=DNS:model.example.com,DNS:github.com,DNS:api.github.com,DNS:plain.example.net,DNS:kubernetes.example.com,DNS:auth.example.com,DNS:a.apps.example.com,DNS:slack.com,DNS:wss-primary.slack.com,DNS:files.slack.com,DNS:helper.example.com\nextendedKeyUsage=serverAuth\n' > outside.ext
 openssl x509 -req -in outside.csr -CA outside-ca.crt -CAkey outside-ca.key -CAcreateserial -days 2 \
   -extfile outside.ext -out outside.crt 2>/dev/null
 rm -f outside.csr outside.ext outside-ca.srl
@@ -32,8 +32,6 @@ done
 # The Slack App's tokens, which the receivers and the fake Slack hold: the plugin refuses a token without its prefix.
 printf 'xapp-1-A0E2E-%s\n' "$(openssl rand -hex 24)" > slack-app-token
 printf 'xoxb-e2e-%s\n' "$(openssl rand -hex 24)" > slack-bot-token
-# The backend's VAPID key for Web Push, which only the backend holds.
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem 2>/dev/null
 
 # The containers run as different users; these are the test's own throwaway keys.
 chmod 0644 ./*

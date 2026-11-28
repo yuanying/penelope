@@ -1,7 +1,7 @@
 // The activity record in the Web UI (docs/ui-api.md, "活動の記録";
 // docs/design/README.md, 15): the count of the failures not seen, the list a
 // day at a time, and each turn, night and closed sub-agent on its own page,
-// reached by its address, and the way to and from the conversation.
+// reached by its address.
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, describe, it } from "node:test";
 
@@ -14,7 +14,6 @@ import { timeOf, words } from "../src/ui/words.ts";
 import { FakeBackend } from "./fake-backend.ts";
 
 const w = words.record;
-const sleep = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
 type HappyWindow = { happyDOM: { setViewport: (viewport: { width: number; height?: number }) => void } };
 
 /** A local time on the fake backend's day, 2026-11-17. */
@@ -88,7 +87,7 @@ afterEach(() => {
 
 function start(backend: FakeBackend, hash = "") {
   window.history.replaceState(null, "", `/${hash}`);
-  render(<App fetch={backend.fetch} sleep={sleep} />);
+  render(<App fetch={backend.fetch} />);
   return backend;
 }
 
@@ -108,24 +107,11 @@ const list = () => screen.findByRole("region", { name: w.title });
 const rowOf = async (text: string | RegExp) => (await within(await list()).findByText(text)).closest("li") as HTMLElement;
 
 describe("the count of the failures not seen", () => {
-  it("is on the activity record's place, and follows the stream", async () => {
-    const backend = new FakeBackend();
-    backend.unseen = 2;
-    start(backend);
-    await backend.connected();
-    assert.ok(await screen.findByRole("button", { name: w.railLabel(2) }));
-    await act(async () => backend.send({ event: "record", data: { unseen: 3 } }));
-    assert.ok(await screen.findByRole("button", { name: w.railLabel(3) }));
-    await act(async () => backend.send({ event: "record", data: { unseen: 0 } }));
-    assert.ok(await screen.findByRole("button", { name: words.places.log }));
-  });
-
   it("is on the phone's menu button", async () => {
     (window as unknown as HappyWindow).happyDOM.setViewport({ width: 390, height: 844 });
     const backend = new FakeBackend();
     backend.unseen = 4;
     start(backend);
-    await backend.connected();
     assert.ok(await screen.findByRole("button", { name: w.menuLabel(4) }));
   });
 
@@ -137,7 +123,6 @@ describe("the count of the failures not seen", () => {
     const old = turn("t-old", 9, 30, { result: "failed", reason: "前のもの", failed_at: at(9, 31) });
     backend.recordDays.set(backend.today, dayOf(backend.today, [failed, old]));
     start(backend);
-    await backend.connected();
     await press(screen.findByRole("button", { name: w.railLabel(1) }));
     assert.ok(await screen.findByText(w.unseenBanner(1)));
     assert.equal(backend.seenTold, 1);
@@ -173,14 +158,13 @@ describe("the list of the activity record", () => {
     assert.ok(screen.getByText("14:40"));
   });
 
-  it("adds a turn to the list when the stream says one ended", async () => {
+  it("shows newly completed turns when the record is refreshed", async () => {
     const backend = new FakeBackend();
     backend.recordDays.set(backend.today, dayOf(backend.today, [failed]));
     start(backend, "#/record");
     await rowOf("[FIRING warning] HighMemoryUsage");
-    await backend.connected();
     backend.recordDays.set(backend.today, dayOf(backend.today, [turn("t-new", 15, 0, { triggers: [{ seq: 9, source: "slack", summary: "新しいメンション" }] }), failed]));
-    await act(async () => backend.send({ event: "activity", data: { agent: "main", activity: { kind: "turn_end", at: at(15, 1), turn_id: "t-new" } } }));
+    await press(screen.findByRole("button", { name: "読み直す" }));
     assert.ok(await rowOf("新しいメンション"));
   });
 
@@ -235,14 +219,12 @@ describe("a turn of the activity record", () => {
       turn: failed,
       flow: [{ kind: "tool_call", at: at(14, 12), turn_id: failed.id, call_id: "c-1", name: "bash", arguments: { command: "kubectl top pods" } }],
       expired: false,
-      replies: [],
     });
     start(backend, "#/record");
     await follow(within(await rowOf("[FIRING warning] HighMemoryUsage")).getByRole("link"));
     assert.equal(window.location.hash, "#/record/turns/t-failed");
     assert.ok(await screen.findByRole("heading", { level: 1, name: "alertmanager ・ [FIRING warning] HighMemoryUsage" }));
     assert.ok(screen.getByText(/kubectl top pods/));
-    assert.ok(screen.getByText(w.noReplies));
     assert.ok(screen.getByText(w.toolTimes(3)));
   });
 
@@ -256,7 +238,6 @@ describe("a turn of the activity record", () => {
         { kind: "tool_result", at: at(9, 0), turn_id: "t-1", call_id: "c-1", is_error: false, lines: 128, bytes: 3174 },
       ],
       expired: false,
-      replies: [],
     });
     backend.recordResults.set("t-1/c-1", "the whole output");
     start(backend, "#/record/turns/t-1");
@@ -268,26 +249,11 @@ describe("a turn of the activity record", () => {
 
   it("says its flow is gone after 30 days", async () => {
     const backend = new FakeBackend();
-    backend.recordTurns.set("t-1", { turn: turn("t-1", 9, 0), flow: [], expired: true, replies: [] });
+    backend.recordTurns.set("t-1", { turn: turn("t-1", 9, 0), flow: [], expired: true });
     start(backend, "#/record/turns/t-1");
     assert.ok(await screen.findByText(w.expired));
   });
 
-  it("goes to its reply in the conversation, reading the page of the history that starts with it", async () => {
-    const backend = new FakeBackend();
-    backend.recordTurns.set("t-1", {
-      turn: turn("t-1", 9, 0, { replies: 1 }),
-      flow: [],
-      expired: false,
-      replies: [{ id: "r-old", at: at(9, 1), text: "古い返事", history_before: "cursor-1" }],
-    });
-    backend.historyPages.set("cursor-1", [{ kind: "agent", id: "r-old", at: at(9, 1), text: "古い返事", agent: "main", turn_id: "t-1" }]);
-    start(backend, "#/record/turns/t-1");
-    await follow(await screen.findByRole("link", { name: w.toTalk }));
-    await backend.connected();
-    assert.ok(await within(await screen.findByRole("log")).findByText("古い返事"));
-    assert.deepEqual(backend.historyBefores, ["cursor-1"]);
-  });
 });
 
 describe("the other pages of the activity record", () => {
@@ -403,27 +369,5 @@ describe("the other pages of the activity record", () => {
     await press(screen.getByRole("button", { name: w.moreTurns(1) }));
     assert.ok(await screen.findByText("9:00"));
     assert.equal(screen.queryByRole("button", { name: /残り/ }), null);
-  });
-});
-
-describe("a reply in the conversation", () => {
-  it("links its time to the turn that sent it", async () => {
-    const backend = new FakeBackend();
-    const at = new Date().toISOString();
-    backend.history = [{ kind: "agent", id: "r-1", at, text: "done", agent: "main", turn_id: "t-9" }];
-    start(backend);
-    const link = await within(await screen.findByRole("log")).findByRole("link", { name: w.seeTurn(timeOf(at)) });
-    assert.equal(new URL((link as HTMLAnchorElement).href).hash, "#/record/turns/t-9");
-  });
-
-  // A reply whose turn is not known keeps its time as plain text.
-  it("keeps its time as text when its turn is not known", async () => {
-    const backend = new FakeBackend();
-    const at = new Date().toISOString();
-    backend.history = [{ kind: "agent", id: "r-1", at, text: "done", agent: "main" }];
-    start(backend);
-    const log = await screen.findByRole("log");
-    assert.ok(await within(log).findByText(timeOf(at)));
-    assert.equal(within(log).queryAllByRole("link").length, 0);
   });
 });

@@ -15,11 +15,9 @@ import { AgentAvatar, seedAvatar } from "./avatar.ts";
 import type { Config } from "./config.ts";
 import { Conversation } from "./conversation.ts";
 import { openDatabase } from "./db.ts";
-import { Feed } from "./feed.ts";
 import { Heartbeat } from "./heartbeat.ts";
 import { close, listenTcp, listenUnix } from "./http.ts";
 import { intakeHandler } from "./intake.ts";
-import { AppTokens } from "./login/app-tokens.ts";
 import { type GitHubEndpoints, GitHubLogin } from "./login/github.ts";
 import { LoginSessions } from "./login/sessions.ts";
 import { MemoryView } from "./memory-view.ts";
@@ -27,10 +25,6 @@ import { Memory } from "./memory.ts";
 import { metricsHandler } from "./metrics.ts";
 import { ModelSettings } from "./model-settings.ts";
 import { PluginNotes } from "./plugin-notes.ts";
-import { ApnsChannel, ApnsClient } from "./push/apns.ts";
-import { ApnsRegistrations } from "./push/apns-registrations.ts";
-import { noticeChannel, Notifier, PushSubscriptions } from "./push/notifier.ts";
-import { vapidKeyOf, type WebPushRequest, WebPushChannel } from "./push/web-push.ts";
 import { Queue } from "./queue.ts";
 import { ActivityRecord } from "./record.ts";
 import { sandboxHandler } from "./sandbox-api.ts";
@@ -49,8 +43,7 @@ export async function startBackend(
     log = console.error,
     now = Date.now,
     githubEndpoints,
-    sendWebPush,
-  }: { log?: (line: string) => void; now?: () => number; githubEndpoints?: GitHubEndpoints; sendWebPush?: (request: WebPushRequest) => Promise<number> } = {},
+  }: { log?: (line: string) => void; now?: () => number; githubEndpoints?: GitHubEndpoints } = {},
 ): Promise<Backend> {
   for (const dir of [path.dirname(config.databasePath), config.assetsDir, config.sourcesDir, config.memoryDir, path.dirname(config.intakeSocket), path.dirname(config.sandboxSocket)]) {
     mkdirSync(dir, { recursive: true });
@@ -74,13 +67,12 @@ export async function startBackend(
     timeZone: config.timeZone,
     redeliverMs: config.redeliverMs,
   });
-  const feed = new Feed();
   const assets = new Assets(db, config.assetsDir, { now });
-  const conversation = new Conversation(db, feed, { now, assets });
-  const agents = new SubAgents(db, feed, conversation, { now });
+  const conversation = new Conversation(db, { now, assets });
+  const agents = new SubAgents(db, { now });
   const schedules = new Schedules(db, { now, timeZone: config.timeZone });
   const scheduler = new Scheduler(schedules, queue, { now, log });
-  const record = new ActivityRecord(db, feed, {
+  const record = new ActivityRecord(db, {
     now,
     timeZone: config.timeZone,
     sleepReportTimeoutMs: config.sleep.reportTimeoutMs,
@@ -88,7 +80,6 @@ export async function startBackend(
     log,
   });
   const sessions = new LoginSessions(db, { now });
-  const appTokens = new AppTokens(db, { now });
   const inbox = new Inbox(db, queue, { assets, now, limits: config.a2a?.limits ?? { deadlineMs: 24 * 3_600_000, maxOpenTasks: 3 } });
   const pluginNotes = new PluginNotes();
   const heartbeat = new Heartbeat(queue, conversation, { now, quietMs: config.heartbeatMs, inbox, record, sleepiness, pluginNotes, log });
@@ -96,19 +87,6 @@ export async function startBackend(
     now, timeZone: config.timeZone, limits: config.sleep, notes: (at, since) => heartbeat.notes(at, since), log,
   });
   const login = new GitHubLogin({ settings: config.github, ...(githubEndpoints ? { endpoints: githubEndpoints } : {}), sessions, now, log });
-  const subscriptions = new PushSubscriptions(db, { now });
-  const vapid = config.webPush === undefined ? undefined : vapidKeyOf(config.webPush.vapidKey);
-  const apnsRegistrations = new ApnsRegistrations(db, { now, ownerId: config.github?.ownerId });
-  const apns = config.apns === undefined ? undefined : new ApnsClient(config.apns, now);
-  const channels = [];
-  if (config.webPush !== undefined && vapid !== undefined) {
-    channels.push(noticeChannel("web-push", subscriptions, new WebPushChannel({ vapid, subject: config.webPush.subject, now, ...(sendWebPush ? { send: sendWebPush } : {}) })));
-  }
-  if (config.apns !== undefined && apns !== undefined) {
-    channels.push(noticeChannel("apns", apnsRegistrations, new ApnsChannel(config.apns.url, (request) => apns.send(request))));
-  }
-  const notifier = new Notifier({ feed, agentName: agent.name, channels, log });
-
   // A start that fails part way closes what it had opened, and the database.
   const opened: http.Server[] = [];
   const opening = async (listening: Promise<http.Server>): Promise<http.Server> => {
@@ -132,27 +110,17 @@ export async function startBackend(
     ui = await opening(
       listenTcp(
         uiHandler({
-          queue,
-          conversation,
-          assets,
-          agents,
-          schedules,
           record,
           memory,
           memoryView,
-          feed,
           login,
           sessions,
-          appTokens,
-          apnsRegistrations,
           modelSettings,
-          sleepiness,
           ownerId: config.github?.ownerId,
           publicUrl: config.publicUrl,
           agent: () => avatar.settings(),
           web: webHandler({ dir: config.webDir, agent: () => avatar.settings() }),
           ...(config.a2a === undefined ? {} : { a2a: a2aOf(config.a2a, agent.name, inbox, now, log) }),
-          ...(vapid === undefined ? {} : { push: { publicKey: vapid.publicKey, subscriptions } }),
           now,
         }),
         config.listen.host,
@@ -176,12 +144,10 @@ export async function startBackend(
   const stopScheduler = scheduler.start();
   const stopRecord = record.start();
   const stopHeartbeat = heartbeat.start();
-  const stopNotifier = channels.length === 0 ? () => {} : notifier.start();
 
   if (config.sandboxToken === undefined) log("backend: no PENELOPE_SANDBOX_TOKEN_FILE; the sandbox's API refuses every request");
   if (config.github === undefined) log("backend: no GitHub login set up; no one can sign in to the UI");
   if (config.a2a === undefined) log("backend: no A2A senders; /a2a/ is closed");
-  if (config.webPush === undefined) log("backend: no PENELOPE_WEB_PUSH_VAPID_KEY_FILE; no Web Push notices are sent");
   const port = (ui.address() as AddressInfo).port;
   log(`backend: intake on ${config.intakeSocket}, sandbox's API on ${config.sandboxSocket}, UI on ${config.listen.host}:${port}`);
 
@@ -193,8 +159,6 @@ export async function startBackend(
       stopScheduler();
       stopRecord();
       stopHeartbeat();
-      stopNotifier();
-      apns?.close();
       await Promise.all(opened.map(close));
       db.close();
     },

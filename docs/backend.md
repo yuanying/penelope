@@ -38,8 +38,8 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_REDELIVER_MINUTES` | `5` | 渡して ack の無い出来事をもう一度渡すまでの分 |
 | `PENELOPE_HEARTBEAT_MINUTES` | なし | heartbeat の N（本体の最後のターンの終わりから待つ分）。無ければ heartbeat は無い（下の「heartbeat」） |
 | `PENELOPE_HEARTBEAT_SECONDS` | なし | テスト用。heartbeat の N を秒で決める。`PENELOPE_HEARTBEAT_MINUTES` と一緒には置けない |
-| `PENELOPE_DELIVERY_UI`・`_CRON`・`_A2A`・`_SELF`・`_JOB` | `now` | backend の中の受信元の `delivery` の既定 |
-| `PENELOPE_INLINE_SOURCES` | `ui,job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
+| `PENELOPE_DELIVERY_CRON`・`_A2A`・`_SELF`・`_JOB` | `now` | backend の中の受信元の `delivery` の既定 |
+| `PENELOPE_INLINE_SOURCES` | `job` | inline の受信元（`,` で区切る）。`control` は書かなくても常に inline。書くと既定を置き換えるので、裏の仕事の終わりを inline のままにするなら `job` も書く。Slack のプラグインの出来事を描いて載せる配置は、その `source` も書く（[events.md](events.md) の「Slack の出来事」） |
 | `PENELOPE_GIT_AUTHOR_NAME` | `penelope-backend` | `/memory` のコミットの作者の名前 |
 | `PENELOPE_GIT_AUTHOR_EMAIL` | `backend@penelope.invalid` | 同じくメールアドレス |
 | `PENELOPE_MEMORY_OWNER_NAME`・`PENELOPE_MEMORY_OWNER_EMAIL` | なし | 画面から保存する記憶の Git 作者の名前とメール。メールが無ければ保存を無効にし、名前が無ければ保存時に `Owner` を使う。履歴では設定した値との完全一致でオーナーを識別する。ログインの認証とは無関係 |
@@ -59,10 +59,6 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 | `PENELOPE_A2A_AUDIENCES` | なし | `tokenreview`: 送り手の token に求める audience（`,` で区切る） |
 | `PENELOPE_KUBERNETES_URL` | `https://<KUBERNETES_SERVICE_HOST>:<KUBERNETES_SERVICE_PORT>` | `tokenreview`: API server の URL |
 | `PENELOPE_KUBERNETES_TOKEN_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | `tokenreview`: backend 自身の ServiceAccount の token。尋ねるたびに読み直す |
-| `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` | なし | Web Push の VAPID の秘密鍵（P-256、PEM）。無ければ Web Push は無い（[ui-api.md](ui-api.md) の「知らせ」） |
-| `PENELOPE_APNS_KEY_ID` | なし | APNs の署名鍵の ID |
-| `PENELOPE_APNS_TEAM_ID` | なし | 署名鍵を持つ Apple Developer のチーム ID |
-| `PENELOPE_APNS_KEY_FILE` | なし | 配置の Secret から渡す APNs の `.p8` ファイル（P-256 の PEM 秘密鍵） |
 | `PENELOPE_KUBERNETES_CA_FILE` | `/var/run/secrets/kubernetes.io/serviceaccount/ca.crt` | `tokenreview`: API server の証明書を確かめる CA |
 
 - GitHub のログインは、`PENELOPE_GITHUB_CLIENT_ID`・`PENELOPE_GITHUB_CLIENT_SECRET_FILE`・`PENELOPE_OWNER_GITHUB_ID` の 3 つと `PENELOPE_PUBLIC_URL` が揃ったときだけ動く。3 つのどれも無ければ、ログインは無く、誰も入れない（[ADR-0010](adr/0010-github-oauth-for-people-tokenreview-for-a2a.md)）。一部だけあるときは、設定の誤りとして起動しない。
@@ -70,11 +66,6 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - A2A の受け口は、`PENELOPE_A2A_SENDERS` があるときだけ開く（[ADR-0018](adr/0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md)）。そのときは `PENELOPE_PUBLIC_URL`（Agent Card の URL と、`gated-assertion` の `aud` に使う）と `PENELOPE_A2A_AUTH` が要り、選んだ確かめ方に要るものがすべて要る。`gated-assertion` には発行元と JWKS の URL、`tokenreview` には audience と API server と、読める token のファイルと CA のファイル。欠けていれば起動しない。
 - `tokenreview` に audience を必ず求めるのは、API server 自身の audience では、その ServiceAccount で動くどの Pod にも mount されている token が通ってしまうためである。
 - `PENELOPE_A2A_SENDERS` が無ければ、ほかの `PENELOPE_A2A_*` は読まない。
-- Web Push は `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` があるときだけ動く（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。そのときは `PENELOPE_PUBLIC_URL` が要る（VAPID の token の `sub`。Apple の push service に届くには https にする）。鍵が読めない、PEM の秘密鍵でない、P-256 でないときは起動しない。backend は鍵を作らない。
-- VAPID の鍵は配置の Secret として長く保つ。鍵を替えると、それまでの購読には届かなくなる（Web UI は、次に開いたときに購読を作り直す）。作るには `openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem`。
-- APNs は `PENELOPE_APNS_KEY_ID`・`PENELOPE_APNS_TEAM_ID`・`PENELOPE_APNS_KEY_FILE` と HTTPS の `PENELOPE_PUBLIC_URL` が揃ったときに有効になる（[ADR-0065](adr/0065-encrypted-reply-notifications-over-apns.md)）。設定の不足や読めない鍵は APNs だけを無効にし、起動や Web Push には影響しない。鍵の値は環境変数に置かない。
-- APNs には backend が Sentinel を通さず HTTP/2 で直接送り、登録時の environment で Apple の sandbox・production を選ぶ。topic は `io.github.yuanying.penelope.phone`。ES256 の認証 JWT は 50 分間使い回す。
-- APNs への送信は 1 回だけ。`410`、または `400` の `BadDeviceToken`・`DeviceTokenNotForTopic` では、その送信に使った登録を消す。送信後に登録し直されたものは消さない。ほかの失敗でも返事は履歴に残る。ログには登録の番号と結果だけを残し、会話の内容・端末の token・鍵は出さない。
 - `PENELOPE_AVATAR` が名前の形（小文字・数字・`.`・`_`・`-`）でなければ起動しない。
 - `batch` の待ちは、N・M のほか、`now` の出来事を初めて渡すときにも終わる。眠りの間は `now` も渡さず、起きたときに `wake` とともに待っている `batch` を渡す（[events.md](events.md) の「いつ渡すか」）。
 
@@ -103,7 +94,7 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - 写せないとき（`/memory` に書けないなど）は、ログに残して起動し、写し元のアバターを出す。次の起動でまた写そうとする。
 - `avatar.json` は JSON の object で、次の項目を読む。ほかの項目は読まずに残す。
   - `name`: 名前の既定（空でない文字列）。`PENELOPE_AGENT_NAME` が無いときに使う。名前は起動のときに決め、動いている間は変えない。
-  - `icons`: 表情ごとのアイコンの画像の場所（`/memory/avatar/` からの相対の場所）。Web UI・通知・ホーム画面のアイコンに使う（[ui-api.md](ui-api.md) の「エージェント」）。
+  - `icons`: 表情ごとのアイコンの画像の場所（`/memory/avatar/` からの相対の場所）。Web UI・ホーム画面のアイコンに使う（[ui-api.md](ui-api.md) の「エージェント」）。
   - `pngIcons`: 表情ごとの PNG の場所。Slack の投稿のアイコンに使う。
 - 表情の画像は、拡張子が `.png`・`.jpg`・`.jpeg`・`.gif`・`.webp`・`.svg` のどれか（`pngIcons` は `.png`）で、中身がその種類であり、4 MiB 以下で、リンクをたどった先が `/memory/avatar/` の中の普通のファイルであるもの。`/memory/avatar/` そのものがリンクなら、何も読まない。規則に合わない表情は出さず、ログに残す。`avatar.json` が読めないときはアイコンの無いエージェントとして出す。どちらでも起動は止めない。
 - 規則のコードは `packages/avatar` にあり、sandbox の `avatar check` も同じコードで読む（[pod.md](pod.md) の「アバター」）。
@@ -112,29 +103,24 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 
 ## 状態
 
-- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、会話の履歴、途中経過の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）、知らせの購読である。
+- 状態は `PENELOPE_DATABASE` の SQLite の 1 つのファイルに置く（[ADR-0002](adr/0002-one-intake-and-a-runner-that-pulls-events.md)）。待ち行列、途中経過と活動の記録、予約、セッションの切り替えの記録、ログインのセッション、A2A の Task、サブエージェントごとに runner が最後に知らせたもの（目的と閉じたか）などを持つ。
 - エージェントごとの今の状態（`thinking` か `waiting`）とその状態になった時刻は別に残さず、途中経過の記録の最後の `turn_start` か `turn_end` から引く（[sandbox-api.md](sandbox-api.md) の「途中経過」）。途中経過が 30 日で消えて（「活動の記録」）どちらも無くなったエージェントは、まだターンの無いエージェントと同じく `waiting` である。
 - schema は migration の列で進める。版は `PRAGMA user_version` で、その数の migration が当たっている。migration は足すだけで、書き換えない。backend より新しい版のファイルは開かずに止まる。版 2 は A2A の Task、版 3 はサブエージェント（`sub_agents`）と、途中経過の記録から最後の `turn_start`・`turn_end` を引く索引、版 4 は知らせの購読（`push_subscriptions`。`endpoint` ごとに 1 行、種類と、その種類の鍵の JSON）、版 5 は作ったものの写し（`assets`）、版 6 はオーナーの画像の写し（`assets` を作り直して `agent` を空でもよくし、`reply_id` を `message_id` にした。履歴の `files`）、版 7 は活動の記録（下の「活動の記録」）、版 8 はオーナーが保存したモデルと思考の深さ（`model_settings`、配置ごとに 1 組）、版 9 は夜の照合係、版 10 は夜の段ごとの記憶の変更量（下の「活動の記録」）、版 11 は A2A の添付の有無と Task の成果画像の参照である。モデル候補は runner から受け取り、SQLite には保存しない。
 - migration は一方通行である。たとえば schema 11 に上げた DB は版 10 までの backend では開けない。backend を旧版に戻すときは、DB も移行前のバックアップに戻す。
 - 出来事・会話の履歴・A2A の Task は消さない。いつまで残すかは、量が問題になったときに決める。途中経過と活動の記録の 1 行は、下の「活動の記録」の期間で消す。
 - `/sources` の保存期間による削除はまだ無い。
 
-## 会話の既読と要約
-
-- 会話の既読は [ADR-0066](adr/0066-agent-summary-stream-and-shared-unread.md) に従い、オーナーの状態として配置ごとに 1 つ持つ。schema 15 の `conversation_read.through_row` は、既読にした最後の `history.row`。移行時点までの履歴は既読扱いにし、その行より後に保存された `kind = 'agent'` の履歴を未読に数える。schema 15 への移行も一方通行。
-- `POST /api/history/read` で受け取ったメッセージの ID を行番号に引き、今より先の場合だけ進める。時刻や端末内の状態には頼らず、複数の端末から順序が前後して届いても既読位置は戻らない。活動の記録の「見た」は別に持つ。
-- 一覧向けの SSE は、接続直後の要約と変更後の要約だけを送る。会話の書き込みと既読、本体のターンとツールの進行、活動の記録の失敗数を使う。本体の進行はメモリ上で追い、backend の起動時は保存済みのターンと途中経過から復元する。詳細な途中経過は配信しない。口と欄は [UI 向けの API の仕様書](ui-api.md) の「要約の流れ（SSE）」。
+旧会話・通知・iPhone 向けの表は schema を進めず残す。既読位置・Web Push の購読・アプリ用 token と APNs の登録は使わない。旧 runner が呼ぶ `POST /v1/replies` の保存だけは互換用に継続する。
 
 ## 作ったものの写し
 
-[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md) の「写しの置き場所」をここで決める。今あるのはオーナーへの返事の画像、オーナーがメッセージに添えた画像（[ADR-0034](adr/0034-images-the-owner-sends-copied-by-the-backend.md)）、A2A の成果画像（[ADR-0047](adr/0047-exchange-images-over-a2a.md)）である。
+[ADR-0032](adr/0032-images-attached-to-a-reply-copied-by-the-backend.md) の「写しの置き場所」をここで決める。A2A の成果画像（[ADR-0047](adr/0047-exchange-images-over-a2a.md)）と、互換用の sandbox 向けの返事の画像を扱う。個人のページは会話の画像を配らない。
 
 - 写しは `PENELOPE_ASSETS_DIR` の下の 1 つのファイル `<ID>.<拡張子>`（`png`・`jpg`・`gif`・`webp`）で、ID は UUID である。`/sources` とも `/memory` とも分ける。既定では SQLite と同じ永続の場所にあり、backend だけが mount する（[pod.md](pod.md) の「volume」）。
 - ファイルは `<ID>.<拡張子>.part` に書いてから名前を変える。書きかけの写しは置き場の名前で見えない。
 - 会話の画像は SQLite の `assets` に 1 つの写しが 1 行で、ID・種類（`kind`、今は `image`）・MIME・大きさ・元のファイルの名前・置き場のファイルの名前・作ったエージェント（オーナーの画像は空）・作った時刻・結び付いた履歴の行（返事かオーナーのメッセージ。`message_id`）と、その行の中の順を持つ。行の順が作った順である。後で履歴の行に結び付かない写しを足せるよう、`message_id` は空でもよい。
-- 返事の行と写しの行は 1 つの transaction で残す。オーナーのメッセージは、出来事の列への追加・履歴の行・写しの行を 1 つの transaction で残す。どちらも、写しのファイルを先に書き、transaction が失敗したら書いた写しのファイルを消す。
+- 返事の行と写しの行は 1 つの transaction で残す。写しのファイルを先に書き、transaction が失敗したら書いた写しのファイルを消す。
 - A2A の成果画像も同じ置き場にファイルを先に書く。Task の完了と同じ transaction で順序付きの参照だけを記録し、失敗したら書いた写しを消す。会話の `assets` 行は作らず、送り手の Task からだけ読める（[a2a.md](a2a.md)）。
-- オーナーのメッセージの、写さなかったファイルの名前と大きさは、履歴の行の `files` に JSON で持つ。
 - 写しは消さない。会話の履歴と同じく、いつまで残すかは量が問題になったときに決める。
 
 ## オーナーのログイン
@@ -148,17 +134,6 @@ ADR が「backend の仕様書」「backend の設定」に委ねた点はここ
 - cookie は `penelope_session` の 1 つで、`Path=/`・`HttpOnly`・`SameSite=Strict`。`PENELOPE_PUBLIC_URL` が https なら `Secure` も付ける。セッションを延ばすたびに cookie も付け直す。
 - 使うたびに、セッションの GitHub の user ID が今の設定のオーナーと同じかを確かめる。設定のオーナーを変えると、前のセッションは通らなくなる。
 - ログアウトはセッションを取り消し、cookie を消す。
-
-### iPhone の端末
-
-[ADR-0064](adr/0064-backend-issued-bearer-tokens-for-iphone.md) の端末の資格は Web のセッションとは別に持つ。口と寿命は [ui-api.md](ui-api.md#iphone-のログインと端末の失効) にある。
-
-- GitHub の確認に使う state と、確認後にアプリへ返す短命の code はメモリにだけ置く。code は SHA-256 をキーに、GitHub の user ID・アプリの PKCE challenge・期限を持つ。再起動すると、引き換えていない code は使えなくなる。
-- SQLite の `app_devices`（schema 14）には端末の UUID、端末名、GitHub の user ID、発行時刻・期限、256 bit の乱数 token の SHA-256 だけを置く。平文の token は引き換えの応答で一度だけ返す。認証のたびに期限と今のオーナーを確かめる。失効時は行を削除し、期限切れは次の引き換え時に削除する。
-- schema 14 は表の追加だけで、既存の行は移さない。ただし古い backend は新しい版のファイルを開かないため、前の backend に戻すには migration 前の SQLite のバックアップが要る。
-
-- SQLite の `apns_registrations`（schema 16）は `app_devices` の端末ごとに APNs の token・environment・端末の公開鍵を 1 組持つ。端末が削除されると登録も削除する。期限切れと今のオーナー以外の端末には送らない。
-- schema 16 は表の追加だけで、既存の行は移さない。古い backend は schema 16 のファイルを開かない。旧版へ戻すには migration 前の SQLite のバックアップが要る。
 
 ## `/memory` のコミット
 

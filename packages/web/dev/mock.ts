@@ -1,20 +1,10 @@
-// A stand-in for the backend's API for the UI (docs/ui-api.md), answered from
-// the scenes (scenes.ts), for the development server (dev.ts). It is always
-// signed in. What the owner does (a message sent, a schedule removed, the
-// record seen) changes the scene until the page is opened with ?scene= again.
-//
-// The scene is kept per browser in a cookie, set when the page is opened with
-// ?scene=<name>, so that nothing in src/ has to pass it along.
+// Serves the personal-page API from fixtures selected by a browser cookie.
 import { existsSync, readFileSync } from "node:fs";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { extname, join } from "node:path";
 
 import { modelRef } from "@penelope/contract";
 import type {
-  AppDevice,
-  AppDevicesResponse,
-  HistoryEntry,
-  HistoryResponse,
   MemoryChangesResponse,
   MemoryCompareResponse,
   MemoryFileResponse,
@@ -24,7 +14,6 @@ import type {
   MemorySearchResponse,
   ModelSelection,
   SettingsResponse,
-  PostMessageResponse,
   RecordDayResponse,
   RecordFlowItem,
   RecordNightResponse,
@@ -34,31 +23,16 @@ import type {
   RecordSubAgentResponse,
   RecordTurn,
   RecordTurnResponse,
-  ReplyImage,
-  StreamEvent,
 } from "@penelope/contract";
 
 import { diffMemoryText } from "../src/model/memory-diff.ts";
 import { memoryDiff, memoryEditLimit, type MemoryScene, memoryTextAt, mockAgentMemoryChange, saveMockMemory } from "./memory.ts";
-import { AVATAR_DIR, AVATAR_ICONS, DAY_IMAGE, PLACEHOLDER_IMAGE, type Scene, scenes } from "./scenes.ts";
+import { AVATAR_DIR, AVATAR_ICONS, type Scene, scenes } from "./scenes.ts";
 
 const COOKIE = "penelope-dev-scene";
-/** A page of GET /api/history. */
-const PAGE = 20;
-/** As the backend, a comment this often keeps the stream from being taken as dropped. */
-const KEEPALIVE_MS = 25_000;
-
 type World = Scene & {
-  name: string;
-  lines: Set<ServerResponse>;
-  timers: Set<NodeJS.Timeout>;
-  kept: Array<{ id: number; event: StreamEvent }>;
-  started: boolean;
-  messages: number;
   settings: SettingsResponse;
-  appDevices: AppDevice[];
-  /** The images the owner sent, by id. */
-  assets: Map<string, { type: string; body: Buffer }>;
+
 };
 
 const worlds = new Map<string, World>();
@@ -69,8 +43,7 @@ function world(name: string): World {
     const now = Date.now();
     const scene = scenes[name]!.make(now);
     found = {
-      ...scene, name, lines: new Set(), timers: new Set(), kept: [], started: false, messages: 0, assets: new Map(),
-      appDevices: [{ id: "00000000-0000-4000-8000-000000000001", name: "旅先の iPhone", created_at: new Date(now).toISOString(), expires_at: new Date(now + 365 * 86_400_000).toISOString() }],
+      ...scene,
       settings: {
         selection: null,
         default: { model: "example/iris-large", thinking: "medium" },
@@ -80,19 +53,9 @@ function world(name: string): World {
         ],
       },
     };
-    found.stream.forEach((event, i) => found!.kept.push({ id: i + 1, event }));
     worlds.set(name, found);
   }
   return found;
-}
-
-/** Makes the scene again, as it was written. The open streams are ended: the UI connects again to the new one. */
-function reset(name: string): void {
-  const old = worlds.get(name);
-  if (old === undefined) return;
-  for (const timer of old.timers) clearTimeout(timer);
-  for (const line of old.lines) line.end();
-  worlds.delete(name);
 }
 
 function sceneOf(request: IncomingMessage): string {
@@ -111,7 +74,7 @@ export function pageScene(url: URL): Record<string, string> {
     console.warn(`no scene "${name}"; the scenes are ${Object.keys(scenes).join(", ")}`);
     return {};
   }
-  reset(name);
+  worlds.delete(name);
   return { "set-cookie": `${COOKIE}=${name}; Path=/; SameSite=Lax` };
 }
 
@@ -156,18 +119,6 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
     response.end(faceOf(face));
     return true;
   }
-  if (method === "GET" && path === "/api/history") return (json(200, historyPage(w, url.searchParams.get("before") ?? undefined)), true);
-  if (method === "POST" && path === "/api/history/read") {
-    request.resume();
-    return (empty(), true); // The Web mock has no other client to share unread counts with.
-  }
-  if (method === "GET" && path === "/api/agents") return (json(200, { agents: w.agents }), true);
-  if (method === "GET" && path === "/api/app/devices") return (json(200, { devices: w.appDevices } satisfies AppDevicesResponse), true);
-  const appDevice = /^\/api\/app\/devices\/([^/]+)$/.exec(path)?.[1];
-  if (method === "DELETE" && appDevice !== undefined) {
-    w.appDevices = w.appDevices.filter((device) => device.id !== appDevice);
-    return (empty(), true);
-  }
   if (method === "GET" && path === "/api/settings") return (json(200, w.settings), true);
   if (method === "PUT" && path === "/api/settings") {
     const chunks: Buffer[] = [];
@@ -178,22 +129,6 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
     w.settings.selection = selection;
     return (json(200, w.settings), true);
   }
-  if (method === "GET" && path === "/api/schedules") return (json(200, { schedules: w.schedules }), true);
-  const schedule = /^\/api\/schedules\/([^/]+)$/.exec(path)?.[1];
-  if (method === "DELETE" && schedule !== undefined) {
-    const id = decodeURIComponent(schedule);
-    const before = w.schedules.length;
-    w.schedules = w.schedules.filter((s) => s.id !== id);
-    return (w.schedules.length < before ? empty() : json(404, { error: "no such schedule" }), true);
-  }
-  if (method === "GET" && path === "/api/stream") return (stream(w, response), true);
-  if (method === "POST" && path === "/api/messages") return (json(202, await post(w, request)), true);
-  const asset = /^\/api\/assets\/([^/]+)$/.exec(path)?.[1];
-  if (method === "GET" && asset !== undefined) return (sendAsset(w, decodeURIComponent(asset), response) || json(404, { error: "no such asset" }), true);
-  // No Web Push: the deployment has no key (ADR-0027).
-  if (method === "GET" && path === "/api/push") return (json(200, {}), true);
-  if (method === "POST" && path === "/api/push/subscriptions") return (json(503, { error: "web-push-not-configured" }), true);
-  if (method === "POST" && path === "/api/push/subscriptions/delete") return (empty(), true);
   if (method === "POST" && path === "/api/dev/memory/change" && w.memory && mockAgentMemoryChange(w.memory, url.searchParams.has("remove"))) return (empty(), true);
   if (method === "POST" && path === "/api/dev/memory/finish" && w.memory?.editing?.worktreeBusy) {
     w.memory.editing.worktreeBusy = false;
@@ -227,147 +162,6 @@ export async function handle(request: IncomingMessage, response: ServerResponse,
 }
 
 /** Newest first. A page's cursor is the id of the line it starts with, as the record's history_before is. */
-function historyPage(w: World, before: string | undefined): HistoryResponse {
-  const newest = [...w.history].reverse();
-  const start = before === undefined ? 0 : newest.findIndex((entry) => entry.id === before);
-  if (start < 0) return { entries: [] };
-  const next = newest[start + PAGE];
-  return { entries: newest.slice(start, start + PAGE), ...(next === undefined ? {} : { before: next.id }) };
-}
-
-function stream(w: World, response: ServerResponse): void {
-  response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
-  response.write(": stream\n\n");
-  // The UI asks for all that was kept (Last-Event-ID: 0) on every connection.
-  for (const { id, event } of w.kept) response.write(frame(id, event));
-  w.lines.add(response);
-  const keepalive = setInterval(() => response.write(":\n\n"), KEEPALIVE_MS);
-  response.on("close", () => {
-    clearInterval(keepalive);
-    w.lines.delete(response);
-  });
-  if (w.started) return;
-  w.started = true;
-  let after = 0;
-  for (const { afterMs, event } of w.script) {
-    after += afterMs;
-    later(w, after, () => send(w, event));
-  }
-}
-
-function frame(id: number, event: StreamEvent): string {
-  return `id: ${id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`;
-}
-
-function send(w: World, event: StreamEvent): void {
-  // A scripted block carries the time it is sent, not the time the scene was made.
-  const stamped: StreamEvent = event.event === "activity" ? { ...event, data: { ...event.data, activity: { ...event.data.activity, at: new Date().toISOString() } } } : event;
-  const id = (w.kept.at(-1)?.id ?? 0) + 1;
-  w.kept.push({ id, event: stamped });
-  for (const line of w.lines) line.write(frame(id, stamped));
-}
-
-function later(w: World, ms: number, run: () => void): void {
-  const timer = setTimeout(() => {
-    w.timers.delete(timer);
-    run();
-  }, ms);
-  w.timers.add(timer);
-}
-
-/** Takes the message as the backend does (ADR-0034), and has her answer it a second later. */
-async function post(w: World, request: IncomingMessage): Promise<PostMessageResponse> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) chunks.push(chunk as Buffer);
-  const body = Buffer.concat(chunks);
-  const type = request.headers["content-type"] ?? "";
-  const id = `dev-o-${++w.messages}`;
-  let text = "";
-  const images: ReplyImage[] = [];
-  const files: Array<{ name: string; size: number }> = [];
-  if (type.startsWith("multipart/form-data")) {
-    // The fetch of Node reads multipart, so there is no parser to write.
-    const form = await new Response(body, { headers: { "content-type": type } }).formData();
-    text = String(form.get("text") ?? "");
-    for (const file of form.getAll("file")) {
-      if (typeof file === "string") continue;
-      if (file.type.startsWith("image/")) {
-        const image = { id: `${id}-a-${images.length + 1}`, mime_type: file.type, size: file.size, name: file.name };
-        w.assets.set(image.id, { type: file.type, body: Buffer.from(await file.arrayBuffer()) });
-        images.push(image);
-      } else {
-        files.push({ name: file.name, size: file.size });
-      }
-    }
-  } else {
-    text = (JSON.parse(body.toString("utf8")) as { text: string }).text;
-  }
-  const kept = { ...(images.length === 0 ? {} : { images }), ...(files.length === 0 ? {} : { files }) };
-  const at = new Date().toISOString();
-  w.history.push({ kind: "owner", id, at, text, ...kept });
-
-  // In a turn already, the message steers it: the reply comes, and she stays in the turn.
-  const last = w.kept.findLast(({ event }) => event.event === "state" && event.data.agent === "main")?.event;
-  const inTurn = last?.event === "state" && last.data.state === "thinking";
-  const turn = `t-dev-${w.messages}`;
-  if (!inTurn) {
-    send(w, { event: "state", data: { agent: "main", state: "thinking" } });
-    send(w, { event: "activity", data: { agent: "main", activity: { kind: "turn_start", at, turn_id: turn } } });
-  }
-  later(w, 1000, () => {
-    const head = text.length > 40 ? `${text.slice(0, 40)}…` : text;
-    const reply: Extract<HistoryEntry, { kind: "agent" }> = {
-      kind: "agent",
-      id: `dev-r-${w.messages}`,
-      at: new Date().toISOString(),
-      text: `「${head}」、受け取ったよ。${images.length + files.length > 0 ? `ファイルも ${images.length + files.length} 個届いてる。` : ""}（開発用のモックの返事です）`,
-      agent: "main",
-      expression: "happy",
-      trigger: { source: "ui", summary: text },
-      turn_id: turn,
-    };
-    w.history.push(reply);
-    w.record.push({
-      id: turn,
-      kind: "turn",
-      at,
-      agent: "main",
-      started_at: at,
-      ended_at: reply.at,
-      seconds: 1,
-      result: "done",
-      triggers: [{ seq: 1000 + w.messages, source: "ui", summary: text }],
-      trigger_count: 1,
-      tools: 1,
-      replies: 1,
-    });
-    send(w, { event: "reply", data: reply });
-    if (!inTurn) {
-      send(w, { event: "activity", data: { agent: "main", activity: { kind: "turn_end", at: reply.at, turn_id: turn } } });
-      send(w, { event: "state", data: { agent: "main", state: "waiting" } });
-    }
-  });
-  return { id, ...kept };
-}
-
-function sendAsset(w: World, id: string, response: ServerResponse): boolean {
-  const sent = w.assets.get(id);
-  if (sent !== undefined) {
-    response.writeHead(200, { "content-type": sent.type });
-    response.end(sent.body);
-    return true;
-  }
-  if (id !== "day") return false;
-  // The owner's picture when it is there; the stand-in otherwise.
-  const real = existsSync(DAY_IMAGE);
-  response.writeHead(200, { "content-type": real ? "image/jpeg" : "image/svg+xml" });
-  response.end(real ? readFileSync(DAY_IMAGE) : PLACEHOLDER_IMAGE);
-  return true;
-}
-
-// ── Committed memory ──
-
-// A small drawn icon, with no external dependency.
 const SAMPLE_IMAGE = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+XxQ0YAAAAABJRU5ErkJggg==", "base64");
 const EMPTY_MEMORY: MemoryOverviewResponse = { head: null, can_edit: false, files: [], broken_links: [], links_incomplete: false, last_night: null, always_read: { bytes: 0, target_bytes: 16384, file_limit_bytes: 65536, over_target_nights: [] } };
 const MEMORY_PAGE = 50;
@@ -488,7 +282,7 @@ function record(w: World, method: string, url: URL): RecordAnswer | undefined {
     if (turn === undefined) return undefined;
     if (parts.length === 2) {
       const memory_change = w.memory?.changes.find(({ change: { writer } }) => "turn_id" in writer && writer.turn_id === turn.id)?.change;
-      return { turn, flow: flowOf(turn), expired: false, replies: repliesOf(w, turn.id), ...(memory_change ? { memory_change } : {}) };
+      return { turn, flow: flowOf(turn), expired: false, ...(memory_change ? { memory_change } : {}) };
     }
     if (parts.length === 4 && parts[2] === "results") {
       const call = flowOf(turn).find((item) => item.kind === "tool_call" && item.call_id === parts[3]);
@@ -513,21 +307,8 @@ function record(w: World, method: string, url: URL): RecordAnswer | undefined {
   }
   if (parts[0] === "sub-agents" && parts.length === 2) {
     const name = parts[1]!;
-    const closed = w.record.find((row): row is RecordSubAgent => row.kind === "sub_agent" && row.agent === name);
-    const open = w.agents.find((a) => a.agent === name);
+    const sub_agent = w.record.find((row): row is RecordSubAgent => row.kind === "sub_agent" && row.agent === name);
     const own = turns.filter((t) => t.agent === name).sort(newestFirst);
-    const sub_agent: RecordSubAgent | undefined =
-      closed ??
-      (open && {
-        id: name,
-        kind: "sub_agent",
-        at: open.started_at,
-        agent: name,
-        purpose: open.purpose,
-        started_at: open.started_at,
-        turns: own.length,
-        failed_turns: own.filter((t) => t.result === "failed").length,
-      });
     return sub_agent === undefined ? undefined : { sub_agent, turns: own };
   }
   return undefined;
@@ -548,7 +329,7 @@ function recordDay(w: World, query: URLSearchParams): RecordDayResponse {
     (kind === null || row.kind === kind || (kind === "night" && row.kind === "missed_night"));
   const whole = w.record.filter((row) => dayOf(row.at) === day);
   const older = [...new Set(w.record.filter(kept).map((row) => dayOf(row.at)))].filter((d) => d < day).sort();
-  const names = new Set([...w.record.flatMap((row) => (row.kind === "sub_agent" || (row.kind === "turn" && row.agent !== "main") ? [row.agent] : [])), ...w.agents.map((a) => a.agent)]);
+  const names = new Set(w.record.flatMap((row) => (row.kind === "sub_agent" || (row.kind === "turn" && row.agent !== "main") ? [row.agent] : [])));
   return {
     day,
     rows: whole.filter(kept).sort(newestFirst),
@@ -559,7 +340,7 @@ function recordDay(w: World, query: URLSearchParams): RecordDayResponse {
   };
 }
 
-const COMMANDS = ["cat /memory/always.md", "ls /sources/ui", "rg -n 予定 /memory/routines", "git -C /memory log --oneline -5", "curl -s https://api.example.com/v1/status", "date"];
+const COMMANDS = ["cat /memory/always.md", "ls /sources", "rg -n 予定 /memory/routines", "git -C /memory log --oneline -5", "curl -s https://api.example.com/v1/status", "date"];
 
 /** A made-up flow as long as the turn says: a thought, its tools and their results, and a last thought. */
 function flowOf(turn: RecordTurn): RecordFlowItem[] {
@@ -589,10 +370,6 @@ function flowOf(turn: RecordTurn): RecordFlowItem[] {
 function outputOf(args: unknown): string {
   const command = (args as { command?: string }).command ?? "";
   return [`$ ${command}`, ...Array.from({ length: 12 }, (_, i) => `line ${i + 1}: 開発用のモックの出力 (${command.split(" ")[0]})`)].join("\n");
-}
-
-function repliesOf(w: World, turn: string): RecordTurnResponse["replies"] {
-  return w.history.flatMap((entry) => (entry.kind === "agent" && entry.turn_id === turn ? [{ id: entry.id, at: entry.at, text: entry.text, history_before: entry.id }] : []));
 }
 
 /** One of her faces, drawn: enough to see the avatar change with what she says. */

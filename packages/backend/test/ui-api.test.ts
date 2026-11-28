@@ -1,34 +1,23 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createECDH, createHash } from "node:crypto";
+import { createHash } from "node:crypto";
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdirSync, readFileSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import { SubAgents } from "../src/agents.ts";
-import { Assets } from "../src/assets.ts";
 import type { AgentSettings } from "../src/avatar.ts";
-import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
-import { Feed } from "../src/feed.ts";
 import { close, type Handler, listenTcp, sendJson } from "../src/http.ts";
-import { AppTokens } from "../src/login/app-tokens.ts";
 import { GitHubLogin, type GitHubSettings } from "../src/login/github.ts";
 import { LoginSessions } from "../src/login/sessions.ts";
 import { MemoryView } from "../src/memory-view.ts";
 import { Memory } from "../src/memory.ts";
 import { ModelSettings } from "../src/model-settings.ts";
-import { ApnsRegistrations } from "../src/push/apns-registrations.ts";
-import { PushSubscriptions } from "../src/push/notifier.ts";
-import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
-import { Schedules } from "../src/schedules.ts";
-import { Sleepiness } from "../src/sleepiness.ts";
-import { Sources } from "../src/sources.ts";
 import { uiHandler } from "../src/ui-api.ts";
-import { ask, type Ask, FakeClock, multipart, SseReader, tempDir } from "./support.ts";
+import { ask, type Ask, FakeClock, tempDir } from "./support.ts";
 
 const OWNER = 4242;
 
@@ -78,7 +67,6 @@ async function setup(
     agent = { name: "Iris", dir: "/nowhere", icons: {} } as AgentSettings,
     a2a = undefined as Handler | undefined,
     web = undefined as Handler | undefined,
-    pushKey = undefined as string | undefined,
     memoryOwner = undefined as { ownerEmail: string; ownerName?: string; fileLimitBytes?: number } | undefined,
   } = {},
 ) {
@@ -86,21 +74,7 @@ async function setup(
   const clock = new FakeClock("2026-11-14T09:00:00Z");
   const now = clock.now;
   const db = openDatabase(path.join(dir, "backend.sqlite"));
-  const sourcesDir = path.join(dir, "sources");
-  const queue = new Queue(db, new Sources(sourcesDir, "UTC"), {
-    now,
-    inline: new Set(["ui", "control"]),
-    builtinDelivery: { ui: "now" },
-    batch: { quietMs: 300_000, maxMs: 1_800_000 },
-    timeZone: "UTC",
-    redeliverMs: 300_000,
-  });
-  const feed = new Feed();
-  const assets = new Assets(db, path.join(dir, "assets"), { now });
-  const conversation = new Conversation(db, feed, { now, assets });
-  const agents = new SubAgents(db, feed, conversation, { now });
-  const schedules = new Schedules(db, { now, timeZone: "Asia/Tokyo" });
-  const record = new ActivityRecord(db, feed, { now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
+  const record = new ActivityRecord(db, { now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const github = await fakeGitHub(t);
   const sessions = new LoginSessions(db, { now });
   const modelSettings = new ModelSettings(db, now);
@@ -108,36 +82,22 @@ async function setup(
     ? { clientId: "client", clientSecret: "secret", ownerId: OWNER, callbackUrl: `${publicUrl}/auth/github/callback` }
     : undefined;
   const login = new GitHubLogin({ settings, endpoints: github.endpoints, sessions, now, log: () => {} });
-  const subscriptions = new PushSubscriptions(db, { now });
-  const apnsRegistrations = new ApnsRegistrations(db, { now, ownerId: settings?.ownerId });
-  const sleepiness = new Sleepiness(db, now, "UTC");
   const memoryDir = path.join(dir, "memory");
   const memory = new Memory(memoryDir, { name: "Backend", email: "backend@example.com" });
-  const push = pushKey === undefined ? undefined : { publicKey: pushKey, subscriptions };
   const server = await listenTcp(
     uiHandler({
-      queue,
-      conversation,
-      assets,
-      agents,
-      schedules,
       record,
       memory,
       memoryView: new MemoryView(memoryDir, db, { now, timeZone: "UTC", backendEmail: "backend@example.com", ...memoryOwner }),
-      feed,
       login,
       sessions,
-      appTokens: new AppTokens(db, { now }),
-      apnsRegistrations,
       modelSettings,
-      sleepiness,
       ownerId: settings?.ownerId,
       publicUrl,
       agent: () => agent,
       now,
       ...(a2a ? { a2a } : {}),
       ...(web ? { web } : {}),
-      ...(push ? { push } : {}),
     }),
     "127.0.0.1",
     0,
@@ -152,8 +112,22 @@ async function setup(
   const signIn = () => cookieOf(sessions.create(OWNER).token);
   const call = (pathname: string, cookie: string | undefined, options: Ask = {}) =>
     ask(target, pathname, { ...options, headers: { ...(cookie ? { cookie } : {}), ...options.headers } });
-  return { queue, conversation, assets, agents, schedules, record, feed, sessions, modelSettings, github, target, signIn, call, sourcesDir, clock, subscriptions, apnsRegistrations, memoryDir, memory, sleepiness };
+  return { record, sessions, modelSettings, github, target, signIn, call, clock, memoryDir, memory };
 }
+
+it("does not expose the retired conversation and notification routes to the owner", async (t) => {
+  const { call, signIn } = await setup(t);
+  const cookie = signIn();
+  for (const [method, pathname] of [
+    ["POST", "/api/messages"], ["GET", "/api/history"], ["POST", "/api/history/read"],
+    ["GET", "/api/stream"], ["GET", "/api/summary/stream"], ["GET", "/api/assets/example"],
+    ["GET", "/api/push"], ["POST", "/api/push/subscriptions"], ["POST", "/api/push/subscriptions/delete"],
+    ["GET", "/auth/app/start"], ["POST", "/auth/app/token"], ["GET", "/api/app/devices"],
+    ["DELETE", "/api/app/devices/current"], ["PUT", "/api/app/push"],
+  ] as const) {
+    assert.equal((await call(pathname, cookie, { method })).status, 404, `${method} ${pathname}`);
+  }
+});
 
 it("requires an owner session even on the committed memory image endpoint", async (t) => {
   const { call } = await setup(t);
@@ -326,15 +300,6 @@ describe("saving memory", () => {
   });
 });
 
-it("serves current status to the owner", async (t) => {
-  const { call, clock, signIn, sleepiness } = await setup(t);
-  clock.advance(12 * 60);
-  sleepiness.setMood("Taking it slow.");
-  const answer = await call("/api/status", signIn());
-  assert.equal(answer.status, 200);
-  assert.deepEqual(answer.json(), { sleep: { state: "awake" }, sleepiness: 50, awake_seconds: 43_200, mood: "Taking it slow." });
-});
-
 const modelChoice = { model: "example/org/chat", thinking: "low" } as const;
 
 it("keeps the owner's selection of a model the runner offers, including a slash in the model ID", async (t) => {
@@ -393,166 +358,6 @@ const appExchange = (env: Awaited<ReturnType<typeof setup>>, code: string, code_
   env.call("/auth/app/token", undefined, { json: { code, code_verifier, device_name: "旅先の iPhone" } });
 const bearer = (token: string) => ({ authorization: `Bearer ${token}` });
 
-async function appCode(env: Awaited<ReturnType<typeof setup>>): Promise<string> {
-  const callback = await logIn(env, { startPath: appStart });
-  assert.equal(callback.status, 302);
-  assert.equal(callback.headers["set-cookie"], undefined);
-  const location = new URL(String(callback.headers.location));
-  assert.equal(`${location.protocol}//${location.host}${location.pathname}`, "penelope://auth");
-  const code = location.searchParams.get("code");
-  assert.ok(code);
-  return code;
-}
-
-describe("the iPhone push registration", () => {
-  const pathname = "/api/app/push";
-
-  it("does not let a Web session manage a device's APNs registration", async (t) => {
-    const env = await setup(t, { publicUrl: "https://penelope.example.com" });
-    const cookie = env.signIn();
-    assert.equal((await env.call(pathname, cookie, { method: "PUT", json: {} })).status, 403);
-    assert.equal((await env.call(pathname, cookie, { method: "DELETE" })).status, 403);
-  });
-
-  it("lets the iPhone turn off APNs without signing out, even before APNs is configured", async (t) => {
-    const env = await setup(t, { publicUrl: "https://penelope.example.com" });
-    const { token } = (await appExchange(env, await appCode(env))).json();
-    const headers = bearer(token);
-    const key = createECDH("prime256v1").generateKeys().toString("base64");
-    const registration = { token: "ab".repeat(32), environment: "sandbox", public_key: key };
-    assert.equal((await env.call(pathname, undefined, { method: "PUT", headers, json: registration })).status, 204);
-    assert.deepEqual(env.apnsRegistrations.all().map((entry) => entry.token), [registration.token]);
-    assert.equal((await env.call(pathname, undefined, { method: "DELETE", headers })).status, 204);
-    assert.deepEqual(env.apnsRegistrations.all(), []);
-    assert.equal((await env.call("/api/history", undefined, { headers })).status, 200);
-  });
-
-  it("rejects a device public key that is not a point on P-256", async (t) => {
-    const env = await setup(t, { publicUrl: "https://penelope.example.com" });
-    const { token } = (await appExchange(env, await appCode(env))).json();
-    const json = { token: "ab".repeat(32), environment: "sandbox", public_key: Buffer.alloc(65, 4).toString("base64") };
-    assert.equal((await env.call(pathname, undefined, { method: "PUT", headers: bearer(token), json })).status, 400);
-  });
-});
-
-describe("the iPhone login", () => {
-  const https = { publicUrl: "https://penelope.example.com" };
-
-  it("issues no code when GitHub identifies someone other than the owner", async (t) => {
-    const env = await setup(t, https);
-    env.github.state.userId = 7;
-    const callback = await logIn(env, { startPath: appStart });
-    assert.equal(callback.status, 403);
-    assert.equal(callback.headers.location, undefined);
-  });
-
-  it("binds the one-use code to the app verifier, not GitHub's verifier", async (t) => {
-    const env = await setup(t, https);
-    const code = await appCode(env);
-    assert.equal((await appExchange(env, code, "b".repeat(43))).status, 400);
-    const response = await appExchange(env, code);
-    assert.equal(response.status, 200);
-    assert.equal(response.headers["cache-control"], "no-store");
-    const { token } = response.json();
-    const history = await env.call("/api/history", undefined, { headers: bearer(token) });
-    assert.equal(history.status, 200);
-    assert.equal(history.headers["set-cookie"], undefined);
-    assert.equal((await appExchange(env, code)).status, 400);
-  });
-
-  it("rejects a code after five minutes even with the right verifier", async (t) => {
-    const env = await setup(t, https);
-    const code = await appCode(env);
-    env.clock.advance(5);
-    assert.equal((await appExchange(env, code)).status, 400);
-  });
-
-  it("rejects an expired Bearer rather than falling back to a valid cookie", async (t) => {
-    const env = await setup(t, https);
-    const { token } = (await appExchange(env, await appCode(env))).json();
-    env.clock.advance(365 * 24 * 60);
-    assert.equal((await env.call("/api/history", env.signIn(), { headers: bearer(token) })).status, 401);
-  });
-
-  it("lets Web settings revoke only the chosen device, without exposing its credential", async (t) => {
-    const env = await setup(t, https);
-    const first = (await appExchange(env, await appCode(env))).json();
-    env.clock.advance(1);
-    const second = (await appExchange(env, await appCode(env))).json();
-    const list = "/api/app/devices";
-    const cookie = env.signIn();
-    const [{ id, ...device }] = (await env.call(list, cookie)).json().devices;
-    assert.deepEqual(device, {
-      name: "旅先の iPhone", created_at: new Date(env.clock.now()).toISOString(), expires_at: second.expires_at,
-    });
-    const path = `${list}/${id}`;
-    assert.equal((await env.call(path, undefined, { method: "DELETE", headers: bearer(first.token) })).status, 403);
-    assert.equal((await env.call(path, cookie, { method: "DELETE" })).status, 204);
-    assert.equal((await env.call("/api/history", undefined, { headers: bearer(second.token) })).status, 401);
-    assert.equal((await env.call("/api/history", undefined, { headers: bearer(first.token) })).status, 200);
-    assert.equal((await env.call(list, cookie)).json().devices.length, 1);
-  });
-
-  it("stops an open app stream before it sends another event after revocation", async (t) => {
-    const env = await setup(t, https);
-    const { token } = (await appExchange(env, await appCode(env))).json();
-    const response = await fetch(`http://127.0.0.1:${env.target.port}/api/stream`, { headers: bearer(token), signal: AbortSignal.timeout(2000) });
-    assert.equal(response.status, 200);
-    const reader = response.body!.getReader();
-    assert.equal(new TextDecoder().decode((await reader.read()).value), ": stream\n\n");
-    assert.equal((await env.call("/api/app/devices/current", undefined, { method: "DELETE", headers: bearer(token) })).status, 204);
-    env.conversation.reply({ agent: "main", text: "private reply" });
-    assert.equal((await reader.read()).done, true);
-  });
-
-  async function openAppSummary(env: Awaited<ReturnType<typeof setup>>, token: string) {
-    const response = await fetch(`http://127.0.0.1:${env.target.port}/api/summary/stream`, {
-      headers: bearer(token), signal: AbortSignal.timeout(2000),
-    });
-    assert.equal(response.status, 200);
-    const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
-    let initial = "";
-    while (!/event: summary\ndata: [^\n]+\n\n/.test(initial)) {
-      const { done, value } = await reader.read();
-      assert.equal(done, false);
-      initial += value;
-    }
-    return reader;
-  }
-
-  it("ends an open app summary stream before sending a changed summary after revocation", async (t) => {
-    const env = await setup(t, https);
-    const { token } = (await appExchange(env, await appCode(env))).json();
-    const reader = await openAppSummary(env, token);
-    assert.equal((await env.call("/api/app/devices/current", undefined, { method: "DELETE", headers: bearer(token) })).status, 204);
-
-    env.conversation.reply({ agent: "main", text: "a new reply" });
-    assert.equal((await reader.read()).done, true);
-  });
-
-  it("ends an idle app summary stream at keepalive when the credential has expired", async (t) => {
-    const env = await setup(t, https);
-    const { token, expires_at } = (await appExchange(env, await appCode(env))).json();
-    t.mock.timers.enable({ apis: ["setInterval"] });
-    const reader = await openAppSummary(env, token);
-
-    env.clock.advance(Math.ceil((Date.parse(expires_at) - env.clock.now()) / 60_000));
-    t.mock.timers.tick(25_000);
-    assert.equal((await reader.read()).done, true);
-  });
-
-  it("lets the app revoke the credential making the request, not the Web session", async (t) => {
-    const env = await setup(t, https);
-    const { token } = (await appExchange(env, await appCode(env))).json();
-    const path = "/api/app/devices/current";
-    const cookie = env.signIn();
-    assert.equal((await env.call(path, cookie, { method: "DELETE" })).status, 403);
-    assert.equal((await env.call(path, cookie, { method: "DELETE", headers: bearer(token) })).status, 204);
-    assert.equal((await env.call("/api/history", undefined, { headers: bearer(token) })).status, 401);
-    assert.equal((await env.call("/api/history", cookie)).status, 200);
-  });
-});
-
 describe("the login", () => {
   it("sends the browser to GitHub with a state and a PKCE challenge", async (t) => {
     const env = await setup(t);
@@ -584,7 +389,7 @@ describe("the login", () => {
     assert.equal(attributes.get("max-age"), String(30 * 24 * 60 * 60));
     assert.ok(!attributes.has("secure"), "not Secure over http");
     const session = `${name}=${value}`;
-    assert.equal((await env.call("/api/history", session)).status, 200);
+    assert.equal((await env.call("/api/record/unseen", session)).status, 200);
   });
 
   it("marks the cookie Secure when the backend is served over https", async (t) => {
@@ -681,7 +486,7 @@ describe("the login", () => {
     assert.equal(start.status, 503);
     assert.equal(start.json().error, "login-not-configured");
     const forged = env.sessions.create(OWNER).token;
-    assert.equal((await env.call("/api/history", `penelope_session=${forged}`)).status, 401);
+    assert.equal((await env.call("/api/record/unseen", `penelope_session=${forged}`)).status, 401);
   });
 
   it("logs out: the cookie is cleared and the session no longer works", async (t) => {
@@ -693,7 +498,7 @@ describe("the login", () => {
     assert.equal(cleared.name, "penelope_session");
     assert.equal(cleared.value, "");
     assert.equal(cleared.attributes.get("max-age"), "0");
-    assert.equal((await env.call("/api/history", session)).status, 401);
+    assert.equal((await env.call("/api/record/unseen", session)).status, 401);
   });
 });
 
@@ -701,15 +506,6 @@ describe("the UI's API", () => {
   it("answers 401 to a request without a session", async (t) => {
     const env = await setup(t);
     for (const [pathname, options] of [
-      ["/api/history", {}],
-      ["/api/stream", {}],
-      ["/api/summary/stream", {}],
-      ["/api/history/read", { json: { through: "r-1" } }],
-      ["/api/messages", { json: { text: "hi" } }],
-      ["/api/agents", {}],
-      ["/api/status", {}],
-      ["/api/schedules", {}],
-      ["/api/schedules/s-1", { method: "DELETE" }],
       ["/api/record", {}],
       ["/api/record/seen", { method: "POST" }],
     ] as const) {
@@ -717,237 +513,9 @@ describe("the UI's API", () => {
       assert.equal(answer.status, 401, pathname);
       assert.equal(typeof answer.json().error, "string");
     }
-    assert.equal((await env.call("/api/history", "penelope_session=not-a-token")).status, 401);
+    assert.equal((await env.call("/api/record/unseen", "penelope_session=not-a-token")).status, 401);
   });
 
-  describe("a message", () => {
-    it("becomes an inline ui event and a line of the history", async (t) => {
-      const env = await setup(t);
-      const answer = await env.call("/api/messages", env.signIn(), { json: { text: "hello\nmore" } });
-      assert.equal(answer.status, 202);
-      const { id } = answer.json();
-      const [event] = env.queue.take({ after: 0 });
-      assert.equal(event?.source, "ui");
-      assert.equal(event?.id, id);
-      assert.equal(event?.summary, "hello");
-      assert.equal(event?.delivery, "now");
-      assert.deepEqual(event?.inline && event.payload, { text: "hello\nmore" });
-      assert.deepEqual(event?.answer_via, { tool: "reply" });
-      assert.deepEqual(env.conversation.page().entries.map((e) => [e.kind, e.id, e.text]), [["owner", id, "hello\nmore"]]);
-    });
-
-    it("carries files sent with it as multipart", async (t) => {
-      const env = await setup(t);
-      const { body, contentType } = await multipart([
-        ["text", "see this"],
-        ["file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], { type: "image/png" }), "shot.png"],
-      ]);
-      const answer = await env.call("/api/messages", env.signIn(), { body, headers: { "content-type": contentType } });
-      assert.equal(answer.status, 202);
-      const [event] = env.queue.take({ after: 0 });
-      assert.deepEqual(event?.attachments, [{ path: path.join(env.sourcesDir, "ui/files/1-shot.png"), mime_type: "image/png", size: 8 }]);
-    });
-
-    it("keeps a copy of each image sent with it, and the names of the other files, in its line of the history", async (t) => {
-      // Guards against: the owner's own images gone from the conversation once the page is read again (ADR-0034).
-      const env = await setup(t);
-      const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
-      const { body, contentType } = await multipart([
-        ["text", "見て"],
-        ["file", new Blob([png], { type: "image/png" }), "shot.png"],
-        ["file", new Blob(["notes"], { type: "text/plain" }), "notes.txt"],
-      ]);
-      const cookie = env.signIn();
-      const answer = await env.call("/api/messages", cookie, { body, headers: { "content-type": contentType } });
-      assert.equal(answer.status, 202);
-      const sent = answer.json();
-      const [entry] = (await env.call("/api/history", cookie)).json().entries;
-      assert.deepEqual(entry, { kind: "owner", id: sent.id, at: entry.at, text: "見て", images: sent.images, files: sent.files });
-      assert.deepEqual({ ...entry.images[0], id: "" }, { id: "", mime_type: "image/png", size: png.length, name: "shot.png" });
-      assert.deepEqual(entry.files, [{ name: "notes.txt", size: 5 }]);
-      assert.deepEqual((await env.call(`/api/assets/${entry.images[0].id}`, cookie)).body, Buffer.from(png));
-    });
-
-    it("is not sent when its images cannot be kept", async (t) => {
-      // Guards against: a message the agent got while the history lost its images.
-      const env = await setup(t);
-      writeFileSync(env.assets.dir, "not a directory");
-      const { body, contentType } = await multipart([["file", new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])]), "shot.png"]]);
-      const answer = await env.call("/api/messages", env.signIn(), { body, headers: { "content-type": contentType } });
-      assert.equal(answer.status, 500);
-      assert.deepEqual(env.queue.take({ after: 0 }), []);
-      assert.deepEqual(env.conversation.page().entries, []);
-    });
-
-    it("is summed up by its first line, cut at 200 characters", async (t) => {
-      // Guards against: a long message making a summary that is not one line (docs/ui-api.md).
-      const env = await setup(t);
-      const cookie = env.signIn();
-      await env.call("/api/messages", cookie, { json: { text: `${"a".repeat(300)}\nsecond` } });
-      const [event] = env.queue.take({ after: 0 });
-      assert.ok(event!.summary.startsWith("a".repeat(200)));
-      assert.ok(!event!.summary.includes("a".repeat(201)));
-      assert.ok(!event!.summary.includes("second"));
-    });
-
-    it("of files alone is summed up by how many there are", async (t) => {
-      const env = await setup(t);
-      const { body, contentType } = await multipart([
-        ["file", new Blob(["a"]), "a.txt"],
-        ["file", new Blob(["b"]), "b.txt"],
-      ]);
-      assert.equal((await env.call("/api/messages", env.signIn(), { body, headers: { "content-type": contentType } })).status, 202);
-      const [event] = env.queue.take({ after: 0 });
-      assert.match(event!.summary, /\b2\b/);
-    });
-
-    it("is refused with no text and no files", async (t) => {
-      const env = await setup(t);
-      assert.equal((await env.call("/api/messages", env.signIn(), { json: { text: "" } })).status, 400);
-      assert.equal((await env.call("/api/messages", env.signIn(), { json: {} })).status, 400);
-    });
-  });
-
-  describe("the history", () => {
-    it("comes newest first, a page at a time", async (t) => {
-      const env = await setup(t);
-      for (let i = 1; i <= 60; i++) env.conversation.ownerMessage({ id: `m-${i}`, text: `${i}` });
-      const cookie = env.signIn();
-      const first = (await env.call("/api/history", cookie)).json();
-      assert.equal(first.entries.length, 50);
-      assert.equal(first.entries[0].id, "m-60");
-      const second = (await env.call(`/api/history?before=${encodeURIComponent(first.before)}`, cookie)).json();
-      assert.deepEqual(second.entries.map((e: { id: string }) => e.id).slice(0, 2), ["m-10", "m-9"]);
-      assert.equal(second.before, undefined);
-    });
-
-    it("refuses a cursor it did not give", async (t) => {
-      const env = await setup(t);
-      assert.equal((await env.call("/api/history?before=x", env.signIn())).status, 400);
-    });
-
-    it("lists the images of a reply, whose bytes are read by their id", async (t) => {
-      // Guards against: the owner not seeing an image of a reply, or seeing other bytes than were sent.
-      const env = await setup(t);
-      const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7, 7]);
-      env.conversation.reply({ agent: "main", text: "描いたよ" }, [{ name: "cat.png", mime_type: "image/png", data: bytes }]);
-      const cookie = env.signIn();
-      const [entry] = (await env.call("/api/history", cookie)).json().entries;
-      assert.equal(entry.images.length, 1);
-      const [image] = entry.images;
-      assert.deepEqual({ ...image, id: "" }, { id: "", mime_type: "image/png", size: bytes.length, name: "cat.png" });
-
-      const answer = await env.call(`/api/assets/${image.id}`, cookie);
-      assert.equal(answer.status, 200);
-      assert.equal(answer.headers["content-type"], "image/png");
-      assert.equal(answer.headers["content-length"], String(bytes.length));
-      assert.equal(answer.headers["x-content-type-options"], "nosniff");
-      // The same id is always the same bytes: the browser keeps what it read.
-      assert.match(answer.headers["cache-control"] ?? "", /private/);
-      assert.match(answer.headers["cache-control"] ?? "", /immutable/);
-      assert.deepEqual(answer.body, Buffer.from(bytes));
-    });
-
-    it("gives an image only to the owner's session, and not one it does not have", async (t) => {
-      // Guards against: the images of the conversation read by anyone who has the link.
-      const env = await setup(t);
-      env.conversation.reply({ agent: "main", text: "x" }, [{ name: "a.png", mime_type: "image/png", data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]) }]);
-      const cookie = env.signIn();
-      const [entry] = (await env.call("/api/history", cookie)).json().entries;
-      const id = entry.images[0].id;
-      assert.equal((await env.call(`/api/assets/${id}`, undefined)).status, 401);
-      assert.equal((await env.call("/api/assets/no-such-image", cookie)).status, 404);
-      assert.equal((await env.call(`/api/assets/${id}/more`, cookie)).status, 404);
-      assert.equal((await env.call(`/api/assets/${id}`, cookie, { method: "POST", body: "" })).status, 405);
-    });
-  });
-
-  describe("the summary stream", () => {
-    it("streams only the changing execution summary, not the main agent's detailed activity", async (t) => {
-      const env = await setup(t);
-      const reader = new SseReader();
-      t.after(() => reader.close());
-      const at = new Date(env.clock.now()).toISOString();
-      const block = { at, turn_id: "t-1" };
-      env.conversation.activities("main", [{ kind: "turn_start", ...block }]);
-      await reader.open(env.target, "/api/summary/stream", { cookie: env.signIn(), "last-event-id": "999" });
-      assert.equal(reader.status, 200);
-      await reader.waitFor(1);
-      env.conversation.activities("main", [
-        { kind: "thinking", text: "private thoughts", ...block },
-        { kind: "tool_call", name: "bash", call_id: "c-1", arguments: { command: "ls\nsecond line" }, ...block },
-        { kind: "thinking", text: "more thoughts", ...block },
-        { kind: "tool_result", call_id: "c-1", output: "private tool output", is_error: false, ...block },
-      ]);
-      env.conversation.turnEnded("main");
-      await reader.waitFor(4);
-      assert.deepEqual(reader.events.map(({ event, data }) => [event, data]),
-        [{ kind: "thinking" }, { kind: "tool", tool: "bash: ls" }, { kind: "thinking" }, { kind: "waiting" }]
-          .map((state) => ["summary", { state, last_message: null, unread: 0, unseen_failures: 0 }]));
-    });
-
-    it("acknowledges only through the given message across sessions, even when replies share a timestamp", async (t) => {
-      const env = await setup(t);
-      const first = env.conversation.reply({ agent: "main", text: "first reply" });
-      const owner = await env.call("/api/messages", env.signIn(), { json: { text: "owner message\nno preview of this line" } });
-      const reader = new SseReader();
-      t.after(() => reader.close());
-      await reader.open(env.target, "/api/summary/stream", { cookie: env.signIn() });
-      await reader.waitFor(1);
-      assert.deepEqual(reader.events[0]?.data.last_message, { kind: "owner", at: new Date(env.clock.now()).toISOString(), text: "owner message" });
-      env.conversation.reply({ agent: "main", text: "new reply" });
-      assert.equal((await env.call("/api/history/read", env.signIn(), { json: { through: owner.json().id } })).status, 204);
-      assert.equal((await env.call("/api/history/read", env.signIn(), { json: { through: first.id } })).status, 204);
-      await reader.waitFor(3);
-      assert.deepEqual(reader.events.map(({ data }) => data.unread), [1, 2, 1]);
-      assert.equal(reader.events[2]?.data.last_message.text, "new reply");
-    });
-
-    it("keeps the activity failure badge independent of conversation reads", async (t) => {
-      const env = await setup(t);
-      const { id } = env.conversation.reply({ agent: "main", text: "an unread reply" });
-      const session = env.signIn();
-      const reader = new SseReader();
-      t.after(() => reader.close());
-      await reader.open(env.target, "/api/summary/stream", { cookie: session });
-      await reader.waitFor(1);
-      env.clock.advance(1);
-      env.record.turnEnded("main", { turn_id: "a-failed-turn", result: "failed" });
-      await env.call("/api/history/read", session, { json: { through: id } });
-      await env.call("/api/record/seen", session, { method: "POST" });
-      await reader.waitFor(4);
-      assert.deepEqual(reader.events.map(({ data }) => data.unseen_failures), [0, 1, 1, 0]);
-    });
-  });
-
-  describe("the stream", () => {
-    it("sends replies, activity and state as server-sent events", async (t) => {
-      const env = await setup(t);
-      const reader = new SseReader();
-      t.after(() => reader.close());
-      await reader.open(env.target, "/api/stream", { cookie: env.signIn() });
-      assert.equal(reader.status, 200);
-      env.conversation.reply({ agent: "main", text: "done" });
-      env.conversation.turnEnded("main");
-      await reader.waitFor(2);
-      assert.deepEqual(reader.events.map((e) => [e.id, e.event]), [["1", "reply"], ["2", "state"]]);
-      assert.equal(reader.events[0]?.data.text, "done");
-    });
-
-    it("sends again what came after the Last-Event-ID", async (t) => {
-      const env = await setup(t);
-      env.conversation.turnEnded("main");
-      env.conversation.turnEnded("main");
-      const reader = new SseReader();
-      t.after(() => reader.close());
-      await reader.open(env.target, "/api/stream", { cookie: env.signIn(), "last-event-id": "1" });
-      await reader.waitFor(1);
-      assert.deepEqual(reader.events.map((e) => e.id), ["2"]);
-    });
-  });
-
-  // The login screen and the home screen's icon show who she is before
-  // anyone signs in, and the name comes from the settings (ADR-0001).
   describe("the agent", () => {
     it("is named from the settings, without a session", async (t) => {
       const env = await setup(t, { agent: { name: "Iris", dir: "/nowhere", icons: {} } });
@@ -1024,84 +592,6 @@ describe("the UI's API", () => {
     });
   });
 
-  describe("the sub-agents", () => {
-    it("are listed while they are not closed, with their purpose and state", async (t) => {
-      const env = await setup(t);
-      const at = "2026-11-14T09:00:00Z";
-      assert.deepEqual((await env.call("/api/agents", env.signIn())).json(), { agents: [] });
-      env.agents.record({ agent: "review-pr-22", purpose: "review PR 22", closed: false });
-      env.clock.advance(1);
-      env.agents.record({ agent: "dig-logs", purpose: "dig the logs", closed: false });
-      env.agents.record({ agent: "old-one", purpose: "done long ago", closed: false });
-      env.agents.record({ agent: "old-one", purpose: "done long ago", closed: true });
-      env.clock.advance(1);
-      env.conversation.activities("dig-logs", [{ kind: "turn_start", at, turn_id: "t-1" }]);
-      env.conversation.activities("main", [{ kind: "turn_start", at, turn_id: "t-2" }]);
-      const answer = await env.call("/api/agents", env.signIn());
-      assert.equal(answer.status, 200);
-      assert.deepEqual(answer.json(), {
-        agents: [
-          {
-            agent: "review-pr-22",
-            purpose: "review PR 22",
-            state: "waiting",
-            started_at: "2026-11-14T09:00:00.000Z",
-            state_since: "2026-11-14T09:00:00.000Z",
-          },
-          {
-            agent: "dig-logs",
-            purpose: "dig the logs",
-            state: "thinking",
-            started_at: "2026-11-14T09:01:00.000Z",
-            state_since: at,
-          },
-        ],
-      });
-    });
-  });
-
-  // The same schedules as her schedule_list and schedule_remove (docs/sandbox-api.md), with when each comes due next.
-  describe("the schedules", () => {
-    it("are listed as she lists them, with when each comes due next", async (t) => {
-      const env = await setup(t);
-      assert.deepEqual((await env.call("/api/schedules", env.signIn())).json(), { schedules: [] });
-      // 09:00 in UTC is 18:00 in Tokyo, the backend's time zone here.
-      const morning = env.schedules.create({ agent: "main", reason: "every morning", cron: "0 9 * * *" });
-      env.clock.advance(1);
-      const once = env.schedules.create({ agent: "main", reason: "look at the PR", at: "2026-11-20T01:30:00Z" });
-      const answer = await env.call("/api/schedules", env.signIn());
-      assert.equal(answer.status, 200);
-      assert.deepEqual(answer.json(), {
-        schedules: [
-          { id: morning.id, reason: "every morning", cron: "0 9 * * *", next_at: "2026-11-15T00:00:00.000Z" },
-          { id: once.id, reason: "look at the PR", at: "2026-11-20T01:30:00Z", next_at: "2026-11-20T01:30:00.000Z" },
-        ],
-      });
-    });
-
-    it("are removed by their id, as she removes them, and she is not told", async (t) => {
-      const env = await setup(t);
-      const kept = env.schedules.create({ agent: "main", reason: "every morning", cron: "0 9 * * *" });
-      const gone = env.schedules.create({ agent: "main", reason: "every night", cron: "0 22 * * *" });
-      const removed = await env.call(`/api/schedules/${encodeURIComponent(gone.id)}`, env.signIn(), { method: "DELETE" });
-      assert.equal(removed.status, 204);
-      assert.deepEqual(env.schedules.list("main"), [kept], "what her schedule_list sees");
-      assert.deepEqual(env.queue.take({ after: 0 }), [], "no event of it");
-      assert.deepEqual((await env.call("/api/schedules", env.signIn())).json().schedules.map((s: { id: string }) => s.id), [kept.id]);
-      const again = await env.call(`/api/schedules/${encodeURIComponent(gone.id)}`, env.signIn(), { method: "DELETE" });
-      assert.equal(again.status, 404);
-      assert.equal(typeof again.json().error, "string");
-    });
-
-    it("cannot be added from the UI", async (t) => {
-      const env = await setup(t);
-      const answer = await env.call("/api/schedules", env.signIn(), { json: { reason: "x", cron: "0 9 * * *" } });
-      assert.equal(answer.status, 404);
-      assert.deepEqual(env.schedules.list("main"), []);
-    });
-  });
-
-  // What the record holds is record.test.ts's; here, that the UI reaches it (docs/ui-api.md "活動の記録").
   describe("the activity record", () => {
     it("gives a day of it, narrowed as asked", async (t) => {
       const env = await setup(t);
@@ -1172,75 +662,4 @@ describe("the UI's API", () => {
     });
   });
 
-  describe("the subscriptions to notices", () => {
-    const KEY = "BPublicKeyOfTheDeployment";
-    const keys = () => {
-      const ecdh = createECDH("prime256v1");
-      ecdh.generateKeys();
-      return { p256dh: ecdh.getPublicKey().toString("base64url"), auth: Buffer.alloc(16, 1).toString("base64url") };
-    };
-    const subscribe = (env: Awaited<ReturnType<typeof setup>>, cookie: string | undefined, body: unknown) =>
-      env.call("/api/push/subscriptions", cookie, { method: "POST", json: body });
-
-    it("tells the UI the VAPID public key, or that there is no Web Push", async (t) => {
-      const on = await setup(t, { pushKey: KEY });
-      assert.deepEqual((await on.call("/api/push", on.signIn())).json(), { web_push: { public_key: KEY } });
-      const off = await setup(t);
-      const answer = await off.call("/api/push", off.signIn());
-      assert.equal(answer.status, 200);
-      assert.deepEqual(answer.json(), {});
-    });
-
-    it("registers and removes a browser's subscription for the owner's session only", async (t) => {
-      const env = await setup(t, { pushKey: KEY });
-      const subscription = { kind: "web-push", endpoint: "https://push.example.com/send/1", keys: keys() };
-      assert.equal((await subscribe(env, undefined, subscription)).status, 401);
-      assert.equal(env.subscriptions.all().length, 0);
-
-      const cookie = env.signIn();
-      assert.equal((await subscribe(env, cookie, subscription)).status, 204);
-      // The same browser again replaces what it had.
-      assert.equal((await subscribe(env, cookie, { ...subscription, keys: keys() })).status, 204);
-      assert.equal((await subscribe(env, cookie, { ...subscription, endpoint: "https://push.example.com/send/2" })).status, 204);
-      assert.deepEqual(
-        env.subscriptions.all().map((s) => s.endpoint),
-        ["https://push.example.com/send/1", "https://push.example.com/send/2"],
-      );
-
-      const remove = (who: string | undefined) =>
-        env.call("/api/push/subscriptions/delete", who, { method: "POST", json: { endpoint: "https://push.example.com/send/1" } });
-      assert.equal((await remove(undefined)).status, 401);
-      assert.equal((await remove(cookie)).status, 204);
-      // Removing what is not there is the same answer.
-      assert.equal((await remove(cookie)).status, 204);
-      assert.deepEqual(
-        env.subscriptions.all().map((s) => s.endpoint),
-        ["https://push.example.com/send/2"],
-      );
-    });
-
-    it("refuses a subscription it could not send to", async (t) => {
-      const env = await setup(t, { pushKey: KEY });
-      const cookie = env.signIn();
-      for (const body of [
-        { kind: "web-push", endpoint: "http://push.example.com/send/1", keys: keys() },
-        { kind: "web-push", endpoint: "https://push.example.com/send/1", keys: { p256dh: "AAAA", auth: "AAAA" } },
-        { kind: "apns", endpoint: "https://push.example.com/send/1", keys: keys() },
-        "not an object",
-      ]) {
-        const answer = await subscribe(env, cookie, body);
-        assert.equal(answer.status, 400, JSON.stringify(body));
-        assert.equal(typeof answer.json().error, "string");
-      }
-      assert.equal((await env.call("/api/push/subscriptions/delete", cookie, { method: "POST", json: { endpoint: 1 } })).status, 400);
-      assert.equal(env.subscriptions.all().length, 0);
-    });
-
-    it("takes no subscription when there is no Web Push", async (t) => {
-      const env = await setup(t);
-      const answer = await subscribe(env, env.signIn(), { kind: "web-push", endpoint: "https://push.example.com/send/1", keys: keys() });
-      assert.equal(answer.status, 503);
-      assert.equal(answer.json().error, "web-push-not-configured");
-    });
-  });
 });

@@ -1,8 +1,6 @@
 // The backend serves the Web UI at /; its places and detail pages live in the hash.
 import { useCallback, useSyncExternalStore } from "react";
 
-import type { Place } from "./places.tsx";
-
 /** A writer the list of changes is narrowed to; all of them when there is none. */
 export type MemoryWriterKind = "daytime" | "night" | "owner";
 const WRITERS: readonly string[] = ["daytime", "night", "owner"] satisfies MemoryWriterKind[];
@@ -17,12 +15,13 @@ export type MemoryPage =
   | { kind: "search"; q: string };
 
 export type Route =
-  | { place: "talk"; reply?: { id: string; before: string } }
   | { place: "log"; page?: RecordPage }
   | { place: "memory"; page?: MemoryPage }
-  | { place: Exclude<Place, "talk" | "log" | "memory"> };
+  | { place: "settings" };
 
-const NAMES: Record<Place, string> = { talk: "talk", log: "record", memory: "memory", events: "events", settings: "settings" };
+export type Place = Route["place"];
+
+const NAMES: Record<Place, string> = { log: "record", memory: "memory", settings: "settings" };
 const PAGES: Record<RecordPage["kind"], string> = { turn: "turns", night: "nights", sub_agent: "sub-agents" };
 
 export function parseRoute(hash: string): Route {
@@ -65,15 +64,11 @@ export function parseRoute(hash: string): Route {
     }
     return { place: "log" };
   }
-  if (name === "events" || name === "settings") return { place: name };
-  const reply = query.get("reply");
-  const before = query.get("before");
-  return reply !== null && before !== null ? { place: "talk", reply: { id: reply, before } } : { place: "talk" };
+  return name === "settings" ? { place: "settings" } : { place: "memory" };
 }
 
 export function hashOf(route: Route): string {
   if (route.place === "log" && route.page !== undefined) return `#/record/${PAGES[route.page.kind]}/${encodeURIComponent(route.page.id)}`;
-  if (route.place === "talk" && route.reply !== undefined) return `#/talk?${new URLSearchParams({ reply: route.reply.id, before: route.reply.before })}`;
   if (route.place === "memory" && route.page !== undefined) {
     const page = route.page;
     switch (page.kind) {

@@ -1,8 +1,7 @@
 // What the end-to-end test drives the Pod with: Docker Compose, the backend's
-// API for the UI and its stream, the fakes' control API and the Sentinel's
+// API for the personal page, the fakes' control API and the Sentinel's
 // record.
 import { spawnSync } from "node:child_process";
-import { spawn, type ChildProcess } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -85,42 +84,6 @@ export class Browser {
   }
 }
 
-export type StreamEvent = { id?: string; event: string; data: unknown };
-
-/** The backend's stream (SSE), read from the outside container, with every event it has sent kept in order. */
-export class Stream {
-  readonly events: StreamEvent[] = [];
-  private child: ChildProcess | undefined;
-
-  open(cookie: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const child = spawn(
-        "docker",
-        ["compose", "exec", "-T", "outside", "node", "/e2e/outside/client.ts", "stream", new URL("/api/stream", pod.url).href, cookie],
-        { cwd: E2E_DIR, env: { ...process.env, ...composeEnv }, stdio: ["ignore", "pipe", "inherit"] },
-      );
-      this.child = child;
-      let buffer = "";
-      child.stdout!.setEncoding("utf8");
-      child.stdout!.on("data", (part: string) => {
-        buffer += part;
-        let end;
-        while ((end = buffer.indexOf("\n")) >= 0) {
-          const event = JSON.parse(buffer.slice(0, end)) as StreamEvent;
-          buffer = buffer.slice(end + 1);
-          if (event.event === "open") resolve();
-          else this.events.push(event);
-        }
-      });
-      child.on("exit", (code) => reject(new Error(`the stream ended (${code})`)));
-    });
-  }
-
-  close(): void {
-    this.child?.kill();
-  }
-}
-
 /** One message of a request the fake model received, as far as the test reads it. */
 export type ChatMessage = { role: string; content?: unknown; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string };
 export type ModelCall = { at: string; credential: string; stream: boolean; messages: ChatMessage[]; tools: string[] };
@@ -137,9 +100,6 @@ export const outside = {
     control<{ code: string; state: string; redirect_uri: string }>("/authorize", { method: "POST", body: JSON.stringify({ query }) }),
   modelCalls: async () => (await control<{ calls: ModelCall[] }>("/model")).calls,
   seen: async () => (await control<{ seen: Seen[] }>("/seen")).seen,
-  /** The pushes the fake push service took, their bodies encrypted, in base64url. */
-  pushes: async () =>
-    (await control<{ pushes: { at: string; path: string; authorization: string; encoding: string; ttl: string; body: string }[] }>("/pushes")).pushes,
   /** The TokenReviews the fake API server answered. */
   reviews: async () => (await control<{ reviews: { caller: string; outcome: string }[] }>("/reviews")).reviews,
   /** What the fake Slack saw: its connections, the envelopes acknowledged, the Web API calls and the downloads. */

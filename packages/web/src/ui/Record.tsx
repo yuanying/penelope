@@ -1,11 +1,5 @@
-// The activity record (docs/ui-api.md, "活動の記録"; docs/design/README.md,
-// 15): what each agent did, a day at a time, newest first, and each turn,
-// night and closed sub-agent on a page of its own. The owner only looks.
-//
-// Opening the place tells the backend she looked (POST /api/record/seen): the
-// count on the rail goes, and the failures since she looked before are told
-// above the list and marked "new" until she leaves the place.
 import { Banner } from "@astryxdesign/core/Banner";
+import { Button } from "@astryxdesign/core/Button";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Heading } from "@astryxdesign/core/Heading";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
@@ -28,20 +22,13 @@ export type RecordPlaceProps = {
   onUnauthorized: () => void;
   /** The page of one row, or the list. */
   page: RecordPage | undefined;
-  /** The failures not seen, as the stream says. */
-  unseen: number;
-  /** Changes whenever the stream says something that may have changed the record. */
-  changes: number;
-  /** The backend was told she looked: none is unseen now. */
   onSeen: () => void;
-  /** Room at the top for what floats over it (the phone's avatar). */
-  topInset?: boolean;
 };
 
 /** What the owner has seen: when she looked before this visit, and how many failures came since. */
 type Seen = { previous: string; count: number };
 
-export function RecordPlace({ api, onUnauthorized, page, unseen, changes, onSeen, topInset = false }: RecordPlaceProps) {
+export function RecordPlace({ api, onUnauthorized, page, onSeen }: RecordPlaceProps) {
   const [seen, setSeen] = useState<Seen | undefined>(undefined);
   const telling = useRef(false);
   const tell = useCallback(async () => {
@@ -58,22 +45,13 @@ export function RecordPlace({ api, onUnauthorized, page, unseen, changes, onSeen
       telling.current = false;
     }
   }, [api, onSeen, onUnauthorized]);
-  // Once on opening the place.
-  useEffect(() => {
-    void tell();
-  }, [tell]);
-  // A failure that comes while she looks is seen as it comes.
-  const told = seen !== undefined;
-  useEffect(() => {
-    if (told && unseen > 0) void tell();
-  }, [told, unseen, tell]);
+  useEffect(() => { void tell(); }, [tell]);
 
   const fail = useCallback((error: unknown) => (error instanceof Unauthorized ? onUnauthorized() : undefined), [onUnauthorized]);
   return (
-    <div className={topInset ? "page page-inset" : "page"}>
-      {/* The list stays while a page is open, so that it is as she left it when she comes back. */}
+    <div className="page">
       <div hidden={page !== undefined}>
-        <RecordList api={api} onFail={fail} changes={changes} seen={seen} />
+        <RecordList api={api} onFail={fail} onRefresh={tell} seen={seen} />
       </div>
       {page === undefined ? null : <RecordDetail key={`${page.kind}/${page.id}`} api={api} onFail={fail} page={page} previousSeenAt={seen?.previous} />}
     </div>
@@ -93,7 +71,7 @@ function queryOf(filter: Filter, day?: string): RecordQuery {
   };
 }
 
-function RecordList({ api, onFail, changes, seen }: { api: Api; onFail: (error: unknown) => void; changes: number; seen: Seen | undefined }) {
+function RecordList({ api, onFail, onRefresh, seen }: { api: Api; onFail: (error: unknown) => void; onRefresh: () => Promise<void>; seen: Seen | undefined }) {
   const [filter, setFilter] = useState<Filter>(ALL);
   const [days, setDays] = useState<RecordDayResponse[] | undefined>(undefined);
   const [agents, setAgents] = useState<string[]>([]);
@@ -130,20 +108,12 @@ function RecordList({ api, onFail, changes, seen }: { api: Api; onFail: (error: 
     void read().then((answer) => (answer === undefined ? undefined : setDays([answer])));
   }, [read]);
 
-  // The newest day again: a turn came or ended, or a failure.
-  const readNow = useRef(read);
-  readNow.current = read;
-  const first = useRef(true);
-  useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
-    }
-    void readNow.current().then((answer) => {
-      if (answer === undefined) return;
-      setDays((now) => (now === undefined ? [answer] : now[0]?.day === answer.day ? [answer, ...now.slice(1)] : [answer, ...now]));
-    });
-  }, [changes]);
+  const refresh = async () => {
+    const answer = await read();
+    if (answer === undefined) return;
+    setDays((now) => (now === undefined ? [answer] : now[0]?.day === answer.day ? [answer, ...now.slice(1)] : [answer, ...now]));
+    await onRefresh();
+  };
 
   const older = days?.at(-1)?.before;
   const readOlder = useCallback(async () => {
@@ -168,9 +138,10 @@ function RecordList({ api, onFail, changes, seen }: { api: Api; onFail: (error: 
 
   return (
     <section className="page-body record-page" aria-labelledby={`${id}-heading`}>
-      <Heading level={1}>
-        <span id={`${id}-heading`}>{w.title}</span>
-      </Heading>
+      <div className="record-toolbar">
+        <Heading level={1}><span id={`${id}-heading`}>{w.title}</span></Heading>
+        <Button label="読み直す" size="sm" variant="secondary" onClick={() => void refresh()} />
+      </div>
       {failed ? <Banner status="error" title={w.failedToRead} /> : null}
       {nothing && !narrowed ? (
         <EmptyState title={w.emptyTitle} description={w.emptyBody} headingLevel={2} />

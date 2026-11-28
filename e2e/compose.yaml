@@ -128,7 +128,7 @@ services:
       PENELOPE_OWNER_GITHUB_ID: "4242"
       PENELOPE_TIME_ZONE: UTC
       # Slack's events are inline, and the runner draws them (ADR-0029).
-      PENELOPE_INLINE_SOURCES: ui,job,slack,a2a
+      PENELOPE_INLINE_SOURCES: job,slack,a2a
       # Off until the heartbeat's scenario makes the backend again with it, in seconds.
       PENELOPE_HEARTBEAT_SECONDS: ${PENELOPE_E2E_HEARTBEAT_SECONDS:-}
       PENELOPE_AVATAR: penelope
@@ -143,12 +143,10 @@ services:
       PENELOPE_KUBERNETES_URL: https://kubernetes.example.com
       PENELOPE_KUBERNETES_TOKEN_FILE: /run/secrets/e2e/kube-token
       PENELOPE_KUBERNETES_CA_FILE: /run/secrets/e2e/outside-ca.crt
-      PENELOPE_WEB_PUSH_VAPID_KEY_FILE: /run/secrets/e2e/vapid.pem
     volumes:
       - *resolv
       - ./.run/backend-token:/run/secrets/e2e/backend-token:ro
       - ./.run/kube-token:/run/secrets/e2e/kube-token:ro
-      - ./.run/vapid.pem:/run/secrets/e2e/vapid.pem:ro
       - ./.run/github-client-secret:/run/secrets/e2e/github-client-secret:ro
       - ./.run/outside-ca.crt:/run/secrets/e2e/outside-ca.crt:ro
       - memory:/memory

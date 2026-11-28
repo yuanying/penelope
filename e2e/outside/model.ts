@@ -37,7 +37,6 @@ export function where(messages: readonly ChatMessage[]): { system: string; input
 }
 
 const write = (path: string, content: string) => ({ name: "write", args: { path, content } });
-const reply = (text: string, images?: string[]) => ({ name: "reply", args: { text, ...(images ? { images } : {}) } });
 
 /** A PNG of one pixel: the image of the turn that shows one (ADR-0032). */
 export const E2E_PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -77,7 +76,7 @@ export function script(messages: readonly ChatMessage[]): Answer {
     }
     if (input.includes("E2E-SUB-QUESTION")) return [{ calls: [subAgent("subagent_send", { name: "e2e-sub", text: "E2E-SUB-MORE main" })] }, { text: "Answered it." }];
     if (input.includes("E2E-SUB-RESULT")) {
-      return [{ calls: [subAgent("subagent_close", { name: "e2e-sub" })] }, { calls: [reply("E2E-REPLY-SUB")] }, { text: "Closed it." }];
+      return [{ calls: [subAgent("subagent_close", { name: "e2e-sub" })] }, { text: "Closed it." }];
     }
     // A background job: started in one turn, its end, with the tail of its output, starting another (ADR-0030).
     if (input.includes("E2E-JOB-START")) {
@@ -87,17 +86,7 @@ export function script(messages: readonly ChatMessage[]): Answer {
       const command = `echo ${E2E_PNG} | base64 -d > ask-diagram.png && ask-agent 'E2E Helper' 'Describe this diagram' --image ask-diagram.png`;
       return [{ calls: [{ name: "job_start", args: { command } }] }, { text: "Asked the helper." }];
     }
-    if (input.includes("E2E-SCHEDULE-ADD")) {
-      return [
-        { calls: [{ name: "schedule_add", args: { reason: "E2E-SCHEDULE-REASON", cron: "0 9 1 1 *" } }] },
-        { calls: [reply("E2E-REPLY-SCHEDULE-ADD")] },
-        { text: "Scheduled." },
-      ];
-    }
-    if (input.includes("E2E-SCHEDULE-LIST")) {
-      return [{ calls: [{ name: "schedule_list", args: {} }] }, { calls: [reply("E2E-REPLY-SCHEDULE-LIST")] }, { text: "Listed." }];
-    }
-    if (input.includes("E2E-JOB-42")) return [{ calls: [reply("E2E-REPLY-JOB")] }, { text: "The job ended." }];
+    if (input.includes("E2E-JOB-42")) return [{ text: "The job ended." }];
     if (system.includes("You are the curator")) {
       return [{ calls: [write("/memory/INDEX.md", "# Index\n\n- notes/e2e.md: the end-to-end test's notes.\n")] }, { text: "Tidied." }];
     }
@@ -107,7 +96,6 @@ export function script(messages: readonly ChatMessage[]): Answer {
     if (input.includes("E2E-SLEEP")) {
       return [
         { calls: [{ name: "sleep", args: { wake_at: new Date(Date.now() + 10_000).toISOString() } }] },
-        { calls: [reply("E2E-SLEEPING")] },
         { text: "Requested sleep." },
       ];
     }
@@ -116,17 +104,7 @@ export function script(messages: readonly ChatMessage[]): Answer {
       return [
         { calls: [write("/memory/notes/e2e.md", "# E2E\n\nWritten in the first turn.\n")] },
         { calls: [{ name: "bash", args: { command: "chmod 2700 /memory/notes && chmod 600 /memory/notes/e2e.md && echo E2E-BASH-$((40 + 2))" } }] },
-        { calls: [reply("E2E-REPLY-1")] },
         { text: "E2E-TEXT-1" },
-      ];
-    }
-    // An image drawn into HOME and shown with a reply; a file that is no image refuses the reply it is put on, text and all.
-    if (input.includes("E2E-IMAGE")) {
-      return [
-        { calls: [{ name: "bash", args: { command: `mkdir -p ~/draw && echo ${E2E_PNG} | base64 -d > ~/draw/e2e.png && echo no image > ~/draw/notes.png` } }] },
-        { calls: [reply("E2E-REPLY-IMAGE-REFUSED", ["draw/notes.png"])] },
-        { calls: [reply("E2E-REPLY-IMAGE", ["draw/e2e.png"])] },
-        { text: "Drew." },
       ];
     }
     if (input.includes("E2E-A2A-ASK")) return [{ calls: [replyToAgent(input, "input-required", "E2E-A2A-QUESTION")] }, { text: "Asked." }];
@@ -142,12 +120,12 @@ export function script(messages: readonly ChatMessage[]): Answer {
       const answer = replyToAgent(input, "completed", "E2E-A2A-DONE");
       return [{ calls: [{ ...answer, args: { ...answer.args, images: [path] } }] }, { text: "Answered." }];
     }
-    if (input.includes("E2E-NOW")) return [{ calls: [reply("E2E-REPLY-EVENTS")] }, { text: "Seen." }];
-    if (input.includes("E2E-ALERT")) return [{ calls: [reply("E2E-REPLY-ALERT")] }, { text: "Looked." }];
-    if (input.includes("E2E-SLACK-MENTION")) return [{ calls: [reply("E2E-REPLY-SLACK")] }, { text: "Read." }];
-    if (input.includes("E2E-GITHUB")) return [{ calls: [reply("E2E-REPLY-GITHUB")] }, { text: "Reviewed." }];
+    if (input.includes("E2E-NOW")) return [{ text: "Seen." }];
+    if (input.includes("E2E-ALERT")) return [{ text: "Looked." }];
+    if (input.includes("E2E-SLACK-MENTION")) return [{ text: "Read." }];
+    if (input.includes("E2E-GITHUB")) return [{ text: "Reviewed." }];
     const turn = /E2E-TURN-(\d+)/.exec(input)?.[1];
-    if (turn) return [{ calls: [reply(`E2E-REPLY-${turn}`)] }, { text: `E2E-TEXT-${turn}` }];
+    if (turn) return [{ text: `E2E-TEXT-${turn}` }];
     return [{ text: "ok" }];
   })();
   return plan[Math.min(steps, plan.length - 1)]!;

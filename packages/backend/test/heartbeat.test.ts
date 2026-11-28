@@ -9,7 +9,6 @@ import { Inbox } from "../src/a2a/inbox.ts";
 import { Assets } from "../src/assets.ts";
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
-import { Feed } from "../src/feed.ts";
 import { Heartbeat } from "../src/heartbeat.ts";
 import { PluginNotes } from "../src/plugin-notes.ts";
 import { Queue } from "../src/queue.ts";
@@ -38,9 +37,8 @@ function setup(
     timeZone: "UTC",
     redeliverMs: 5 * 60_000,
   });
-  const feed = new Feed();
-  const conversation = new Conversation(db, feed, { now: clock.now });
-  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
+  const conversation = new Conversation(db, { now: clock.now });
+  const record = new ActivityRecord(db, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000 });
   const inbox = new Inbox(db, queue, {
     assets: new Assets(db, path.join(dir, "assets"), { now: clock.now }),
     now: clock.now,

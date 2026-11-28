@@ -1,72 +1,36 @@
 // The backend's API for the Web UI (docs/ui-api.md) and the owner's login
 // (ADR-0010). It listens on TCP, reached from outside the Pod; a request from
 // the sandbox over the loopback is checked the same way (ADR-0014).
-import { randomUUID } from "node:crypto";
 import type http from "node:http";
 
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { ICON_TYPES } from "@penelope/avatar";
-import type { AgentResponse, AppDevicesResponse, PostMessageResponse, PushResponse, RecordKind, RecordResultResponse, RecordUnseenResponse, SchedulesResponse, SubAgentsResponse } from "@penelope/contract";
+import type { AgentResponse, RecordKind, RecordResultResponse, RecordUnseenResponse } from "@penelope/contract";
 
 import { isA2APath } from "./a2a/endpoint.ts";
-import type { SubAgents } from "./agents.ts";
-import { AssetStoreError, type Assets } from "./assets.ts";
 import { type AgentSettings, faceBytes } from "./avatar.ts";
-import type { Conversation } from "./conversation.ts";
-import type { Feed } from "./feed.ts";
-import { type Handler, HttpError, isMultipart, readForm, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
-import { appChallengeOf, type AppTokens, appTokenRequestOf } from "./login/app-tokens.ts";
+import { type Handler, HttpError, readJson, sendEmpty, sendError, sendJson } from "./http.ts";
 import { CALLBACK_PATH, type GitHubLogin } from "./login/github.ts";
 import type { LoginSessions } from "./login/sessions.ts";
 import { MEMORY_PATH, memoryRoute } from "./memory-api.ts";
 import type { MemoryView } from "./memory-view.ts";
 import type { Memory } from "./memory.ts";
 import type { ModelSettings } from "./model-settings.ts";
-import { apnsRegistrationOf, type ApnsRegistrations } from "./push/apns-registrations.ts";
-import type { PushSubscriptions } from "./push/notifier.ts";
-import { webPushSubscriptionOf } from "./push/web-push.ts";
-import type { Queue } from "./queue.ts";
 import { type ActivityRecord, RecordQueryError } from "./record.ts";
-import type { Schedules } from "./schedules.ts";
-import type { Sleepiness } from "./sleepiness.ts";
-import type { Attachment } from "./sources.ts";
-import { iso } from "./time.ts";
 import { AGENT_ICONS_PATH } from "./web.ts";
 
 export const SESSION_COOKIE = "penelope_session";
-/** Where the copies the backend keeps of what the agents made are read, by id (ADR-0032). */
-export const ASSETS_PATH = "/api/assets/";
-/** Where the activity record is read (ADR-0038). */
 export const RECORD_PATH = "/api/record";
-/** A message with its files: 64 MiB in all by default. */
-export const DEFAULT_UI_BYTES = 64 * 1024 * 1024;
-const HEARTBEAT_MS = 25_000;
-const SUMMARY_LENGTH = 200;
-/** A subscription is a URL and two keys. */
-const PUSH_BYTES = 16 * 1024;
 
 export type UiOptions = {
-  queue: Queue;
-  conversation: Conversation;
-  /** The copies of the replies' images. */
-  assets: Assets;
-  /** The sub-agents that are not closed, for `GET /api/agents`. */
-  agents: SubAgents;
-  /** Her schedules, listed and removed as her own tools do (docs/sandbox-api.md). */
-  schedules: Schedules;
   /** The activity record (ADR-0038). */
   record: ActivityRecord;
   memory: Memory;
   memoryView: MemoryView;
-  feed: Feed;
   login: GitHubLogin;
   sessions: LoginSessions;
-  appTokens: AppTokens;
-  apnsRegistrations: ApnsRegistrations;
   modelSettings: ModelSettings;
-  sleepiness: Sleepiness;
   /** The owner's GitHub user ID. Without one, no one gets in. */
   ownerId: number | undefined;
   /** Where the owner reaches the backend. Cookies are Secure when it is https. */
@@ -74,18 +38,14 @@ export type UiOptions = {
   /** The agent's name and her avatar's faces as they are now, read without a login. */
   agent: () => AgentSettings;
   now: () => number;
-  maxBytes?: number;
   /** The Web UI's files, served for everything else. Until it is built, nothing is. */
   web?: Handler;
   /** The A2A routes, including root discovery. Without this handler, those routes return 404. */
   a2a?: Handler;
-  /** Web Push: the VAPID public key the browsers subscribe with, and where their subscriptions are kept. Without it, there is none. */
-  push?: { publicKey: string; subscriptions: PushSubscriptions };
 };
 
 export function uiHandler(options: UiOptions): Handler {
-  const { queue, conversation, assets, agents, schedules, record, memory, memoryView, feed, login, sessions, appTokens, ownerId, now } = options;
-  const maxBytes = options.maxBytes ?? DEFAULT_UI_BYTES;
+  const { record, memory, memoryView, login, sessions, ownerId, now } = options;
   const secure = options.publicUrl?.startsWith("https:") ?? false;
   const web = options.web ?? notBuilt;
   const cookie = (value: string, expiresMs: number) => sessionCookie(value, expiresMs, now(), secure);
@@ -98,34 +58,16 @@ export function uiHandler(options: UiOptions): Handler {
       sendJson(response, 200, { ok: true });
       return;
     }
-    if (route === "GET /auth/github/start" || route === "GET /auth/app/start") {
-      const isApp = route === "GET /auth/app/start";
-      const challenge = isApp ? appChallengeOf(url.searchParams) : undefined;
-      if (isApp && !secure) throw new HttpError(503, "app-login-requires-https");
-      if (isApp && challenge === undefined) throw new HttpError(400, "invalid-code-challenge");
-      const start = login.start(challenge);
+    if (route === "GET /auth/github/start") {
+      const start = login.start();
       if (start.kind === "refused") sendError(response, start.status, start.code);
       else sendEmpty(response, 302, { location: start.location, "cache-control": "no-store" });
-      return;
-    }
-    if (route === "POST /auth/app/token") {
-      if (!secure) throw new HttpError(503, "app-login-requires-https");
-      if (ownerId === undefined) throw new HttpError(503, "login-not-configured");
-      const exchange = appTokenRequestOf(await readJson(request, 4096));
-      if (exchange === undefined) throw new HttpError(400, "invalid-request");
-      const result = appTokens.exchange(exchange, ownerId);
-      if (result === undefined) throw new HttpError(400, "invalid-grant");
-      sendJson(response, 200, result);
       return;
     }
     if (route === `GET ${CALLBACK_PATH}`) {
       const finish = await login.callback(url.searchParams);
       if (finish.kind === "refused") sendError(response, finish.status, finish.code);
-      else if (finish.kind === "app-login") {
-        const code = appTokens.issueCode(finish.userId, finish.challenge);
-        if (code === undefined) throw new HttpError(429, "too-many-logins");
-        sendEmpty(response, 302, { location: `penelope://auth?code=${code}`, "cache-control": "no-store", "referrer-policy": "no-referrer" });
-      } else {
+      else {
         sendEmpty(response, 302, {
           location: "/",
           "set-cookie": cookie(finish.session.token, finish.session.expiresMs),
@@ -146,6 +88,7 @@ export function uiHandler(options: UiOptions): Handler {
       await options.a2a(request, response);
       return;
     }
+    if (url.pathname.startsWith("/auth/")) throw new HttpError(404, "no such path");
     if (!url.pathname.startsWith("/api/")) {
       await web(request, response);
       return;
@@ -191,60 +134,12 @@ export function uiHandler(options: UiOptions): Handler {
       return;
     }
 
-    if (ownerId === undefined) throw new HttpError(401, "not signed in");
-    const authorization = request.headersDistinct.authorization;
-    let appToken: string | undefined;
-    let deviceId: string | undefined;
-    if (authorization !== undefined) {
-      const [value] = authorization;
-      appToken = secure && authorization.length === 1 ? /^Bearer +([A-Za-z0-9_-]+)$/i.exec(value ?? "")?.[1] : undefined;
-      deviceId = appToken === undefined ? undefined : appTokens.authenticate(appToken, ownerId);
-      if (deviceId === undefined) throw new HttpError(401, "not signed in");
-    } else {
-      const token = cookieValue(request);
-      const session = token === undefined ? undefined : sessions.use(token, ownerId);
-      if (!session) throw new HttpError(401, "not signed in");
-      // Each use moves the session's end on; the cookie follows it.
-      response.setHeader("set-cookie", cookie(session.token, session.expiresMs));
-    }
+    if (ownerId === undefined || request.headers.authorization !== undefined) throw new HttpError(401, "not signed in");
+    const token = cookieValue(request);
+    const session = token === undefined ? undefined : sessions.use(token, ownerId);
+    if (!session) throw new HttpError(401, "not signed in");
+    response.setHeader("set-cookie", cookie(session.token, session.expiresMs));
 
-    if (route === "GET /api/app/devices") {
-      if (deviceId !== undefined) throw new HttpError(403, "requires a Web session");
-      sendJson(response, 200, { devices: appTokens.list(ownerId) } satisfies AppDevicesResponse);
-      return;
-    }
-    if (route === "DELETE /api/app/devices/current") {
-      if (deviceId === undefined) throw new HttpError(403, "requires an app token");
-      appTokens.revoke(deviceId, ownerId);
-      sendEmpty(response, 204, { "cache-control": "no-store" });
-      return;
-    }
-    if (route === "PUT /api/app/push" || route === "DELETE /api/app/push") {
-      if (deviceId === undefined || appToken === undefined) throw new HttpError(403, "requires an app token");
-      if (route === "PUT /api/app/push") {
-        const registration = apnsRegistrationOf(await readJson(request, PUSH_BYTES));
-        if (registration === undefined) throw new HttpError(400, "invalid-apns-registration");
-        // The body can arrive after this device has expired or been revoked.
-        if (appTokens.authenticate(appToken, ownerId) !== deviceId) throw new HttpError(401, "not signed in");
-        options.apnsRegistrations.save(deviceId, registration);
-      } else {
-        options.apnsRegistrations.remove(deviceId);
-      }
-      sendEmpty(response, 204, { "cache-control": "no-store" });
-      return;
-    }
-    const selectedDevice = /^\/api\/app\/devices\/([a-f0-9-]{36})$/.exec(url.pathname)?.[1];
-    if (request.method === "DELETE" && selectedDevice !== undefined) {
-      if (deviceId !== undefined) throw new HttpError(403, "requires a Web session");
-      appTokens.revoke(selectedDevice, ownerId);
-      sendEmpty(response, 204, { "cache-control": "no-store" });
-      return;
-    }
-
-    if (url.pathname.startsWith(ASSETS_PATH)) {
-      await sendAsset(assets, url.pathname.slice(ASSETS_PATH.length), request, response);
-      return;
-    }
     if (url.pathname === MEMORY_PATH || url.pathname.startsWith(`${MEMORY_PATH}/`)) {
       try {
         await memoryRoute(memoryView, memory, url, request, response);
@@ -266,105 +161,12 @@ export function uiHandler(options: UiOptions): Handler {
     }
 
     switch (route) {
-      case "POST /api/messages": {
-        const { text, attachments } = isMultipart(request)
-          ? await messageFromForm(await readForm(request, maxBytes))
-          : messageFromJson(await readJson(request, maxBytes));
-        if (text === "" && attachments.length === 0) throw new HttpError(400, "a message needs text or files");
-        const id = randomUUID();
-        // The event and its line of the history are kept together, with the
-        // copies of its images, or none of them (ADR-0034).
-        let files;
-        try {
-          files = conversation.ownerMessage({ id, text, files: attachments }, () =>
-            queue.accept(
-              {
-                source: "ui", id, occurred_at: iso(now()), summary: summaryOf(text, attachments.length),
-                answer_via: { tool: "reply" }, payload: { text },
-              },
-              { builtin: true, attachments },
-            ),
-          );
-        } catch (error) {
-          if (!(error instanceof AssetStoreError)) throw error;
-          throw new HttpError(500, "not sent: the images could not be kept");
-        }
-        sendJson(response, 202, { id, ...files } satisfies PostMessageResponse);
-        return;
-      }
-      case "GET /api/history": {
-        const before = url.searchParams.get("before") ?? undefined;
-        let page;
-        try {
-          page = conversation.page(before);
-        } catch (error) {
-          throw new HttpError(400, error instanceof Error ? error.message : String(error));
-        }
-        sendJson(response, 200, page);
-        return;
-      }
-      case "POST /api/history/read": {
-        const through = (await readJson(request, 1024) as { through?: unknown } | null)?.through;
-        if (typeof through !== "string" || through === "") throw new HttpError(400, "through must be a message id");
-        if (!conversation.markRead(through)) throw new HttpError(404, "no such history message");
-        sendEmpty(response, 204);
-        return;
-      }
-      case "GET /api/summary/stream":
-      case "GET /api/stream": {
-        const token = appToken;
-        const stillSignedIn = token === undefined ? undefined : () => appTokens.authenticate(token, ownerId) !== undefined;
-        if (route === "GET /api/summary/stream") summaryStream(conversation, record, feed, response, stillSignedIn);
-        else stream(feed, request, response, stillSignedIn);
-        return;
-      }
-      case "GET /api/status":
-        sendJson(response, 200, options.sleepiness.status(), { "cache-control": "no-store" });
-        return;
-      case "GET /api/agents":
-        sendJson(response, 200, { agents: agents.list() } satisfies SubAgentsResponse);
-        return;
-      // Only the main agent has schedules. The UI adds none.
-      case "GET /api/schedules":
-        sendJson(response, 200, { schedules: schedules.entries("main") } satisfies SchedulesResponse);
-        return;
       case "GET /api/settings":
         sendJson(response, 200, options.modelSettings.read(), { "cache-control": "no-store" });
         return;
       case "PUT /api/settings":
         sendJson(response, 200, options.modelSettings.save(await readJson(request, 16 * 1024)), { "cache-control": "no-store" });
         return;
-      case "GET /api/push":
-        sendJson(response, 200, (options.push === undefined ? {} : { web_push: { public_key: options.push.publicKey } }) satisfies PushResponse);
-        return;
-      case "POST /api/push/subscriptions": {
-        if (options.push === undefined) throw new HttpError(503, "web-push-not-configured");
-        const subscription = webPushSubscriptionOf(await readJson(request, PUSH_BYTES));
-        if (subscription === undefined) throw new HttpError(400, "not a Web Push subscription with an https endpoint and its keys");
-        options.push.subscriptions.save({ kind: "web-push", ...subscription });
-        sendEmpty(response, 204);
-        return;
-      }
-      case "POST /api/push/subscriptions/delete": {
-        const endpoint = ((await readJson(request, PUSH_BYTES)) as { endpoint?: unknown } | null)?.endpoint;
-        if (typeof endpoint !== "string") throw new HttpError(400, "endpoint must be a string");
-        options.push?.subscriptions.remove(endpoint);
-        sendEmpty(response, 204);
-        return;
-      }
-    }
-    // Removed as her schedule_remove removes it; she is not told, and finds out with schedule_list.
-    const scheduleId = /^\/api\/schedules\/([^/]+)$/.exec(url.pathname)?.[1];
-    if (request.method === "DELETE" && scheduleId !== undefined) {
-      let id: string;
-      try {
-        id = decodeURIComponent(scheduleId);
-      } catch {
-        throw new HttpError(404, "no such schedule");
-      }
-      if (!schedules.remove(id)) throw new HttpError(404, "no such schedule");
-      sendEmpty(response, 204);
-      return;
     }
     throw new HttpError(404, "no such path");
   };
@@ -428,129 +230,6 @@ async function recordRoute(record: ActivityRecord, memory: MemoryView, request: 
 }
 
 const RECORD_KINDS: readonly string[] = ["turn", "night", "job", "sub_agent"] satisfies RecordKind[];
-
-/**
- * The bytes of one copy, as its type. A copy never changes, so the browser
- * may keep it as long as it likes; it is the owner's, so only her browser.
- */
-async function sendAsset(assets: Assets, rest: string, request: http.IncomingMessage, response: http.ServerResponse): Promise<void> {
-  let id = "";
-  try {
-    id = decodeURIComponent(rest);
-  } catch {
-    // Not an id of any copy: answered as one that is not there.
-  }
-  const found = id === "" || id.includes("/") ? undefined : assets.get(id);
-  if (found === undefined) throw new HttpError(404, "no such asset");
-  if (request.method !== "GET") throw new HttpError(405, "only GET");
-  let body: Buffer;
-  try {
-    body = await readFile(found.file);
-  } catch {
-    throw new HttpError(404, "the asset cannot be read");
-  }
-  response.writeHead(200, {
-    "content-type": found.mime_type,
-    "content-length": body.length,
-    "cache-control": "private, max-age=31536000, immutable",
-    "x-content-type-options": "nosniff",
-  });
-  response.end(body);
-}
-
-function stream(feed: Feed, request: http.IncomingMessage, response: http.ServerResponse, stillSignedIn?: () => boolean): void {
-  const lastEventId = request.headers["last-event-id"];
-  events(response, (write) => feed.subscribe(typeof lastEventId === "string" ? lastEventId : undefined, (id, event) => {
-    write(`id: ${id}\nevent: ${event.event}\ndata: ${JSON.stringify(event.data)}\n\n`);
-  }), stillSignedIn);
-}
-
-function summaryStream(
-  conversation: Conversation,
-  record: ActivityRecord,
-  feed: Feed,
-  response: http.ServerResponse,
-  stillSignedIn?: () => boolean,
-): void {
-  let unseen = record.unseen();
-  let last = JSON.stringify(conversation.summary(unseen));
-  events(response, (write) => {
-    write(`event: summary\ndata: ${last}\n\n`);
-    const update = () => {
-      const next = JSON.stringify(conversation.summary(unseen));
-      if (next === last) return;
-      last = next;
-      write(`event: summary\ndata: ${next}\n\n`);
-    };
-    const stopConversation = conversation.onSummaryChange(update);
-    const stopRecord = feed.subscribe(undefined, (_id, event) => {
-      if (event.event !== "record" || unseen === event.data.unseen) return;
-      unseen = event.data.unseen;
-      update();
-    });
-    return () => {
-      stopConversation();
-      stopRecord();
-    };
-  }, stillSignedIn);
-}
-
-/** Server-sent events until the browser goes away, a comment now and then to keep the line open. */
-function events(
-  response: http.ServerResponse,
-  subscribe: (write: (text: string) => void) => () => void,
-  stillSignedIn?: () => boolean,
-): void {
-  response.writeHead(200, {
-    "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-store",
-    connection: "keep-alive",
-    "x-accel-buffering": "no",
-  });
-  response.write(": stream\n\n");
-  const write = (text: string) => {
-    if (response.writableEnded) return;
-    try {
-      if (stillSignedIn === undefined || stillSignedIn()) {
-        response.write(text);
-        return;
-      }
-    } catch {
-      // If the credential cannot be checked, stop sending private events.
-    }
-    response.end();
-  };
-  const stop = subscribe(write);
-  const heartbeat = setInterval(() => write(": ping\n\n"), HEARTBEAT_MS);
-  response.once("close", () => {
-    clearInterval(heartbeat);
-    stop();
-  });
-}
-
-function messageFromJson(body: unknown): { text: string; attachments: Attachment[] } {
-  const text = (body as { text?: unknown } | null)?.text;
-  if (typeof text !== "string") throw new HttpError(400, "text must be a string");
-  return { text, attachments: [] };
-}
-
-async function messageFromForm(form: FormData): Promise<{ text: string; attachments: Attachment[] }> {
-  const text = form.get("text") ?? "";
-  if (typeof text !== "string") throw new HttpError(400, "text must be a field, not a file");
-  const attachments: Attachment[] = [];
-  for (const file of form.getAll("file")) {
-    if (typeof file === "string") throw new HttpError(400, "a file part must be a file");
-    attachments.push({ name: file.name, type: file.type, data: new Uint8Array(await file.arrayBuffer()) });
-  }
-  return { text, attachments };
-}
-
-/** The first line of the text, cut short; or how many files came when there is no text. */
-function summaryOf(text: string, files: number): string {
-  const first = text.split("\n", 1)[0]!.trim();
-  if (first !== "") return first.length > SUMMARY_LENGTH ? `${first.slice(0, SUMMARY_LENGTH)}…` : first;
-  return files === 1 ? "1 file" : `${files} files`;
-}
 
 function cookieValue(request: http.IncomingMessage): string | undefined {
   const values = (request.headers.cookie ?? "")

@@ -1,35 +1,9 @@
-// The backend's API for the Web UI and iPhone (docs/ui-api.md).
+// The backend's API for the personal page (docs/ui-api.md).
 
 import type { Source } from "./events.ts";
-import type { Activity, AgentId, JobEndKind, MemoryMove, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, ScheduleWhen, SubAgentStatus, TurnResult } from "./sandbox.ts";
+import type { Activity, AgentId, JobEndKind, MemoryMove, NightLayerOverTarget, NightReviewPhase, NightStageResult, NightTurnStage, TurnResult } from "./sandbox.ts";
 
-/** `GET /auth/app/start` query (separate from the backend's PKCE with GitHub). */
-export type AppLoginQuery = { code_challenge: string; code_challenge_method: "S256" };
-/** `POST /auth/app/token` body. */
-export type AppTokenRequest = { code: string; code_verifier: string; device_name: string };
-export type AppTokenResponse = { token: string; expires_at: string };
-
-/** Web settings metadata. Never includes the token or its hash. */
-export type AppDevice = { id: string; name: string; created_at: string; expires_at: string };
-/** `GET /api/app/devices`. */
-export type AppDevicesResponse = { devices: AppDevice[] };
-
-/** `POST /api/messages` (JSON, or multipart with files). */
-export type PostMessageRequest = { text: string };
-/**
- * The id of the `ui` event the message became, with what the history keeps of
- * its files: the same as its line of the history.
- */
-export type PostMessageResponse = { id: string } & OwnerFiles;
-
-/** The event a reply answers: where it came from and its one line. Never its payload. */
-export type Trigger = { source: Source; summary: string };
-
-/**
- * An image the backend copied when a reply carried it (ADR-0032), or when the
- * owner sent it with a message (ADR-0034). Its bytes are
- * `GET /api/assets/<id>`, and never change.
- */
+/** An image copy stored by the backend. */
 export type ReplyImage = {
   id: string;
   /** PNG, JPEG, GIF or WebP, from its first bytes. */
@@ -40,99 +14,8 @@ export type ReplyImage = {
   name: string;
 };
 
-/**
- * A file the owner sent that the backend keeps no copy of: what is not an
- * image it copies (ADR-0034). Only its name and size are kept.
- */
-export type OwnerFile = {
-  /** The name the browser gave, without its directory. */
-  name: string;
-  /** Bytes. */
-  size: number;
-};
-
-/** What the history keeps of the files of one of the owner's messages, in the order sent. */
-export type OwnerFiles = {
-  /** The images copied (ADR-0034). Missing when there are none. */
-  images?: ReplyImage[];
-  /** The other files, by name. Missing when there are none. */
-  files?: OwnerFile[];
-};
-
-/** One line of the conversation. */
-export type HistoryEntry =
-  | ({ kind: "owner"; id: string; at: string; text: string; agent?: never } & OwnerFiles)
-  | {
-      kind: "agent";
-      id: string;
-      at: string;
-      text: string;
-      agent: AgentId;
-      expression?: string;
-      trigger?: Trigger;
-      /** The turn it was sent in, for the activity record (ADR-0038). Missing when the backend does not know it. */
-      turn_id?: string;
-      /** The images it carries, in the order sent. Missing when there are none. */
-      images?: ReplyImage[];
-    };
-
-/** `GET /api/history?before=`: newest first. `before` is the cursor of the next, older page. */
-export type HistoryResponse = { entries: HistoryEntry[]; before?: string };
-
-/** `POST /api/history/read`: the history message seen, including this message. */
-export type ReadHistoryRequest = { through: string };
-
-/** The main agent's status for the deployments list (ADR-0066). */
-export type SummaryState =
-  | { kind: "waiting" }
-  | { kind: "thinking" }
-  | { kind: "tool"; tool: string }
-  /** Reserved until Sentinel supports approvals. */
-  | { kind: "approval"; pending: number };
-
-/** The data of a `summary` event on `GET /api/summary/stream`. */
-export type AgentSummary = {
-  state: SummaryState;
-  last_message: Pick<HistoryEntry, "kind" | "at" | "text"> | null;
-  unread: number;
-  unseen_failures: number;
-};
-
 /** Whether an agent is in a turn or waiting for events. */
 export type AgentState = "thinking" | "waiting";
-
-/** One server-sent event of `GET /api/stream`: `event` is its name, `data` its JSON. */
-export type StreamEvent =
-  | { event: "reply"; data: Extract<HistoryEntry, { kind: "agent" }> }
-  | { event: "activity"; data: { agent: AgentId; activity: Activity } }
-  | { event: "state"; data: { agent: AgentId; state: AgentState } }
-  /** A sub-agent was started or closed. */
-  | { event: "agent"; data: SubAgentStatus }
-  /** The number of failures the owner has not seen changed (ADR-0038). */
-  | { event: "record"; data: RecordUnseenResponse };
-
-/** One sub-agent that is not closed, as `GET /api/agents` lists it. */
-export type SubAgent = {
-  agent: AgentId;
-  purpose: string;
-  state: AgentState;
-  /** RFC 3339: when the runner first said it was started. */
-  started_at: string;
-  /** RFC 3339: since when it is in `state`; when it was started if it has had no turn. */
-  state_since: string;
-};
-
-/** `GET /api/agents`: the sub-agents that are not closed. */
-export type SubAgentsResponse = { agents: SubAgent[] };
-
-/**
- * One of her schedules, as `GET /api/schedules` lists it: what her
- * `schedule_list` lists, and when it comes due next (RFC 3339).
- */
-export type ScheduleEntry = { id: string; reason: string; next_at: string } & ScheduleWhen;
-
-/** `GET /api/schedules`: her schedules, in the order she made them. */
-export type SchedulesResponse = { schedules: ScheduleEntry[] };
 
 /** `GET /api/agent`, read without a login: what the UI shows of the agent. */
 export type AgentResponse = {
@@ -142,69 +25,6 @@ export type AgentResponse = {
   icons?: Record<string, string>;
   /** Where the PNG of each face that has one is served, by expression: for Slack's icon_url. */
   png_icons?: Record<string, string>;
-};
-
-/**
- * `GET /api/push`: the kinds of notice the backend can send, with what a
- * browser needs to subscribe. A kind is missing when the deployment does not
- * set it up (ADR-0027).
- */
-export type PushResponse = {
-  /** Web Push: the VAPID public key, uncompressed P-256 in base64url. */
-  web_push?: { public_key: string };
-};
-
-/**
- * `POST /api/push/subscriptions`: one place to send the notices to. The first
- * kind is Web Push, the browser's `PushSubscription.toJSON()`; the same
- * endpoint again replaces the keys it had.
- */
-export type PushSubscriptionRequest = {
-  kind: "web-push";
-  endpoint: string;
-  keys: { p256dh: string; auth: string };
-};
-
-/** `POST /api/push/subscriptions/delete`: stop sending to this endpoint. */
-export type PushUnsubscribeRequest = { endpoint: string };
-
-export type ApnsEnvironment = "sandbox" | "production";
-
-/** `PUT /api/app/push`: replaces the calling app device's registration (ADR-0065). */
-export type ApnsRegistrationRequest = {
-  /** The opaque APNs device token as hex. */
-  token: string;
-  environment: ApnsEnvironment;
-  /** An uncompressed X9.63 P-256 public key, as standard padded base64. */
-  public_key: string;
-};
-
-/** The APNs alert as delivered, before the iPhone's extension opens `e`. */
-export type ApnsReplyPayload = {
-  aps: { alert: { title: string; body: string }; "mutable-content": 1; sound: "default" };
-  messageId: string;
-  kind: "reply";
-  /** Standard padded base64: X9.63 ephemeral key, 12-byte nonce, ciphertext followed by its 16-byte tag. */
-  e: { v: 1; epk: string; nonce: string; ct: string };
-};
-
-/** Inside `e`: the preview and the deployment URL to open when the notification is tapped. */
-export type ApnsReplyPreview = Pick<Notice, "text" | "expression" | "images"> & { url: string };
-
-/**
- * What one notice of a reply carries, whatever the kind it is sent by: what
- * the Web Push is, as JSON, after it is decrypted.
- */
-export type Notice = {
-  /** The id of the reply, as in the history. */
-  id: string;
-  /** The agent's name, from the backend's settings. */
-  agent: string;
-  /** The head of the reply, cut short (docs/ui-api.md, "知らせ"). */
-  text: string;
-  expression?: string;
-  /** How many images the reply has, when it has any (ADR-0032). */
-  images?: number;
 };
 
 // ── The activity record (ADR-0038, docs/ui-api.md "活動の記録") ──
@@ -373,15 +193,6 @@ export type RecordFlowItem =
       bytes: number;
     };
 
-/** A reply the turn sent, with where it stands in the conversation. */
-export type RecordReply = {
-  id: string;
-  at: string;
-  text: string;
-  /** A `before` for `GET /api/history` whose page starts with this reply. */
-  history_before: string;
-};
-
 /** `GET /api/record/turns/<id>` */
 export type RecordTurnResponse = {
   turn: RecordTurn;
@@ -391,7 +202,6 @@ export type RecordTurnResponse = {
   flow: RecordFlowItem[];
   /** Whether its flow is gone with time (30 days), only the summary left. */
   expired: boolean;
-  replies: RecordReply[];
 };
 
 /** `GET /api/record/turns/<id>/results/<call_id>`: the whole output of one tool's result. */

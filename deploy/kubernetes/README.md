@@ -75,7 +75,7 @@ PVC の大きさ（`penelope` 20Gi、`penelope-memory` 5Gi）と StorageClass �
 | ConfigMap | `penelope-skills` | init container skills | 任意。その配置だけの skill（下の「skill」） |
 | Secret | `penelope-sentinel-ca` | Sentinel、sandbox（証明書だけ） | Sentinel の CA（`kubernetes.io/tls`） |
 | Secret | `penelope-sentinel` | Sentinel | 本物の鍵。キーごとに `/run/secrets/penelope-sentinel/keys/<キー>` |
-| Secret | `penelope-backend` | backend | `github-client-secret`、Web Push を使うなら `web-push-vapid-key` |
+| Secret | `penelope-backend` | backend | `github-client-secret` |
 | Secret | `penelope-receivers` | receivers | 任意。受信の鍵。キーごとに `/run/secrets/penelope-receivers/<キー>` |
 
 base が決めている場所:
@@ -149,11 +149,9 @@ kubectl -n "$ns" create secret generic penelope-sentinel \
   --from-file=slack-bot-token=./slack-bot-token \
   --from-file=sd-webui-token=./sd-webui-token
 
-# backend。VAPID の鍵は Web Push を使うときだけ（docs/backend.md）。
-openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256 -out vapid.pem
+# backend の GitHub OAuth 用の鍵。
 kubectl -n "$ns" create secret generic penelope-backend \
-  --from-file=github-client-secret=./github-client-secret \
-  --from-file=web-push-vapid-key=./vapid.pem
+  --from-file=github-client-secret=./github-client-secret
 
 # receivers。キーの名前は receivers/config.json の *_file と揃える。
 kubectl -n "$ns" create secret generic penelope-receivers \

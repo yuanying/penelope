@@ -1,7 +1,6 @@
 // The backend's settings, from environment variables (docs/backend.md).
 // Secrets are read from files, named by the variables, so that their values
 // never sit in the environment.
-import { createPrivateKey } from "node:crypto";
 import path from "node:path";
 
 import type { Delivery } from "@penelope/contract";
@@ -9,8 +8,6 @@ import { audienceOf, type KubernetesSettings } from "@penelope/service-account-a
 
 import { CALLBACK_PATH, type GitHubSettings } from "./login/github.ts";
 import { Senders } from "./a2a/senders.ts";
-import type { ApnsSettings } from "./push/apns.ts";
-import { vapidKeyOf } from "./push/web-push.ts";
 import type { SleepLimits } from "./sleep.ts";
 
 /** A setting that cannot be used. The backend does not start. */
@@ -35,7 +32,7 @@ export type Config = {
   redeliverMs: number;
   /** The heartbeat's quiet time (ADR-0031); none when it is off. */
   heartbeatMs: number | undefined;
-  builtinDelivery: Record<"ui" | "cron" | "a2a" | "self" | "job", Delivery>;
+  builtinDelivery: Record<"cron" | "a2a" | "self" | "job", Delivery>;
   inline: Set<string>;
   gitAuthor: { name: string; email: string };
   memoryView?: { ownerEmail?: string; ownerName?: string; targetBytes?: number; fileLimitBytes?: number };
@@ -44,10 +41,6 @@ export type Config = {
   webDir: string;
   /** The A2A way in (docs/a2a.md); none when no sender is allowed. */
   a2a: A2ASettings | undefined;
-  /** Web Push (ADR-0027): the VAPID private key in PEM and the subject it names; none without the key. */
-  webPush: { vapidKey: string; subject: string } | undefined;
-  /** APNs (ADR-0065): provider credentials and the HTTPS URL to open from the alert. */
-  apns: (ApnsSettings & { url: string }) | undefined;
 };
 
 /** The A2A way in: who may send, how they are checked (one way or both), and the limits. */
@@ -82,7 +75,7 @@ type Env = Readonly<Record<string, string | undefined>>;
 
 const MINUTE = 60_000;
 
-export function loadConfig(env: Env, readFile: (file: string) => string, log = console.error): Config {
+export function loadConfig(env: Env, readFile: (file: string) => string): Config {
   const get = (name: string) => {
     const value = env[name]?.trim();
     return value === undefined || value === "" ? undefined : value;
@@ -197,14 +190,13 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
     redeliverMs: minutes("PENELOPE_REDELIVER_MINUTES", 5),
     heartbeatMs: heartbeatOf(),
     builtinDelivery: {
-      ui: delivery("PENELOPE_DELIVERY_UI"),
       cron: delivery("PENELOPE_DELIVERY_CRON"),
       a2a: delivery("PENELOPE_DELIVERY_A2A"),
       self: delivery("PENELOPE_DELIVERY_SELF"),
       job: delivery("PENELOPE_DELIVERY_JOB"),
     },
     inline: new Set([
-      ...(get("PENELOPE_INLINE_SOURCES") ?? "ui,job")
+      ...(get("PENELOPE_INLINE_SOURCES") ?? "job")
         .split(",")
         .map((name) => name.trim())
         .filter((name) => name !== ""),
@@ -224,45 +216,7 @@ export function loadConfig(env: Env, readFile: (file: string) => string, log = c
     avatar: { name: get("PENELOPE_AGENT_NAME"), chosen, from: avatarsDir === undefined ? [IMAGE_AVATARS_DIR] : [avatarsDir, IMAGE_AVATARS_DIR] },
     webDir: get("PENELOPE_WEB_DIR") ?? "/app/web",
     a2a: a2aOf(get, readFile, publicUrl),
-    webPush: webPushOf(secret("PENELOPE_WEB_PUSH_VAPID_KEY_FILE"), publicUrl),
-    apns: apnsOf(get, secret, publicUrl, log),
   };
-}
-
-/** Missing or unusable APNs settings leave the backend and Web Push running. */
-function apnsOf(get: (name: string) => string | undefined, secret: (name: string) => string | undefined, url: string | undefined, log: (line: string) => void): Config["apns"] {
-  const keyFile = "PENELOPE_APNS_KEY_FILE";
-  const keyId = get("PENELOPE_APNS_KEY_ID");
-  const teamId = get("PENELOPE_APNS_TEAM_ID");
-  if (keyId === undefined && teamId === undefined && get(keyFile) === undefined) return undefined;
-  const appleId = /^[A-Z0-9]{10}$/;
-  if (!keyId || !appleId.test(keyId) || !teamId || !appleId.test(teamId) || !url?.startsWith("https:") || get(keyFile) === undefined) {
-    log("backend: APNs disabled; check PENELOPE_APNS_KEY_ID, PENELOPE_APNS_TEAM_ID, PENELOPE_APNS_KEY_FILE and the HTTPS public URL");
-    return undefined;
-  }
-  try {
-    const key = createPrivateKey(secret(keyFile)!);
-    if (key.asymmetricKeyType === "ec" && key.asymmetricKeyDetails?.namedCurve === "prime256v1") return { key, keyId, teamId, url };
-  } catch {
-    // Neither the secret's path nor its content belongs in the log.
-  }
-  log("backend: APNs disabled; PENELOPE_APNS_KEY_FILE must be a readable P-256 private key");
-  return undefined;
-}
-
-/**
- * Web Push is there with the deployment's VAPID key, which names the backend
- * by its public URL. A key it cannot use stops the start (ADR-0027).
- */
-function webPushOf(vapidKey: string | undefined, publicUrl: string | undefined): Config["webPush"] {
-  if (vapidKey === undefined) return undefined;
-  try {
-    vapidKeyOf(vapidKey);
-  } catch (error) {
-    throw new ConfigError(`PENELOPE_WEB_PUSH_VAPID_KEY_FILE: ${error instanceof Error ? error.message : String(error)}`);
-  }
-  if (publicUrl === undefined) throw new ConfigError("Web Push needs PENELOPE_PUBLIC_URL, the subject of its VAPID tokens");
-  return { vapidKey, subject: publicUrl };
 }
 
 /**

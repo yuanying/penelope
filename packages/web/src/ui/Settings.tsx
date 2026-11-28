@@ -7,15 +7,14 @@ import { useCallback, useEffect, useId, useState } from "react";
 import { modelRef, type ModelSelection, type SettingsResponse, type ThinkingLevel } from "@penelope/contract";
 
 import { type Api, Unauthorized } from "../model/api.ts";
-import { AppDevices } from "./AppDevices.tsx";
 
 const thinkingNames: Record<ThinkingLevel, string> = {
   off: "オフ", minimal: "最小", low: "低い", medium: "標準", high: "高い", xhigh: "とても高い", max: "最大",
 };
 const tokens = new Intl.NumberFormat("ja-JP");
 
-export function Settings({ api, onUnauthorized, agentName, topInset = false }: {
-  api: Api; onUnauthorized: () => void; agentName: string; topInset?: boolean;
+export function Settings({ api, onUnauthorized, agentName }: {
+  api: Api; onUnauthorized: () => void; agentName: string;
 }) {
   const heading = useId();
   const [settings, setSettings] = useState<SettingsResponse>();
@@ -61,7 +60,7 @@ export function Settings({ api, onUnauthorized, agentName, topInset = false }: {
   };
 
   return (
-    <div className={topInset ? "page page-inset" : "page"}>
+    <div className="page">
       <section className="page-body settings-page" aria-labelledby={heading}>
         <Heading level={1}><span id={heading}>設定</span></Heading>
         <div className="settings-card">
@@ -116,7 +115,6 @@ export function Settings({ api, onUnauthorized, agentName, topInset = false }: {
           ) : !failed && <p role="status">読み込み中…</p>}
           {(failed || settings?.models.length === 0) && <div><Button label="読み直す" variant="secondary" onClick={() => void read()} /></div>}
         </div>
-        <AppDevices api={api} onUnauthorized={onUnauthorized} />
         <div className="settings-card">
           <Heading level={2}>エージェント</Heading>
           <p className="settings-note">名前: {agentName}</p>

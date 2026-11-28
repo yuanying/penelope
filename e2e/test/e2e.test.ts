@@ -1,4 +1,4 @@
-// The Pod end to end (e2e/README.md): the owner signs in and talks, the
+// The Pod end to end (e2e/README.md): the owner signs in and opens the activity record, the
 // sandbox's runner makes turns with the fake model, the memory is committed,
 // the sandbox's traffic goes through the Sentinel, a receiver's events reach
 // a turn, the night switches the session, and ended turns are folded.
@@ -7,12 +7,12 @@
 // before left it.
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createDecipheriv, createECDH, createHmac, createPrivateKey, createPublicKey, hkdfSync, randomUUID, verify } from "node:crypto";
+import { createHmac, randomUUID } from "node:crypto";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 
-import type { RecordDayResponse, RecordNight, RecordTurn, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
+import type { RecordDayResponse, RecordNight, RecordSubAgentResponse, RecordTurn, RecordTurnResponse, TurnBatch, TurnEvent, TurnLine } from "@penelope/contract";
 
 import { E2E_PNG } from "../outside/model.ts";
 import {
@@ -30,8 +30,6 @@ import {
   RUN_DIR,
   sentinelRecords,
   sleep,
-  Stream,
-  type StreamEvent,
   textOf,
   where,
 } from "./support.ts";
@@ -42,7 +40,6 @@ const MODEL_SURROGATE = "e2e-surrogate-model-0001";
 const BACKEND_SURROGATE = "e2e-surrogate-backend-0001";
 
 const browser = new Browser();
-let stream = new Stream();
 let failed = false;
 
 /** The model calls whose last input carries `marker`, at the given step of the turn. */
@@ -51,10 +48,6 @@ async function callsFor(marker: string, steps?: number): Promise<ModelCall[]> {
     const at = where(call);
     return at.input.includes(marker) && (steps === undefined || at.steps === steps);
   });
-}
-
-function streamed(event: string, test: (data: Record<string, unknown>) => boolean): StreamEvent | undefined {
-  return stream.events.find((entry) => entry.event === event && test(entry.data as Record<string, unknown>));
 }
 
 function eventLines(input: string): TurnLine[] {
@@ -75,18 +68,16 @@ function track(scenario: () => Promise<void>): () => Promise<void> {
   };
 }
 
-async function send(text: string): Promise<void> {
-  const { status, body } = await browser.json("/api/messages", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text }),
-  });
-  // A refusal says who refused it and why, with the cookie the browser sent.
-  assert.equal(status, 202, `${text}: ${JSON.stringify(body)}, cookie ${browser.cookie?.split("=")[0] ?? "none"}`);
+function send(summary: string): void {
+  assert.equal(intake({ source: "e2e", id: randomUUID(), occurred_at: new Date().toISOString(), summary, delivery: "now", payload: {} }), "202");
 }
 
-const replied = (text: string, timeoutMs = 120_000) =>
-  eventually(`the reply ${text} on the stream`, () => streamed("reply", (data) => data.text === text), timeoutMs);
+function finished(marker: string, timeoutMs = 120_000): Promise<RecordTurn> {
+  return eventually(`a completed turn for ${marker}`, () =>
+    browser.json<RecordDayResponse>("/api/record?kind=turn&agent=main&tz=UTC").body.rows.find(
+      (row): row is RecordTurn => row.kind === "turn" && row.result === "done" && row.triggers.some(({ summary }) => summary.includes(marker)),
+    ), timeoutMs);
+}
 
 /** The log of /memory, as the backend's git sees it: subject, body and the files of each commit. */
 function memoryLog(): string {
@@ -125,7 +116,6 @@ before(async () => {
 });
 
 after(() => {
-  stream.close();
   if (failed || KEEP) {
     process.stderr.write(compose(["logs", "--no-color", "--timestamps"], { check: false }).stdout);
   }
@@ -148,10 +138,8 @@ describe("the Pod end to end", () => {
     assert.equal(callback.headers.location, "/");
     assert.ok(browser.cookie?.startsWith("penelope_session="));
 
-    const history = await browser.json<{ entries: unknown[] }>("/api/history");
-    assert.equal(history.status, 200);
-    assert.deepEqual(history.body.entries, []);
-    await stream.open(browser.cookie!);
+    assert.equal(new Browser().request("/api/record").status, 401);
+    assert.equal(browser.request("/api/record").status, 200);
   }));
 
   it("serves the Web UI from the backend, named from the settings", track(async () => {
@@ -175,42 +163,13 @@ describe("the Pod end to end", () => {
     assert.equal(manifest.name, "E2E Agent");
   }));
 
-  it("makes a turn of the owner's message and streams the reply and what happened", track(async () => {
-    // Guards against: a message not reaching a turn, the reply or the activity not reaching the UI, or the model getting the surrogate.
-    await send("E2E-TURN-1 こんにちは");
-    const reply = await replied("E2E-REPLY-1", 180_000);
-    assert.equal((reply.data as { agent: string }).agent, "main");
-
-    const states = () => stream.events.filter((event) => event.event === "state").map((event) => (event.data as { state: string }).state);
-    await eventually("the agent waiting again", () => (states().at(-1) === "waiting" ? true : undefined));
-    assert.ok(states().includes("thinking"));
-    const activity = stream.events
-      .filter((event) => event.event === "activity")
-      .map((event) => (event.data as { activity: { kind: string; name?: string } }).activity);
-    for (const kind of ["turn_start", "tool_call", "tool_result", "message", "turn_end"]) {
-      assert.ok(activity.some((entry) => entry.kind === kind), `an activity of kind ${kind} on the stream`);
-    }
-    assert.deepEqual(
-      activity.filter((entry) => entry.kind === "tool_call").map((entry) => entry.name),
-      ["write", "bash", "reply"],
-    );
-
-    const history = await browser.json<{ entries: { kind: string; text: string }[] }>("/api/history");
-    assert.deepEqual(
-      history.body.entries.map((entry) => [entry.kind, entry.text]),
-      [
-        ["agent", "E2E-REPLY-1"],
-        ["owner", "E2E-TURN-1 こんにちは"],
-      ],
-    );
-
-    // The activity record has the turn as the runner told it: done, from the owner's message, with its reply (ADR-0038).
-    const record = browser.json<RecordDayResponse>("/api/record?kind=turn&agent=main");
-    const turn = record.body.rows.find(
-      (row): row is RecordTurn => row.kind === "turn" && row.triggers.some((trigger) => trigger.summary.includes("E2E-TURN-1")),
-    );
-    assert.ok(turn, `the turn in the record: ${JSON.stringify(record.body)}`);
-    assert.deepEqual([turn.result, turn.triggers.map((trigger) => trigger.source), turn.replies], ["done", ["ui"], 1]);
+  it("makes a turn of an intake event and writes the activity record", track(async () => {
+    send("E2E-TURN-1 こんにちは");
+    const turn = await finished("E2E-TURN-1", 180_000);
+    assert.deepEqual(turn.triggers.map(({ source, summary }) => [source, summary]), [["e2e", "E2E-TURN-1 こんにちは"]]);
+    const detail = browser.json<RecordTurnResponse>(`/api/record/turns/${turn.id}`);
+    assert.equal(detail.status, 200);
+    assert.deepEqual(detail.body.flow.flatMap((step) => step.kind === "tool_call" ? [step.name] : []), ["write", "bash"]);
 
     // The model's key: the sandbox sent its surrogate, the model got the real one.
     const calls = await outside.modelCalls();
@@ -245,13 +204,13 @@ describe("the Pod end to end", () => {
   }));
 
   it("folds the first turn in the second turn's input to the model", track(async () => {
-    // Guards against: ended turns sent whole again, with their thinking and tool output, or her replies folded away.
+    // Guards against: ended turns sent whole again, or their final answer being folded away.
     // The first turn, whole, while it ran: the tool's output was there.
     const during = await callsFor("E2E-TURN-1", 2);
     assert.ok(JSON.stringify(during[0]!.messages).includes("E2E-BASH-42"));
 
-    await send("E2E-TURN-2");
-    await replied("E2E-REPLY-2");
+    send("E2E-TURN-2");
+    await finished("E2E-TURN-2");
     const [first] = await callsFor("E2E-TURN-2", 0);
     assert.ok(first, "the model was called for the second turn");
     const sent = JSON.stringify(first.messages);
@@ -268,104 +227,6 @@ describe("the Pod end to end", () => {
     }
     assert.ok(!sent.includes("E2E-BASH-42"), "the output of bash is folded away");
     assert.ok(!sent.includes("Successfully wrote"), "the output of write is folded away");
-    const kept = first.messages.filter((message) => message.tool_calls?.some((call) => call.function.name === "reply"));
-    assert.equal(kept.length, 1, "the reply is kept whole");
-  }));
-
-  it("sends a notice of her reply to the owner's push subscriptions, and drops one that is gone", track(async () => {
-    // Guards against: a reply the owner is not told of, a notice the push service could read, the VAPID key not the
-    // deployment's, a subscription kept after its push service said it is gone, or the notice sent through the Sentinel.
-    const { body: settings } = browser.json<{ web_push?: { public_key: string } }>("/api/push");
-    const { x, y } = createPublicKey(createPrivateKey(readFileSync(join(RUN_DIR, "vapid.pem"), "utf8"))).export({ format: "jwk" });
-    const vapidKey = Buffer.concat([Buffer.from([4]), Buffer.from(x!, "base64url"), Buffer.from(y!, "base64url")]);
-    assert.equal(settings.web_push?.public_key, vapidKey.toString("base64url"));
-
-    // Two browsers: one whose push service takes the notice, one whose push service has ended the subscription.
-    const phone = createECDH("prime256v1");
-    phone.generateKeys();
-    const auth = Buffer.alloc(16, 9);
-    const subscribe = (endpoint: string) =>
-      browser.request("/api/push/subscriptions", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "web-push", endpoint, keys: { p256dh: phone.getPublicKey().toString("base64url"), auth: auth.toString("base64url") } }),
-      }).status;
-    assert.equal(subscribe("https://push.example.com/send/phone"), 204);
-    assert.equal(subscribe("https://push.example.com/send/gone-pc"), 204);
-
-    await send("E2E-TURN-3");
-    const reply = await replied("E2E-REPLY-3");
-    const pushes = await eventually("the notices at the push service", async () => {
-      const taken = (await outside.pushes()).filter((push) => push.path === "/send/phone" || push.path === "/send/gone-pc");
-      return taken.length >= 2 ? taken : undefined;
-    });
-    const push = pushes.find((taken) => taken.path === "/send/phone")!;
-    assert.equal(push.encoding, "aes128gcm");
-    assert.ok(Number(push.ttl) > 0);
-
-    // The browser opens it with its own key (RFC 8291); what is in it is the notice of ui-api.md.
-    const body = Buffer.from(push.body, "base64url");
-    const serverKey = body.subarray(21, 21 + body[20]!);
-    const record = body.subarray(21 + body[20]!);
-    const info = Buffer.concat([Buffer.from("WebPush: info\0"), phone.getPublicKey(), serverKey]);
-    const ikm = Buffer.from(hkdfSync("sha256", phone.computeSecret(serverKey), auth, info, 32));
-    const salt = body.subarray(0, 16);
-    const decipher = createDecipheriv("aes-128-gcm", Buffer.from(hkdfSync("sha256", ikm, salt, "Content-Encoding: aes128gcm\0", 16)), Buffer.from(hkdfSync("sha256", ikm, salt, "Content-Encoding: nonce\0", 12)));
-    decipher.setAuthTag(record.subarray(record.length - 16));
-    const plaintext = Buffer.concat([decipher.update(record.subarray(0, record.length - 16)), decipher.final()]).subarray(0, -1);
-    assert.deepEqual(JSON.parse(plaintext.toString("utf8")), { id: (reply.data as { id: string }).id, agent: "E2E Agent", text: "E2E-REPLY-3" });
-
-    // Named by the deployment's VAPID key, for the push service's origin (RFC 8292).
-    const vapid = /^vapid t=([^.]+)\.([^.]+)\.([^,]+), k=(.+)$/.exec(push.authorization);
-    assert.ok(vapid, push.authorization);
-    assert.equal(vapid[4], vapidKey.toString("base64url"));
-    assert.equal(JSON.parse(Buffer.from(vapid[2]!, "base64url").toString()).aud, "https://push.example.com");
-    const jwk = { kty: "EC", crv: "P-256", x: x!, y: y! };
-    assert.ok(verify("sha256", Buffer.from(`${vapid[1]}.${vapid[2]}`), { key: createPublicKey({ key: jwk, format: "jwk" }), dsaEncoding: "ieee-p1363" }, Buffer.from(vapid[3]!, "base64url")));
-
-    // The one that is gone is dropped: the next reply goes to the phone only. The log names neither text nor endpoint.
-    await send("E2E-TURN-6");
-    await replied("E2E-REPLY-6");
-    await eventually("the next notice", async () => ((await outside.pushes()).filter((taken) => taken.path === "/send/phone").length >= 2 ? true : undefined));
-    assert.equal((await outside.pushes()).filter((taken) => taken.path === "/send/gone-pc").length, 1);
-    const backendLog = compose(["logs", "--no-log-prefix", "--no-color", "backend"]).stdout;
-    assert.match(backendLog, /push: subscription \d+ \(web-push\): removed, its service answered 410/);
-    assert.ok(!/push: .*(push\.example\.com|E2E-REPLY)/.test(backendLog), "the push lines name no endpoint and no text");
-
-    // The backend sends it itself: the Sentinel has no record of the push service.
-    assert.ok(!sentinelRecords().some((entry) => JSON.stringify(entry).includes("push.example.com")));
-  }));
-
-  it("shows the owner the image of a reply, copied by the backend, and refuses a reply whose image is none", track(async () => {
-    // Guards against: an image she sends not reaching the owner, reaching anyone without the owner's login, reaching
-    // them as other bytes, or a reply reaching the owner without the image it was sent with (ADR-0032).
-    await send("E2E-IMAGE draw");
-    const reply = await replied("E2E-REPLY-IMAGE");
-    const images = (reply.data as { images?: { id: string; mime_type: string; size: number; name: string }[] }).images ?? [];
-    const png = Buffer.from(E2E_PNG, "base64");
-    assert.deepEqual(images.map(({ mime_type, size, name }) => ({ mime_type, size, name })), [{ mime_type: "image/png", size: png.length, name: "e2e.png" }]);
-    const [image] = images;
-
-    // The reply whose file is no image did not reach the owner; the tool said why.
-    const history = await browser.json<{ entries: { text: string; images?: { id: string }[] }[] }>("/api/history");
-    assert.ok(!history.body.entries.some((entry) => entry.text === "E2E-REPLY-IMAGE-REFUSED"));
-    assert.deepEqual(history.body.entries.find((entry) => entry.text === "E2E-REPLY-IMAGE")?.images?.map((kept) => kept.id), [image!.id]);
-    const refused = streamed("activity", (data) => {
-      const activity = data.activity as { kind: string; is_error?: boolean; output?: string };
-      return activity.kind === "tool_result" && activity.is_error === true && (activity.output ?? "").includes("notes.png");
-    });
-    assert.ok(refused, "the refusal came back to the reply's call");
-
-    // The owner reads its bytes by its id; no one else does.
-    const asset = browser.request(`/api/assets/${image!.id}`);
-    assert.equal(asset.status, 200);
-    assert.equal(asset.headers["content-type"], "image/png");
-    assert.equal(asset.headers["content-length"], String(png.length));
-    assert.equal(new Browser().request(`/api/assets/${image!.id}`).status, 401);
-    // What the backend keeps is the sandbox's file as it was sent, in the backend's own place.
-    const sum = (service: string, file: string) => exec(service, `sha256sum ${file}`).stdout.split(" ")[0];
-    assert.equal(sum("backend", `/var/lib/penelope/assets/${image!.id}.png`), sum("sandbox", "/home/agent/draw/e2e.png"));
-    assert.equal(exec("sandbox", "ls /var/lib/penelope 2>&1", { check: false }).status === 0, false, "the sandbox does not see the copies");
   }));
 
   it("sends the sandbox's traffic through the Sentinel, and records it", track(async () => {
@@ -430,7 +291,7 @@ describe("the Pod end to end", () => {
     // The intake's and the Sentinel's sockets are not in the sandbox.
     assert.equal(exec("sandbox", "ls /run/penelope 2>&1; true").stdout.includes("intake"), false);
     // The backend's port for the UI is reached over loopback, and asks for the same login.
-    assert.equal(exec("sandbox", "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/history").stdout, "401");
+    assert.equal(exec("sandbox", "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/record").stdout, "401");
   }));
 
   it("takes a receiver's events into /sources, and brings the batch along with a now", track(async () => {
@@ -453,7 +314,7 @@ describe("the Pod end to end", () => {
     const answer_via = { tool: "reply" };
     const now = { source: "e2e", stream: "feed", id: "now-1", occurred_at: new Date().toISOString(), summary: "E2E-NOW ping", delivery: "now", answer_via, payload: { n: 2 } };
     assert.equal(intake(now), "202");
-    await replied("E2E-REPLY-EVENTS");
+    await finished("E2E-NOW");
     // Both reach one turn as lines of its <events>, each pointing at where it was appended
     // (docs/events.md, "ターンに入る形"): the now with its summary, the batch as one line of its stream.
     const calls = await callsFor("E2E-NOW", 0);
@@ -509,7 +370,7 @@ describe("the Pod end to end", () => {
     assert.equal(webhook("Bearer wrong"), 401);
     assert.equal(fromOutside("GET", new URL("/healthz", url).href).text, "ok");
     assert.equal(webhook(`Bearer ${token}`), 200);
-    await replied("E2E-REPLY-ALERT");
+    await finished("E2E-ALERT");
     assert.equal(webhook(`Bearer ${token}`), 200, "Alertmanager's resend is taken as received");
 
     const day = startsAt.slice(0, 10);
@@ -580,7 +441,7 @@ describe("the Pod end to end", () => {
     // The batch waits for its quiet minutes; a now brings it along, as the receiver's batch was brought, rather than
     // the test waiting them out. The batch's own wait is the queue's unit tests'.
     assert.equal(intake({ source: "e2e", stream: "github", id: "github-now", occurred_at: new Date().toISOString(), summary: "E2E-GITHUB-NOW ping", delivery: "now", payload: {} }), "202");
-    await replied("E2E-REPLY-GITHUB");
+    await finished("E2E-GITHUB-NOW");
     const calls = await callsFor("E2E-GITHUB", 0);
     assert.equal(calls.length, 1, "one turn for the request and the now");
     const turn = eventLines(where(calls[0]!).input);
@@ -660,7 +521,7 @@ describe("the Pod end to end", () => {
     assert.equal(exec("sandbox", `head -c 8 ${lines[1].attachments[0]} | od -An -tx1`).stdout.trim(), "89 50 4e 47 0d 0a 1a 0a", "the image is beside it");
 
     // The mention is now, and brings the fetched message with it.
-    await replied("E2E-REPLY-SLACK");
+    await finished("E2E-SLACK-MENTION");
     const [call] = await callsFor("E2E-SLACK-MENTION", 0);
     // The mention is inline, so its image goes in beside the text of this input.
     const user = call!.messages.findLast((message) => message.role === "user");
@@ -803,20 +664,14 @@ describe("the Pod end to end", () => {
 
   it("has a sub-agent started, stopped with a question, told more and closed by the main agent", track(async () => {
     // Guards against: a sub-agent's last words not reaching the main agent as a `self` event, more words not going on
-    // in its session, its memory left uncommitted, or the UI not told it was started and closed.
-    await send("E2E-SUB-START");
-    await replied("E2E-REPLY-SUB", 180_000);
-
-    const agents = stream.events.filter((event) => event.event === "agent").map((event) => event.data);
-    assert.deepEqual(agents, [
-      { agent: "e2e-sub", purpose: "E2E-SUB-PURPOSE", closed: false },
-      { agent: "e2e-sub", purpose: "E2E-SUB-PURPOSE", closed: true },
-    ]);
-    const own = stream.events
-      .filter((event) => event.event === "activity" && (event.data as { agent: string }).agent === "e2e-sub")
-      .map((event) => (event.data as { activity: { kind: string } }).activity.kind);
-    assert.equal(own.filter((kind) => kind === "turn_start").length, 2, "two runs of the sub-agent on the stream");
-    assert.deepEqual((await browser.json<{ agents: unknown[] }>("/api/agents")).body.agents, [], "closed, it is not listed");
+    // in its session, its memory left uncommitted, or its work missing from the activity record.
+    send("E2E-SUB-START");
+    const { sub_agent, turns } = await eventually("the closed sub-agent in the activity record", () => {
+      const detail = browser.json<RecordSubAgentResponse>("/api/record/sub-agents/e2e-sub");
+      return detail.status === 200 && detail.body.sub_agent.closed_at ? detail.body : undefined;
+    }, 180_000);
+    assert.equal(sub_agent.purpose, "E2E-SUB-PURPOSE");
+    assert.deepEqual(turns.map(({ result }) => result), ["done", "done"]);
 
     // Each time it stopped, its last words were appended to /sources/self/<name>/ for the main agent.
     const day = new Date().toISOString().slice(0, 10);
@@ -850,8 +705,8 @@ describe("the Pod end to end", () => {
   it("runs a background job and brings its end, with the tail of its output, into a turn", track(async () => {
     // Guards against: a job_start that holds the turn until the command ends, or an end that does not reach the main
     // agent inline with how it ended and its output (ADR-0030).
-    await send("E2E-JOB-START");
-    await replied("E2E-REPLY-JOB", 180_000);
+    send("E2E-JOB-START");
+    await finished("[exit 0] sleep 2; echo E2E-JOB-", 180_000);
 
     // job_start answered with the job and its file, not with what the command printed.
     const [started] = await callsFor("E2E-JOB-START", 1);
@@ -885,7 +740,7 @@ describe("the Pod end to end", () => {
   }));
 
   it("asks a named agent in a job and receives its reply with a saved image", track(async () => {
-    await send("E2E-ASK-AGENT-START");
+    send("E2E-ASK-AGENT-START");
     const ended = await eventually("ask-agent's job event", async () => (await callsFor("Describe this diagram", 0))[0], 180_000);
     const line = eventLines(where(ended).input).find((entry) => entry.kind === undefined && entry.source === "job");
     assert.ok(line && line.kind === undefined && line.text);
@@ -897,35 +752,6 @@ describe("the Pod end to end", () => {
     assert.equal(exec("sandbox", `base64 -w0 ${path}`).stdout, E2E_PNG);
   }));
 
-  it("lists a schedule she made in the UI's API, and removes it there for her schedule_list too", track(async () => {
-    // Guards against: the UI's list of the schedules not being what her schedule_list sees, or a removal from the UI
-    // that she still finds (docs/ui-api.md, "予約").
-    await send("E2E-SCHEDULE-ADD");
-    await replied("E2E-REPLY-SCHEDULE-ADD");
-    const [added] = await callsFor("E2E-SCHEDULE-ADD", 1);
-    assert.ok(added, "the turn that added the schedule");
-    const made = JSON.parse(textOf(added.messages.findLast((message) => message.role === "tool")!.content)) as { id: string };
-
-    type Entry = { id: string; reason: string; cron?: string; at?: string; next_at: string };
-    const listed = browser.json<{ schedules: Entry[] }>("/api/schedules");
-    assert.equal(listed.status, 200);
-    const [entry] = listed.body.schedules;
-    assert.equal(listed.body.schedules.length, 1, JSON.stringify(listed.body));
-    assert.deepEqual([entry!.id, entry!.reason, entry!.cron, entry!.at], [made.id, "E2E-SCHEDULE-REASON", "0 9 1 1 *", undefined]);
-    assert.ok(Date.parse(entry!.next_at) > Date.now(), `comes due next: ${entry!.next_at}`);
-
-    assert.equal(browser.request(`/api/schedules/${encodeURIComponent(made.id)}`, { method: "DELETE" }).status, 204);
-    assert.equal(browser.request(`/api/schedules/${encodeURIComponent(made.id)}`, { method: "DELETE" }).status, 404);
-    assert.deepEqual(browser.json<{ schedules: Entry[] }>("/api/schedules").body.schedules, []);
-
-    // She was not told; she finds it gone when she lists them.
-    await send("E2E-SCHEDULE-LIST");
-    await replied("E2E-REPLY-SCHEDULE-LIST");
-    const [list] = await callsFor("E2E-SCHEDULE-LIST", 1);
-    assert.ok(list, "the turn that listed the schedules");
-    assert.equal(textOf(list.messages.findLast((message) => message.role === "tool")!.content), "[]");
-  }));
-
   it("makes a turn of a heartbeat after the quiet time, and asks nothing before folding it", track(async () => {
     // Guards against: no heartbeat after a quiet stretch (ADR-0031), or a heartbeat's turn with no tool
     // costing a second call for the request before folding. That a second one
@@ -933,7 +759,6 @@ describe("the Pod end to end", () => {
     // The backend is made again with a heartbeat after a few quiet seconds; the next scenario makes it again without.
     composeEnv.PENELOPE_E2E_HEARTBEAT_SECONDS = "5";
     try {
-      stream.close();
       compose(["up", "--detach", "--no-deps", "backend"]);
       await eventually("the backend's health", async () => ((await browser.request("/healthz")).status === 200 ? true : undefined));
 
@@ -956,15 +781,12 @@ describe("the Pod end to end", () => {
     }
   }));
 
-  it("runs the four stages after sleep and handles a queued message with the wake notice", track(async () => {
-    stream.close();
+  it("runs the four stages after sleep and handles a queued event with the wake notice", track(async () => {
     compose(["up", "--detach", "--no-deps", "backend"]);
     await eventually("the backend's health", async () => ((await browser.request("/healthz")).status === 200 ? true : undefined));
-    stream = new Stream();
-    await stream.open(browser.cookie!);
-    await send("E2E-SLEEP");
-    await replied("E2E-SLEEPING");
-    await send("E2E-TURN-4");
+    send("E2E-SLEEP");
+    await finished("E2E-SLEEP");
+    send("E2E-TURN-4");
 
     await eventually(
       "the curator's turn",
@@ -991,7 +813,7 @@ describe("the Pod end to end", () => {
     const { reflection, verifier, curator, session } = night.stages;
     assert.deepEqual([reflection.result, verifier.result, curator.result, session.result], ["done", "done", "done", "done"]);
 
-    await replied("E2E-REPLY-4");
+    await finished("E2E-TURN-4");
     const [first] = await callsFor("E2E-TURN-4", 0);
     const sent = where(first!);
     assert.ok(eventLines(sent.input).some((event) => event.source === "wake"), "the queued message reaches the wake turn");

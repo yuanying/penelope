@@ -2,8 +2,6 @@
 // replace.
 import type {
   AgentResponse,
-  AppDevicesResponse,
-  HistoryResponse,
   MemoryChangeResponse,
   MemoryChangesResponse,
   MemoryCompareResponse,
@@ -16,11 +14,6 @@ import type {
   MemorySearchResponse,
   MemoryWriterFilter,
   ModelSelection,
-  PostMessageResponse,
-  PushResponse,
-  PushSubscriptionRequest,
-  PushUnsubscribeRequest,
-  ReadHistoryRequest,
   RecordDayResponse,
   RecordKind,
   RecordNightResponse,
@@ -29,15 +22,8 @@ import type {
   RecordSubAgentResponse,
   RecordTurnResponse,
   RecordUnseenResponse,
-  SchedulesResponse,
   SettingsResponse,
-  SubAgentsResponse,
 } from "@penelope/contract";
-
-/** Where the bytes of a copy the backend keeps are read: an image of a reply (ADR-0032). They never change. */
-export function assetUrl(id: string): string {
-  return `/api/assets/${encodeURIComponent(id)}`;
-}
 
 export type Fetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
@@ -56,24 +42,9 @@ export class Refused extends Error {
 
 export type Api = {
   agent(): Promise<AgentResponse>;
-  /** The sub-agents that are not closed. */
-  agents(): Promise<SubAgentsResponse>;
-  history(before?: string): Promise<HistoryResponse>;
-  markRead(through: string): Promise<void>;
-  send(text: string, files: readonly File[]): Promise<PostMessageResponse>;
   logout(): Promise<void>;
-  /** The kinds of notice the deployment sends, with the key to subscribe with. */
-  push(): Promise<PushResponse>;
-  subscribePush(subscription: PushSubscriptionRequest): Promise<void>;
-  unsubscribePush(endpoint: string): Promise<void>;
-  /** Her schedules, with when each comes due next. */
-  schedules(): Promise<SchedulesResponse>;
   settings(): Promise<SettingsResponse>;
   saveSettings(selection: ModelSelection): Promise<SettingsResponse>;
-  appDevices(): Promise<AppDevicesResponse>;
-  revokeAppDevice(id: string): Promise<void>;
-  /** Removes one of her schedules; Refused with 404 when it is already gone. */
-  removeSchedule(id: string): Promise<void>;
   /** One day of the activity record, newest first, narrowed as asked; today when no day is given. */
   record(query: RecordQuery): Promise<RecordDayResponse>;
   recordTurn(id: string): Promise<RecordTurnResponse>;
@@ -139,51 +110,13 @@ export function createApi(fetch: Fetch): Api {
       return result;
     },
     agent: async () => (await call("/api/agent")).json() as Promise<AgentResponse>,
-    agents: async () => (await call("/api/agents")).json() as Promise<SubAgentsResponse>,
-    history: async (before) =>
-      (await call(before === undefined ? "/api/history" : `/api/history?before=${encodeURIComponent(before)}`)).json() as Promise<HistoryResponse>,
-    markRead: async (through) => {
-      await call("/api/history/read", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ through } satisfies ReadHistoryRequest),
-      });
-    },
-    send: async (text, files) => {
-      let init: RequestInit;
-      if (files.length === 0) {
-        init = { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text }) };
-      } else {
-        const form = new FormData();
-        form.append("text", text);
-        for (const file of files) form.append("file", file, file.name);
-        init = { method: "POST", body: form };
-      }
-      return (await call("/api/messages", init)).json() as Promise<PostMessageResponse>;
-    },
     logout: async () => {
       await call("/auth/logout", { method: "POST" });
     },
-    push: async () => (await call("/api/push")).json() as Promise<PushResponse>,
-    subscribePush: async (subscription) => {
-      await call("/api/push/subscriptions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(subscription) });
-    },
-    unsubscribePush: async (endpoint) => {
-      const body: PushUnsubscribeRequest = { endpoint };
-      await call("/api/push/subscriptions/delete", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    },
-    schedules: async () => (await call("/api/schedules")).json() as Promise<SchedulesResponse>,
     settings: async () => (await call("/api/settings")).json() as Promise<SettingsResponse>,
     saveSettings: async (selection) => (await call("/api/settings", {
       method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(selection),
     })).json() as Promise<SettingsResponse>,
-    appDevices: async () => (await call("/api/app/devices")).json() as Promise<AppDevicesResponse>,
-    revokeAppDevice: async (id) => {
-      await call(`/api/app/devices/${encodeURIComponent(id)}`, { method: "DELETE" });
-    },
-    removeSchedule: async (id) => {
-      await call(`/api/schedules/${encodeURIComponent(id)}`, { method: "DELETE" });
-    },
     record: async ({ day, tz, failed, agent, kind }) => {
       const query = new URLSearchParams({ tz });
       if (day !== undefined) query.set("day", day);

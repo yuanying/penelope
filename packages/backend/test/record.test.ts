@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import path from "node:path";
 import { describe, it } from "node:test";
 
-import type { Activity, StreamEvent } from "@penelope/contract";
+import type { Activity } from "@penelope/contract";
 
 import { Conversation } from "../src/conversation.ts";
 import { openDatabase } from "../src/db.ts";
-import { Feed } from "../src/feed.ts";
 import { Queue } from "../src/queue.ts";
 import { ActivityRecord } from "../src/record.ts";
 import { Sleep } from "../src/sleep.ts";
@@ -27,11 +26,8 @@ function setup(t: { after: (fn: () => void) => void }) {
     timeZone: "UTC",
     redeliverMs: 300_000,
   });
-  const feed = new Feed();
-  const streamed: StreamEvent[] = [];
-  feed.subscribe(undefined, (_id, event) => streamed.push(event));
-  const conversation = new Conversation(db, feed, { now: clock.now });
-  const record = new ActivityRecord(db, feed, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000, owner: 1, log: () => {} });
+  const conversation = new Conversation(db, { now: clock.now });
+  const record = new ActivityRecord(db, { now: clock.now, timeZone: "UTC", sleepReportTimeoutMs: 60 * 60_000, owner: 1, log: () => {} });
   const event = (source: string, id: string, summary: string) =>
     queue.accept({ source, id, occurred_at: new Date(clock.now()).toISOString(), summary, payload: { text: summary } }, { builtin: true }).seq;
   /** A turn from start to end, its blocks kept as the sandbox's API keeps them. */
@@ -42,7 +38,7 @@ function setup(t: { after: (fn: () => void) => void }) {
   };
   const night = (due: string) =>
     queue.accept({ source: "control", id: `nightly@${due}`, occurred_at: due, summary: "the nightly switch", payload: { kind: "nightly" } }, { builtin: true }).seq;
-  return { db, clock, queue, conversation, record, streamed, event, turn, night };
+  return { db, clock, queue, conversation, record, event, turn, night };
 }
 
 const done = { result: "done" as const };
@@ -119,18 +115,6 @@ describe("the activity record", () => {
       assert.equal(expired, false);
       assert.deepEqual(flow[1], { kind: "tool_result", at: "2026-11-14T10:00:02.000Z", turn_id: "t-1", call_id: "c-1", is_error: false, lines: 3, bytes: 6 });
       assert.equal(record.result("t-1", "c-1"), "a\nb\né");
-    });
-
-    it("gives the replies a turn sent, each with a cursor of the history whose page starts with it", (t) => {
-      const { record, conversation, turn } = setup(t);
-      conversation.reply({ agent: "main", text: "earlier" });
-      turn("main", "t-1", "2026-11-14T10:00:00.000Z", "2026-11-14T10:00:05.000Z");
-      const { id } = conversation.reply({ agent: "main", text: "done", turn_id: "t-1" });
-      conversation.reply({ agent: "main", text: "later" });
-      const [reply] = record.turn("t-1").replies;
-      assert.equal(reply!.id, id);
-      assert.equal(conversation.page(reply!.history_before).entries[0]!.id, id);
-      assert.equal(record.turn("t-1").turn.replies, 1);
     });
 
     it("ties a reply that names no turn to the main agent's turn under way", (t) => {
@@ -351,12 +335,11 @@ describe("the activity record", () => {
       assert.equal(record.unseen(), 0);
     });
 
-    it("sends the new number down the stream when a failure comes", (t) => {
-      const { record, turn, streamed, clock } = setup(t);
+    it("counts a new failure until the owner sees it", (t) => {
+      const { record, turn, clock } = setup(t);
       clock.set("2026-11-14T10:00:02Z");
       turn("main", "t-1", "2026-11-14T10:00:00.000Z", "2026-11-14T10:00:01.000Z");
       record.turnEnded("main", { turn_id: "t-1", result: "failed" });
-      assert.deepEqual(streamed.filter((event) => event.event === "record"), [{ event: "record", data: { unseen: 1 } }]);
     });
   });
 

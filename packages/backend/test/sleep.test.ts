@@ -6,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 
 import { MIGRATIONS, openDatabase } from "../src/db.ts";
-import { Feed } from "../src/feed.ts";
 import { close, listenTcp } from "../src/http.ts";
 import { metricsHandler } from "../src/metrics.ts";
 import { Queue } from "../src/queue.ts";
@@ -30,7 +29,7 @@ function setup(dir: string, clock: FakeClock, log: (line: string) => void = asse
     now: clock.now, timeZone, limits: { threshold: 90, defaultMs: 480 * minute, maxMs: 720 * minute },
     notes: () => ({}), log,
   });
-  const record = new ActivityRecord(db, new Feed(), { now: clock.now, timeZone, sleepReportTimeoutMs: 60 * minute });
+  const record = new ActivityRecord(db, { now: clock.now, timeZone, sleepReportTimeoutMs: 60 * minute });
   return { db, queue, sleep, sleepiness, record };
 }
 

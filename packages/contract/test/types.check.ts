@@ -14,11 +14,7 @@ import type {
   DeliveredEvent,
   ErrorBody,
   Event,
-  HistoryEntry,
-  HistoryResponse,
   PollResponse,
-  PostMessageRequest,
-  PostMessageResponse,
   ReplyRequest,
   ReplyResponse,
   Schedule,
@@ -27,10 +23,7 @@ import type {
   SelfEventRequest,
   SessionRotatedRequest,
   SourcesLine,
-  StreamEvent,
-  SubAgent,
   SubAgentNotice,
-  SubAgentsResponse,
   SubAgentStatus,
   TurnBatch,
   TurnEndRequest,
@@ -241,63 +234,6 @@ export const turnNeither = appendedLeftOut satisfies TurnEvent;
 export const batchWithoutSeqs = { ...turnBatch, seqs: undefined } satisfies TurnBatch;
 // @ts-expect-error a single event is not a batch
 export const eventAsBatch = { ...turnNotice, kind: "batch" } satisfies TurnLine;
-
-// --- The UI's API (docs/ui-api.md) ---
-
-export const post = { text: "hello" } satisfies PostMessageRequest;
-export const posted = { id: "m-1" } satisfies PostMessageResponse;
-
-export const ownerEntry = { kind: "owner", id: "m-1", at, text: "hello" } satisfies HistoryEntry;
-export const agentEntry = {
-  kind: "agent",
-  id: "r-1",
-  at,
-  text: "done",
-  agent: "main",
-  expression: "smile",
-} satisfies HistoryEntry;
-// @ts-expect-error the owner's message has no agent
-export const ownerWithAgent = { ...ownerEntry, agent: "main" } satisfies HistoryEntry;
-
-export const history = { entries: [agentEntry, ownerEntry], before: "opaque" } satisfies HistoryResponse;
-export const lastPage = { entries: [] } satisfies HistoryResponse;
-
-export const streamed = [
-  { event: "reply", data: agentEntry },
-  { event: "activity", data: { agent: "main", activity: { kind: "turn_start", at, turn_id: "t-1" } } },
-  { event: "state", data: { agent: "main", state: "thinking" } },
-  { event: "state", data: { agent: "main", state: "waiting" } },
-] satisfies StreamEvent[];
-
-export const subAgents = {
-  agents: [
-    {
-      agent: "review-pr-22",
-      purpose: "review PR 22",
-      state: "thinking",
-      started_at: "2026-11-14T09:00:00Z",
-      state_since: "2026-11-14T09:05:00Z",
-    },
-  ],
-} satisfies SubAgentsResponse;
-export const noSubAgents = { agents: [] } satisfies SubAgentsResponse;
-// @ts-expect-error a listed sub-agent is in a turn or waiting
-export const runningSubAgent = { agent: "a", purpose: "x", state: "running", started_at: at, state_since: at } satisfies SubAgent;
-// @ts-expect-error a listed sub-agent names its purpose
-export const subAgentWithoutPurpose = { agent: "a", state: "waiting", started_at: at, state_since: at } satisfies SubAgent;
-// @ts-expect-error a listed sub-agent says when it was started and since when it is in its state
-export const subAgentWithoutTimes = { agent: "a", purpose: "x", state: "waiting" } satisfies SubAgent;
-
-export const streamedSubAgents = [
-  { event: "agent", data: started },
-  { event: "agent", data: closed },
-  { event: "state", data: { agent: "review-pr-22", state: "thinking" } },
-] satisfies StreamEvent[];
-// @ts-expect-error the agent event says whether it is closed
-export const agentWithoutClosed = { event: "agent", data: { agent: "a", purpose: "x" } } satisfies StreamEvent;
-
-// @ts-expect-error the states are thinking and waiting
-export const sleeping = { event: "state", data: { agent: "main", state: "sleeping" } } satisfies StreamEvent;
 
 // --- A2A (docs/a2a.md) ---
 

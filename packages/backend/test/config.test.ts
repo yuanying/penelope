@@ -1,13 +1,9 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
 import { describe, it } from "node:test";
 
 import { ConfigError, loadConfig } from "../src/config.ts";
 
-const VAPID = generateKeyPairSync("ec", { namedCurve: "prime256v1" }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
 const files: Record<string, string> = {
-  "/secrets/vapid.pem": VAPID,
-  "/secrets/not-a-key.pem": "-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
   "/secrets/sandbox-token": "real-token\n",
   "/secrets/github-secret": "client-secret\n",
   "/sa/token": "backend-sa-token\n",
@@ -20,21 +16,6 @@ const read = (file: string) => {
 };
 
 describe("the configuration", () => {
-  it("disables only APNs when it cannot read its signing key, without logging the path", () => {
-    const logs: string[] = [];
-    const config = loadConfig({
-      PENELOPE_PUBLIC_URL: "https://penelope.example.com",
-      PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/vapid.pem",
-      PENELOPE_APNS_KEY_ID: "KEYEXAMPLE",
-      PENELOPE_APNS_TEAM_ID: "TEAMEXAMPL",
-      PENELOPE_APNS_KEY_FILE: "/secrets/nonexistent.p8",
-    }, read, (line) => logs.push(line));
-    assert.equal(config.apns, undefined);
-    assert.ok(config.webPush);
-    assert.match(logs.join("\n"), /APNs disabled/);
-    assert.doesNotMatch(logs.join("\n"), /nonexistent\.p8/);
-  });
-
   it("has a default for everything but the secrets and the owner", () => {
     const config = loadConfig({}, read);
     assert.deepEqual(config, {
@@ -54,15 +35,13 @@ describe("the configuration", () => {
       batch: { quietMs: 5 * 60_000, maxMs: 30 * 60_000 },
       redeliverMs: 5 * 60_000,
       heartbeatMs: undefined,
-      builtinDelivery: { ui: "now", cron: "now", a2a: "now", self: "now", job: "now" },
-      inline: new Set(["ui", "job", "control"]),
+      builtinDelivery: { cron: "now", a2a: "now", self: "now", job: "now" },
+      inline: new Set(["job", "control"]),
       gitAuthor: { name: "penelope-backend", email: "backend@penelope.invalid" },
       memoryView: { ownerEmail: undefined, ownerName: undefined, targetBytes: 16384, fileLimitBytes: 65536 },
       avatar: { name: undefined, chosen: undefined, from: ["/app/avatars"] },
       webDir: "/app/web",
       a2a: undefined,
-      webPush: undefined,
-      apns: undefined,
     });
   });
 
@@ -113,7 +92,6 @@ describe("the configuration", () => {
     assert.equal(config.redeliverMs, 3 * 60_000);
     assert.equal(config.builtinDelivery.cron, "batch");
     assert.equal(config.builtinDelivery.job, "batch");
-    assert.equal(config.builtinDelivery.ui, "now");
     // control is always inline: the runner needs what it says.
     assert.deepEqual(config.inline, new Set(["ui", "self", "control"]));
     assert.deepEqual(config.gitAuthor, { name: "backend", email: "backend@example.com" });
@@ -164,7 +142,6 @@ describe("the configuration", () => {
       { PENELOPE_HEARTBEAT_MINUTES: "an hour" },
       { PENELOPE_HEARTBEAT_SECONDS: "0" },
       { PENELOPE_HEARTBEAT_SECONDS: "1.5" },
-      { PENELOPE_DELIVERY_UI: "later" },
       { PENELOPE_OWNER_GITHUB_ID: "someone" },
       { PENELOPE_PUBLIC_URL: "not a url" },
       { PENELOPE_SANDBOX_TOKEN_FILE: "/secrets/missing" },
@@ -178,24 +155,6 @@ describe("the configuration", () => {
   it("refuses an empty secret", () => {
     files["/secrets/empty"] = "\n";
     assert.throws(() => loadConfig({ PENELOPE_SANDBOX_TOKEN_FILE: "/secrets/empty" }, read), ConfigError);
-  });
-
-  describe("Web Push", () => {
-    it("is set up with the VAPID key's file, and names the backend by its public URL", () => {
-      const config = loadConfig({ PENELOPE_PUBLIC_URL: "https://penelope.example.com/", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/vapid.pem" }, read);
-      assert.deepEqual(config.webPush, { vapidKey: VAPID.trim(), subject: "https://penelope.example.com" });
-    });
-
-    it("does not start with a key it cannot use, or without the public URL", () => {
-      for (const env of [
-        { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/missing.pem" },
-        { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/not-a-key.pem" },
-        { PENELOPE_PUBLIC_URL: "https://penelope.example.com", PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/github-secret" },
-        { PENELOPE_WEB_PUSH_VAPID_KEY_FILE: "/secrets/vapid.pem" },
-      ]) {
-        assert.throws(() => loadConfig(env, read), ConfigError, JSON.stringify(env));
-      }
-    });
   });
 
   describe("the A2A way in", () => {

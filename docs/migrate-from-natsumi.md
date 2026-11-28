@@ -20,7 +20,7 @@ Kubernetes で動いている natsumi（[yuanying/natsumi](https://github.com/yu
 
 | もの | penelope では |
 | --- | --- |
-| Mac・iPhone のアプリと APNs | 無い。話し口は Web UI で、知らせは Web Push（[ADR-0027](adr/0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)）。iPhone ではホーム画面に置いた Web UI で受ける。購読は移らないので、移った後にオーナーが Web UI で知らせを許し直す |
+| Mac・iPhone のアプリと APNs | アプリの配置情報と購読は写さない。各配置の Web UI は個人のページ専用で、会話と通知は家の担当（[ADR-0080](adr/0080-connect-the-iphone-app-to-the-house.md)） |
 | natsumi の会話の履歴・Pi のセッション・チャットに添えたファイル | 写さない。penelope は形が違う。覚えておくべきことは記憶にある |
 | `sources/`（Slack のチャンネルのファイル、A2A の返事など） | 写さない。penelope の `/sources` は新しく始まる（[events.md](events.md)） |
 | `home/`（`/home/natsumi`。シェルの設定・道具のキャッシュ） | 写さない。penelope の HOME は `/home/agent` で、道具は image に入っている |
@@ -72,7 +72,7 @@ natsumi の config（JSON）の項目と、それを書く penelope の配置の
 | `skills` | ConfigMap `penelope-skills`（`skills/skills.list`。見本の README の「skill」） |
 | `tools`・中継 | 無い |
 | `postbox` | 無い |
-| `apns` | 無い。Web Push は `PENELOPE_WEB_PUSH_VAPID_KEY_FILE` と Secret `penelope-backend` の `web-push-vapid-key` |
+| `apns` | 各配置の backend では使わない |
 | `sentinel`（関所の承認待ち） | 無い |
 | sdctl（作業環境の `/etc/sdctl/config.yaml` と中継） | `sandbox/surrogates.env` の `SDCTL_URL`・`SDCTL_TOKEN`、`sentinel/sentinel.yaml`、`connectors/sd-webui.md`（下の「sd-webui」） |
 
@@ -293,7 +293,7 @@ kubectl -n $ns exec -i penelope-0 -c sandbox -- \
 4. Slack: bot を招いたチャンネルで bot にメンションすると出来事として届き、エージェントが `slackctl post` で返せる。
 5. A2A: `curl -s https://<公開のホスト>/.well-known/agent-card.json | jq -r .name` が名前である（受け口を開いたとき）。エージェントから相手に頼め、Sentinel の記録に相手のホストが出る。
 6. 絵: 自分の絵を頼むと、返事に画像が添えられる。Sentinel の記録に sd-webui のホストが出る。
-7. Web Push: Web UI で知らせを許し、返事が届く（iPhone はホーム画面に置いた Web UI）。
+7. 個人のページ: オーナーでログインし、記憶と活動の記録、モデル設定が開ける。
 8. backup: `components/backup/` を使うなら、手で 1 回動かして成功する（見本の README の「backup」）。
 
 ### 10. 最初のメッセージでパスの移り変わりを伝える

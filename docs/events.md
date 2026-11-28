@@ -14,7 +14,7 @@ receivers のプラグインが封筒を作る形は [receivers.md](receivers.md
 
 | 欄 | 必須 | 中身 |
 | --- | --- | --- |
-| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake` |
+| `source` | ○ | 受信元の名前。`/sources` の最初のディレクトリにもなる。backend の中の受信元は `cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake` |
 | `id` | ○ | 受信元が付ける。`source` と組で一意。重複を除くキー |
 | `occurred_at` | ○ | 起きた時刻（RFC 3339） |
 | `summary` | ○ | 1 行の要約。人とモデルが読む |
@@ -37,20 +37,20 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - `now`: 起きていればすぐにターンへ。ターンの最中なら割り込み（steer）、待っていれば新しいターン。
 - `batch`: `/sources` にはすぐ書くが、ターンへはまとめて後で渡す。`now` の出来事が来たら、それと一緒に渡す。いつ渡すかは backend が決める（下の「いつ渡すか」）。
 - **決めるのは受信元の側だけ**である。receivers のプラグインは自分の設定（例: Slack ならメンションと DM は `now`）に従って出来事ごとに付ける。backend はそれを上書きしない。
-- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`）は backend の設定で決め、既定はどれも `now`。`control`・`heartbeat`・`wake` は常に `now`。
+- 封筒で省いたときの既定は、receivers のプラグインなら `batch`。backend の中の受信元（`cron`・`a2a`・`self`・`job`）は backend の設定で決め、既定はどれも `now`。`control`・`heartbeat`・`wake` は常に `now`。
 
 ### `answer_via`
 
 [ADR-0060](adr/0060-answer-through-the-event-source.md) の答える口は、`{"tool":"…"}`（道具の名前）か `{"command":"…"}`（シェルコマンドの先頭）のどちらか一つ。値は空白だけではない文字列で、追加の欄（宛先・引数・本文など）は認めない。
 
-- backend は Web UI の発言（`ui`）には `{"tool":"reply"}`、A2A の依頼と聞き返しへの答え（`a2a`）には `{"tool":"reply_to_agent"}` を付ける。ほかの受信元は、出来事を作るプラグインが返事を想定するものにだけ付ける。
+- backend は A2A の依頼と聞き返しへの答え（`a2a`）には `{"tool":"reply_to_agent"}` を付ける。ほかの受信元は、出来事を作るプラグインが返事を想定するものにだけ付ける。
 - 外から届いた本文や `payload` の同名の欄はヒントにしない。ヒントには権限も宛先もなく、runner が実行することもない。送る場合は既存の権限と失敗時の扱いに従い、宛先が確かでなければ推測で送らない。
 - A2A で答えないと決めたときは、エージェントが出来事の `seq` を指定し、本文・画像なしの `completed` で Task を閉じる（[sandbox-api.md](sandbox-api.md#a2a-の-task-に返す)）。runner は代わりに閉じない。
 
 ### `inline`
 
 - 中身（`payload`）をそのままターンに載せる受信元。封筒の欄ではなく、backend の設定で受信元ごとに決める。
-- 既定は `ui`（オーナーのメッセージ）・`job`（裏の仕事の終わり、[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）・`control`（制御の出来事）。サブエージェントの知らせ（`self`）は inline でない。
+- 既定は `job`（裏の仕事の終わり、[ADR-0030](adr/0030-background-jobs-run-by-the-runner-and-their-end-as-an-event.md)）・`control`（制御の出来事）。サブエージェントの知らせ（`self`）は inline でない。
 - Slack のプラグインの出来事を受ける配置は、その `source` も inline にする（[ADR-0029](adr/0029-slack-events-inline-drawn-as-channels-and-threads.md)）。runner がそれを描いてターンに載せる（下の「ターンに入る形」の「Slack の出来事」）。
 - `heartbeat` と `wake` は設定にかかわらず inline ではない。
 - inline の出来事も、ほかと同じく `/sources` に書く。
@@ -108,7 +108,7 @@ backend は受けたときに、単調増加の整数 `seq` と、受けた時�
 - multipart では、封筒は `event` の部分（文字の欄でも、JSON のファイルでもよい）、ファイルは `file` の部分を繰り返す。ファイルの名前は部分の filename である。
 - JSON と multipart のどちらも、封筒の `answer_via` が不正なら `400` で断る。
 - 大きさの上限は、封筒とファイルを合わせた body の全体で 64 MiB。
-- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
+- backend の中の受信元（`ui`・`cron`・`a2a`・`self`・`job`・`control`・`heartbeat`・`wake`）の名前の出来事は、取り込み口では断る（`400`）。それらは取り込み口を通らない。`ui` は旧会話 API 用の予約名で、新しい出来事は作らない。receivers のプラグインが夜の切り替えなどを起こせないようにするためである。
 
 | 応答 | 意味 |
 | --- | --- |

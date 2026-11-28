@@ -1,14 +1,12 @@
-// Backend copies of images for the conversation (ADR-0032, ADR-0034) and
-// A2A Task artifacts (ADR-0047). Files are immutable and live apart from
-// /sources and /memory. Only conversation copies have UI asset rows.
+// Image copies for A2A Task artifacts and legacy runner replies.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
 
-import { type AgentId, type OwnerFile, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImage } from "@penelope/contract";
+import { type AgentId, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX, type ReplyImage } from "@penelope/contract";
 
-import { type Attachment, imageTypeOf } from "./sources.ts";
+import { imageTypeOf } from "./sources.ts";
 import { iso } from "./time.ts";
 
 /** An image a reply carries, checked: its name, its type from its first bytes, and its bytes. */
@@ -57,24 +55,6 @@ export function checkImages(value: unknown, maxImages = REPLY_IMAGES_MAX, maxByt
     if (mimeType === undefined) throw new ImageRefusal(`${called} is not a PNG, JPEG, GIF or WebP image`);
     return { name, mime_type: mimeType, data: bytes };
   });
-}
-
-/**
- * The files the owner sent, split into the images to copy and the rest, each
- * in the order sent. An image is told from its first bytes and has at most
- * REPLY_IMAGE_MAX_BYTES, as a reply's (ADR-0034); one that is bigger is kept
- * by name like any other file. The message is never refused for its files.
- */
-export function splitOwnerFiles(files: readonly Attachment[]): { images: CheckedImage[]; others: OwnerFile[] } {
-  const images: CheckedImage[] = [];
-  const others: OwnerFile[] = [];
-  for (const file of files) {
-    const name = file.name.split(/[/\\]/).pop()!.slice(0, NAME_MAX) || "file";
-    const mimeType = file.data.byteLength <= REPLY_IMAGE_MAX_BYTES ? imageTypeOf(file.data) : undefined;
-    if (mimeType === undefined) others.push({ name, size: file.data.byteLength });
-    else images.push({ name, mime_type: mimeType, data: file.data });
-  }
-  return { images, others };
 }
 
 /** Removes a file if it can: what is left of a failed write is only an unused file. */

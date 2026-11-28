@@ -1,11 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cleanup, fireEvent, render, screen, waitForElementToBeRemoved, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, waitForElementToBeRemoved, within } from "@testing-library/react";
 import type { SettingsResponse } from "@penelope/contract";
 
 import { createApi } from "../src/model/api.ts";
+import { App } from "../src/ui/App.tsx";
 import { Settings } from "../src/ui/Settings.tsx";
+
+test("the personal page opens memory without loading conversation history", async (t) => {
+  window.location.hash = "";
+  const requested: string[] = [];
+  const fetch = async (input: string | URL | Request) => {
+    requested.push(String(input));
+    if (String(input) === "/api/agent") return Response.json({ name: "Iris" });
+    if (String(input) === "/api/record/unseen") return Response.json({ unseen: 0 });
+    return Response.json({}, { status: 404 });
+  };
+  render(<App fetch={fetch} />);
+  t.after(cleanup);
+  await waitFor(() => assert.ok(requested.some((path) => path.startsWith("/api/memory?"))));
+  assert.ok(!requested.includes("/api/history"));
+});
 
 test("choosing another model makes only its supported thinking levels selectable", async (t) => {
   t.after(cleanup);
@@ -23,22 +39,4 @@ test("choosing another model makes only its supported thinking levels selectable
   fireEvent.change(model, { target: { value: "example/org/chat" } });
   const thinking = screen.getByRole("combobox", { name: "思考の深さ" });
   assert.deepEqual(within(thinking).getAllByRole("option").map((option) => option.textContent), ["オフ"]);
-});
-
-test("removes the named iPhone from settings after the backend confirms revocation", async (t) => {
-  t.after(cleanup);
-  const api = createApi(async (path, init) => {
-    if (path === "/api/app/devices") return Response.json({ devices: [
-      { id: "device-1", name: "旅先の iPhone", created_at: "2026-11-26T00:00:00Z", expires_at: "2027-11-26T00:00:00Z" },
-    ] });
-    if (path === "/api/app/devices/device-1" && init?.method === "DELETE") return new Response(null, { status: 204 });
-    return Response.json({ models: [], selection: null, default: null } satisfies SettingsResponse);
-  });
-  render(<Settings api={api} onUnauthorized={() => assert.fail("Unexpected 401")} agentName="Iris" />);
-  const revoke = await screen.findByRole("button", { name: "旅先の iPhone を失効" });
-  fireEvent.click(revoke);
-  const dialog = await screen.findByRole("alertdialog");
-  const removed = waitForElementToBeRemoved(() => screen.queryByText("旅先の iPhone"));
-  fireEvent.click(within(dialog).getByRole("button", { name: "失効" }));
-  await removed;
 });
