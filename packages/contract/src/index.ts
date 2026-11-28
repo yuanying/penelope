@@ -8,7 +8,7 @@ export * from "./images.ts";
 export * from "./record.ts";
 export * from "./settings.ts";
 export * from "./events.ts";
-export type * from "./house.ts";
+export * from "./house.ts";
 export type * from "./sandbox.ts";
 export * from "./status.ts";
 export type * from "./turn.ts";

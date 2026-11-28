@@ -1,4 +1,6 @@
 import type { Delivery } from "./events.ts";
+import type { REPLY_IMAGE_TYPES } from "./images.ts";
+import type { ReplyImageUpload } from "./sandbox.ts";
 import type { SleepStatus } from "./status.ts";
 
 export type HouseActor = { id: string; name: string; kind: "agent" | "person" };
@@ -21,14 +23,26 @@ export type HouseView = {
   away: HouseActor[];
 };
 
-export type HouseSpeech = { text: string; to?: string[] };
+export const HOUSE_EXPRESSIONS = ["neutral", "happy", "laughing", "surprised", "thinking", "worried", "sad", "sleepy", "angry"] as const;
+export type HouseExpression = typeof HOUSE_EXPRESSIONS[number];
+export type HouseImage = { id: string; name: string; mime_type: typeof REPLY_IMAGE_TYPES[number]; size: number };
+export type HouseMessage = { text: string; expression?: HouseExpression; images?: ReplyImageUpload[] };
+export type HouseSpeech = HouseMessage & { to?: string[] };
 export type HouseSpeechResult = { id: string; not_delivered: HouseActor[] };
+export type HouseDirect = { agent_id: string; owner_id: string };
+export type HouseReplyResult = HouseSpeechResult & (
+  | { destination: { kind: "room"; room: Pick<HouseRoom, "id" | "name"> }; ignored_to?: never }
+  | { destination: { kind: "dm"; dm: HouseDirect }; ignored_to?: string[] }
+);
 export type HouseEnterResult = { occupants: HouseResident[] };
 
-export type HouseEvent = { id: string; occurred_at: string; room: Pick<HouseRoom, "id" | "name">; actor: HouseActor } & (
-  | { kind: "speech"; text: string; to: string[] }
+type HouseEventBase = { id: string; occurred_at: string; actor: HouseActor };
+type HouseSpokenMessage = { kind: "speech"; text: string; expression?: HouseExpression; images?: HouseImage[] };
+export type HouseEvent = HouseEventBase & { room: Pick<HouseRoom, "id" | "name"> } & (
+  | (HouseSpokenMessage & { to: string[] })
   | { kind: "enter" | "leave" }
 );
+export type HouseDirectEvent = HouseEventBase & HouseSpokenMessage & { dm: HouseDirect };
 
 export type HouseDelivery = {
   event: HouseEvent;
@@ -36,7 +50,21 @@ export type HouseDelivery = {
   answer_via?: { command: "house say" };
 };
 
-export type HouseAgentIdentity = HouseActor & { kind: "agent"; avatar_url?: string; chat_url?: string };
+export type HouseConversationDelivery = {
+  event: HouseEvent | HouseDirectEvent;
+  stream: string;
+  delivery: Delivery;
+  owner: boolean;
+  answer_via?: { tool: "reply" };
+};
+
+export type HouseAgentIdentity = HouseActor & {
+  kind: "agent";
+  avatar_url?: string;
+  avatar_urls?: Partial<Record<HouseExpression, string>>;
+  personal_url?: string;
+  chat_url?: string;
+};
 export type HousePersonIdentity = HouseActor & { kind: "person"; avatar_url?: string };
 export type HousePublicIdentity = HouseAgentIdentity | HousePersonIdentity;
 export type HousePersonOccupant = (
@@ -49,12 +77,20 @@ export type HousePersonFloor = {
   rooms: (HouseRoom & { occupants: HousePersonOccupant[]; last_speech: HouseSpeechPreview | null })[];
   away: HousePublicIdentity[];
 };
-export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity };
+export type HouseDirectAvailability = {
+  agent_id: string;
+  send: "ready" | "in-room" | "deployment-unsupported";
+  sleeping: boolean;
+};
+export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity; direct?: HouseDirectAvailability[] };
 /** An event as people are given it. `seq` is its place in the house's record: a later event has a greater one. */
 export type HousePersonEvent = HouseEvent & { seq: number };
+export type HousePersonDirectEvent = HouseDirectEvent & { seq: number };
 export type HouseHistory = { events: HousePersonEvent[]; before?: string };
+export type HouseDirectHistory = { events: HousePersonDirectEvent[]; before?: string };
 export type HouseStreamReady = { connection: string; house: HousePersonView };
-export type HouseStreamEvents = { ready: HouseStreamReady; house: HousePersonView; room: HousePersonEvent };
+export type HouseStreamEvents = { ready: HouseStreamReady; house: HousePersonView; room: HousePersonEvent; dm: HousePersonDirectEvent };
 
-export type HouseSync = { status: HouseAgentStatus; ack?: string[] };
+export type HouseSync = { status: HouseAgentStatus; ack?: string[]; protocol?: 2 };
 export type HouseSyncResult = { house: HouseView; pending: HouseDelivery[] };
+export type HouseConversationSyncResult = { protocol: 2; house: HouseView; pending: HouseConversationDelivery[] };
