@@ -55,6 +55,7 @@ export const words = {
   directUnsupported: "相手の配置はまだ1対1に対応していません。",
   directUnavailable: "この1対1は開けません。",
   directSleep: "寝ています。起きたら届きます",
+  directWaiting: "相手はつながっていません。発言は届け待ちになります。",
   directExpired: "配信期限切れ",
   directEmpty: "まだ1対1の発言はありません。",
   personal: "個人ページ",

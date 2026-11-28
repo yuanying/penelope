@@ -38,7 +38,7 @@ export type Snapshot = {
 export type Said = "sent" | "refused" | "unknown" | "in-room" | "deployment-unsupported" | "invalid-images";
 
 export function directWith(house: HousePersonView | undefined, agent: string) {
-  return house?.direct?.find(({ agent_id }) => agent_id === agent);
+  return house?.direct.find(({ agent_id }) => agent_id === agent);
 }
 
 /** The part of EventSource the session uses; the tests give their own. */
@@ -357,7 +357,7 @@ export class Session {
 
   private setHouse(house: HousePersonView, change?: Partial<Snapshot>): void {
     const moved = roomOf(house, house.you.id) !== myRoom(this.snapshot);
-    const removed = this.snapshot.house?.direct?.filter(({ agent_id }) => !directWith(house, agent_id)) ?? [];
+    const removed = this.snapshot.house?.direct.filter(({ agent_id }) => !directWith(house, agent_id)) ?? [];
     let logs = this.snapshot.logs;
     if (removed.length > 0) {
       const remaining = new Map(logs);

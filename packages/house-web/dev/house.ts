@@ -10,7 +10,7 @@ import { type AddressInfo, createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import { HOUSE_EXPRESSIONS, type HouseAgentStatus, type HouseConversationDelivery, type HouseConversationSyncResult, type HouseSpeech } from "@penelope/contract";
+import { HOUSE_EXPRESSIONS, type HouseAgentStatus, type HouseConversationDelivery, type HouseConversationSyncResult, type HouseReply } from "@penelope/contract";
 import { parseConfig, startHouse } from "@penelope/house";
 
 const AVATARS = path.join(import.meta.dirname, "../../../assets/avatars");
@@ -52,7 +52,7 @@ export type FakeAgent = {
   enter: (room: string) => Promise<void>;
   leave: () => Promise<void>;
   say: (room: string, text: string, to?: string[]) => Promise<void>;
-  reply: (speech: HouseSpeech) => Promise<void>;
+  reply: (speech: HouseReply) => Promise<void>;
 };
 
 export type FakeHouse = {

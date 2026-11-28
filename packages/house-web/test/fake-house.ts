@@ -236,7 +236,7 @@ export class FakeHouse {
       this.signedIn = false;
       return new Response(null, { status: 204 });
     }
-    if (dm && !this.house.direct?.some(({ agent_id }) => agent_id === dm[1])) return json({ error: "not found" }, 404);
+    if (dm && !this.house.direct.some(({ agent_id }) => agent_id === dm[1])) return json({ error: "not found" }, 404);
     if ((room ?? dm)?.[2] === "history") {
       const newestFirst = (room ? this.records.get(room[1]!) ?? [] : this.directRecords.get(dm![1]!) ?? []).toReversed();
       const before = url.searchParams.get("before");
@@ -250,7 +250,7 @@ export class FakeHouse {
       return json(this.house);
     }
     if (dm?.[2] === "say") {
-      const availability = this.house.direct?.find(({ agent_id }) => agent_id === dm[1]);
+      const availability = this.house.direct.find(({ agent_id }) => agent_id === dm[1]);
       if (availability?.send === "in-room") return json({ error: "agent-in-room" }, 409);
       if (availability?.send !== "ready") return json({ error: "deployment-unsupported" }, 409);
       const agent = dm[1] === IVY.id ? IVY : FERN;

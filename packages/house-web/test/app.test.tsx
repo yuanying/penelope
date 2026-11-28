@@ -3,6 +3,8 @@ import { afterEach, describe, it } from "node:test";
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
+import type { HouseDirectAvailability } from "@penelope/contract";
+
 import { App } from "../src/ui/App.tsx";
 import { asleep, awake, BATH, directSpeech, FakeHouse, FERN, IVY, LEE, LIVING, speech } from "./fake-house.ts";
 
@@ -39,12 +41,12 @@ afterEach(() => {
   window.location.hash = "";
 });
 
-function withAwayIvy(house: FakeHouse, send: "ready" | "deployment-unsupported" = "ready", sleeping = false) {
+function withAwayIvy(house: FakeHouse, availability: Partial<Omit<HouseDirectAvailability, "agent_id">> = {}) {
   return {
     ...house.house,
     rooms: house.house.rooms.map((room) => ({ ...room, occupants: room.occupants.filter(({ id }) => id !== IVY.id) })),
     away: [IVY],
-    direct: [{ agent_id: IVY.id, send, sleeping }],
+    direct: [{ agent_id: IVY.id, send: "ready" as const, sleeping: false, connected: true, ...availability }],
   };
 }
 
@@ -66,12 +68,12 @@ it("opens an away resident's direct conversation without entering or reopening t
 
 it("keeps direct history readable after the resident enters a room, but cannot send there", async () => {
   const house = new FakeHouse();
-  const inRoom = { ...house.house, direct: [{ agent_id: IVY.id, send: "in-room", sleeping: false }] } as const;
+  const inRoom = { ...house.house, direct: [{ agent_id: IVY.id, send: "in-room" as const, sleeping: false, connected: true }] };
   house.house = withAwayIvy(house);
   await open(house);
   fireEvent.click(ivyDirect());
   await act(async () => house.direct(directSpeech(IVY, "Before coming home")));
-  await act(async () => house.floor({ ...inRoom, direct: [...inRoom.direct] }));
+  await act(async () => house.floor(inRoom));
 
   await screen.findByText("Before coming home");
   assert.ok(screen.getByText("相手は部屋にいます。1対1では送れません。"));
@@ -80,7 +82,7 @@ it("keeps direct history readable after the resident enters a room, but cannot s
 
 it("explains why an older deployment cannot receive a direct message", async () => {
   const house = new FakeHouse();
-  house.house = withAwayIvy(house, "deployment-unsupported");
+  house.house = withAwayIvy(house, { send: "deployment-unsupported" });
   await open(house);
   fireEvent.click(ivyDirect());
 
@@ -88,9 +90,20 @@ it("explains why an older deployment cannot receive a direct message", async () 
   assert.equal(screen.getByRole("button", { name: "送信" }).getAttribute("aria-disabled"), "true");
 });
 
+it("offers to queue direct messages while a supported resident is disconnected", async () => {
+  const house = new FakeHouse();
+  house.house = withAwayIvy(house, { connected: false });
+  await open(house);
+  fireEvent.click(ivyDirect());
+
+  await screen.findByText("相手はつながっていません。発言は届け待ちになります。");
+  await say("Read it later", "Ivy への発言");
+  assert.deepEqual(house.sentDirect[0]?.message, { text: "Read it later" });
+});
+
 it("shows the sleeping notice only inside the direct conversation", async () => {
   const house = new FakeHouse();
-  house.house = withAwayIvy(house, "ready", true);
+  house.house = withAwayIvy(house, { sleeping: true });
   await open(house);
   assert.equal(screen.queryByText("寝ています。起きたら届きます"), null);
   fireEvent.click(ivyDirect());

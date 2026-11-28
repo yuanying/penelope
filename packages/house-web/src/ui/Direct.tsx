@@ -22,7 +22,8 @@ export function Direct({ resident, availability, log, heading, phone, line, onRe
   const label = available ? words.directLog(resident.name) : words.direct;
   const note = availability?.send === "in-room" ? words.directInRoom
     : availability?.send === "deployment-unsupported" ? words.directUnsupported
-    : availability?.sleeping ? words.directSleep : undefined;
+    : availability?.sleeping ? words.directSleep
+    : availability?.connected === false ? words.directWaiting : undefined;
 
   return (
     <section className="room" id="conversation" aria-labelledby="direct-heading">
