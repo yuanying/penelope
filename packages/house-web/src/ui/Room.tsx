@@ -64,7 +64,7 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | u
 
 export type MyRoomProps = Shared & {
   room: Room | undefined;
-  entering: boolean;
+  access: "member" | "entering" | "read-only";
   log: RoomLog | undefined;
   touch: boolean;
   /** What is written for this room, and a way to change it that still means this room after the person left it. */
@@ -76,7 +76,7 @@ export type MyRoomProps = Shared & {
   onBack: () => void;
 };
 
-export function MyRoom({ room, entering, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
+export function MyRoom({ room, access, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState(false);
   // Astryx keeps the record's end in view as the record grows, not as what stands over the end grows.
@@ -105,9 +105,10 @@ export function MyRoom({ room, entering, log, touch, writing, onWriting, onSay, 
       </section>
     );
   }
+  const member = access === "member";
   const others = room.occupants.filter((resident) => !(resident.kind === "person" && resident.id === shared.you.id));
   return (
-    <section className="room" id="conversation" aria-label={words.myRoom}>
+    <section className="room" id="conversation" aria-label={member ? words.myRoom : words.readOnlyRoom}>
       <header className="room-head">
         {back}
         <div className="room-title">
@@ -116,7 +117,7 @@ export function MyRoom({ room, entering, log, touch, writing, onWriting, onSay, 
           </h2>
           <p>{phone ? room.occupants.map((resident) => `${resident.name}${isAsleep(resident) ? words.asleepMark : ""}`).join("・") : room.description}</p>
         </div>
-        {entering ? null : phone ? (
+        {!member ? null : phone ? (
           <button type="button" className="room-people" aria-label={words.showResidents} onClick={() => setSheet(true)}>
             <ResidentStack residents={room.occupants} size={32} max={4} />
           </button>
@@ -136,15 +137,15 @@ export function MyRoom({ room, entering, log, touch, writing, onWriting, onSay, 
         bottom={
           <div className="room-bottom">
             <LineNotice line={line} onRetry={onRetry} />
-            {entering ? (
-              <p className="room-reading" role="status">{words.entering}</p>
+            {!member ? (
+              <p className="room-reading" role="status">{access === "entering" ? words.entering : words.readOnlyBody}</p>
             ) : (
               <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
             )}
           </div>
         }
       />
-      {phone && !entering ? (
+      {phone && member ? (
         <BottomSheet isOpen={sheet} onOpenChange={setSheet} label={words.residentsOf(room.name)}>
           <div className="room-sheet">
             <div className="room-sheet-head">

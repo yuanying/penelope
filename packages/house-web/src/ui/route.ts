@@ -1,13 +1,13 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-export type Route = { at: "plan" } | { at: "talk" } | { at: "peek"; room: string };
+export type Route = { at: "plan" } | { at: "talk"; room?: string } | { at: "peek"; room: string };
 
 export function parseRoute(hash: string): Route {
   const [, name, room] = hash.split("/");
-  if (name === "talk") return { at: "talk" };
-  if (name === "peek" && room) {
+  if (name === "talk" && !room) return { at: "talk" };
+  if ((name === "talk" || name === "peek") && room) {
     try {
-      return { at: "peek", room: decodeURIComponent(room) };
+      return { at: name, room: decodeURIComponent(room) };
     } catch {
       return { at: "plan" };
     }
@@ -16,8 +16,9 @@ export function parseRoute(hash: string): Route {
 }
 
 function hashOf(route: Route): string {
-  if (route.at === "peek") return `#/peek/${encodeURIComponent(route.room)}`;
-  return route.at === "talk" ? "#/talk" : "#/";
+  if (route.at === "plan") return "#/";
+  const pane = `#/${route.at}`;
+  return route.room === undefined ? pane : `${pane}/${encodeURIComponent(route.room)}`;
 }
 
 function subscribe(onChange: () => void): () => void {

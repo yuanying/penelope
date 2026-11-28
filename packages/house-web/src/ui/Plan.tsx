@@ -21,6 +21,7 @@ export type PlanProps = {
   online: boolean;
   /** On a phone the conversation is a screen of its own, opened from the person's room or from the strip below. */
   phone: boolean;
+  openTalkFromTile: boolean;
   unread: number;
   lineNotice?: ReactNode;
   heading: RefObject<HTMLHeadingElement | null>;
@@ -44,7 +45,7 @@ function Capacity({ room }: { room: Room }) {
   );
 }
 
-export function Plan({ house, mine, peek, online, phone, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
+export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
   const myRoom = house.rooms.find(({ id }) => id === mine);
   return (
     <div className="plan">
@@ -94,7 +95,7 @@ export function Plan({ house, mine, peek, online, phone, unread, lineNotice, hea
                   {here ? (
                     <>
                       <span className="tile-tag tile-tag-here">{words.here}</span>
-                      {phone ? <Button label={words.openTalk} variant="secondary" size="lg" onClick={onOpenTalk} /> : null}
+                      {openTalkFromTile ? <Button label={words.openTalk} variant="secondary" size={phone ? "lg" : "sm"} onClick={onOpenTalk} /> : null}
                     </>
                   ) : (
                     <>

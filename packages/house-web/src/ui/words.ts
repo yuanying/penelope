@@ -26,6 +26,8 @@ export const words = {
   enterRoom: (room: string) => `${room}に入る`,
   enterHere: "ここに入る",
   entering: "入室を確認しています。",
+  readOnlyRoom: "読み取り専用の会話",
+  readOnlyBody: "この部屋に入室すると発言できます。",
   fullNoEntry: "満員で入れません",
   fullNoEntryOf: (capacity: number) => `満員なので入れません（定員 ${capacity}）`,
   openTalk: "会話を開く",

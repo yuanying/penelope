@@ -38,7 +38,7 @@ async function evening(t: TestContext, options: { long?: boolean } = {}): Promis
 }
 
 /** A browser of its own, signed in, with the floor on the screen. */
-async function open(t: TestContext, house: FakeHouse, viewport: { width: number; height: number }, as = "lee", prepare?: (page: Page) => Promise<void>): Promise<Page> {
+async function open(t: TestContext, house: FakeHouse, viewport: { width: number; height: number }, as = "lee", prepare?: (page: Page) => Promise<unknown>): Promise<Page> {
   const phone = viewport.width < 768;
   const context = await browser.newContext({ viewport, hasTouch: phone, isMobile: phone });
   // Before the house: a page left open would go on asking a house that is gone.
@@ -153,9 +153,9 @@ describe("the house's screen in a browser", () => {
     t.after(enter);
 
     await page.getByRole("button", { name: "ここに入る" }).click();
-    const conversation = page.getByRole("region", { name: "自分のいる部屋" });
+    const conversation = page.getByRole("region", { name: "読み取り専用の会話" });
     await conversation.getByRole("heading", { name: "ミャオの部屋", exact: true }).waitFor({ timeout: 2_000 });
-    assert.equal(await page.evaluate(() => window.location.hash), "#/talk");
+    assert.equal(await page.evaluate(() => window.location.hash), "#/talk/myao-room");
     assert.equal(await focused(page), "ミャオの部屋");
     assert.equal(await field(page, "ミャオの部屋").count(), 0);
 
@@ -187,7 +187,8 @@ describe("the house's screen in a browser", () => {
         }
       };
     }));
-    const { promise: pending, resolve: enter } = Promise.withResolvers<void>();
+    let enter!: () => void;
+    const pending = new Promise<void>((resolve) => (enter = resolve));
     await page.route("**/api/rooms/living/enter", async (route) => {
       await pending;
       await route.continue();
@@ -197,14 +198,15 @@ describe("the house's screen in a browser", () => {
     await page.getByRole("button", { name: "居間に入る" }).click();
     const speech = page.getByText("そのまま寝ちゃいそうだね", { exact: true });
     await speech.waitFor();
+    const confirming = page.getByText("入室を確認しています。", { exact: true });
+    await confirming.waitFor();
     await house.agent("aki").sync({ mood: null, sleepiness: 5, sleep: { state: "awake" } });
     await page.getByText("ペネロペ・アキ", { exact: true }).waitFor();
     const response = page.waitForResponse("**/api/rooms/living/enter");
     enter();
     const entered = await response;
     assert.equal(entered.status(), 200);
-    await entered.finished();
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await confirming.waitFor({ state: "hidden" });
 
     assert.ok(await speech.isVisible());
     assert.equal(await field(page, "居間").count(), 0);
@@ -216,7 +218,8 @@ describe("the house's screen in a browser", () => {
   it("keeps focus on the older history button when entry fails", async (t) => {
     const house = await evening(t, { long: true });
     const page = await open(t, house, PHONE);
-    const { promise: pending, resolve: fail } = Promise.withResolvers<void>();
+    let fail!: () => void;
+    const pending = new Promise<void>((resolve) => (fail = resolve));
     await page.route("**/api/rooms/living/enter", async (route) => {
       await pending;
       await route.fulfill({ status: 503, json: { error: "unavailable" } });

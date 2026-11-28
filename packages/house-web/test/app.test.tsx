@@ -64,8 +64,9 @@ describe("the house's screen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Livingに入る" }));
 
+    const chosen = window.location.hash;
     await screen.findByText("Livingは満員で入れませんでした。");
-    assert.equal(window.location.hash, "#/talk");
+    assert.equal(window.location.hash, chosen);
 
     fireEvent.click(screen.getByRole("button", { name: "間取りに戻る" }));
 
@@ -177,6 +178,18 @@ describe("the house's screen", () => {
     await screen.findByLabelText("Livingで話す");
 
     assert.equal(window.location.hash, "#/");
+  });
+
+  it("lets a PC switch from a selected read-only conversation to the current room", async () => {
+    window.location.hash = "#/talk/bath";
+    await open();
+    const reading = screen.getByRole("region", { name: "読み取り専用の会話" });
+    assert.ok(within(reading).getByRole("heading", { name: "Bath" }));
+
+    const current = screen.getByRole("article", { name: "Living" });
+    fireEvent.click(within(current).getByRole("button", { name: "会話を開く" }));
+
+    assert.ok(await screen.findByLabelText("Livingで話す"));
   });
 
   // The decision of the review of 2026-11-27: what is written is the room's it was written in.

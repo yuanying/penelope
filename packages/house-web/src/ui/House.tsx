@@ -25,7 +25,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const wide = useMediaQuery(WIDE);
   const touch = useMediaQuery(TOUCH) || phone;
   const [route, go] = useRoute();
-  const [entry, setEntry] = useState<{ room: string }>();
+  const [entryRequest, setEntryRequest] = useState<{ room: string }>();
   const [writings, setWritings] = useState<ReadonlyMap<string, Writing>>(new Map());
   const writers = useRef(new Map<string, (change: (writing: Writing) => Writing) => void>());
   /** The way to change what is written for one room: the same function for the same room, whoever calls it later. */
@@ -40,17 +40,20 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const mine = house.rooms.find(({ id }) => id === myRoom(snapshot));
   const peeked = route.at === "peek" ? house.rooms.find(({ id }) => id === route.room) : undefined;
   const swapped = peeked !== undefined && (phone || !wide || peeked.id === mine?.id);
-  const target = route.at === "talk" && entry !== undefined ? house.rooms.find(({ id }) => id === entry.room) : undefined;
-  const conversation = target ?? mine;
-  const entering = target !== undefined && target.id !== mine?.id;
-  const talkShown = !entering && (phone ? route.at === "talk" : !swapped);
+  const selected = route.at === "talk" ? house.rooms.find(({ id }) => id === route.room) : undefined;
+  const conversation = selected ?? mine;
+  const access =
+    conversation !== undefined && conversation.id === mine?.id ? "member"
+    : entryRequest !== undefined && entryRequest.room === conversation?.id ? "entering"
+    : "read-only";
+  const talkShown = access === "member" && (phone ? route.at === "talk" : !swapped);
   const count = unread(snapshot);
   const online = snapshot.line.kind === "open";
 
   useEffect(() => {
     document.title = house.name;
   }, [house.name]);
-  const viewed = peeked?.id ?? target?.id;
+  const viewed = peeked?.id ?? selected?.id;
   useEffect(() => session.show(viewed), [session, viewed]);
   // A tab in the background has shown nothing.
   const myLog = mine === undefined ? undefined : snapshot.logs.get(mine.id);
@@ -118,14 +121,15 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   };
   const enter = (room: string) => {
     const attempt = { room };
-    setEntry(attempt);
+    setEntryRequest(attempt);
     want("room");
-    go({ at: "talk" }, route.at === "peek");
-    void session.enter(room).then(() => setEntry((current) => (current === attempt ? undefined : current)));
+    go({ at: "talk", room }, route.at === "peek");
+    void session.enter(room).then(() => setEntryRequest((current) => (current === attempt ? undefined : current)));
   };
   const leave = () => {
     want(phone ? "plan" : "room");
     if (phone) go({ at: "plan" });
+    else if (route.at === "talk" && route.room !== undefined) go({ at: "talk" }, true);
     void session.leave();
   };
   const older = useCallback((room: string) => session.older(room), [session]);
@@ -182,6 +186,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       peek={peeked?.id}
       online={online}
       phone={phone}
+      openTalkFromTile={phone || (selected !== undefined && selected.id !== mine?.id)}
       unread={count}
       lineNotice={<LineNotice line={snapshot.line} onRetry={() => session.retry()} />}
       heading={planHeading}
@@ -197,7 +202,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       {...shared}
       narrow={phone || peeked !== undefined}
       room={conversation}
-      entering={entering}
+      access={access}
       log={conversation === undefined ? undefined : snapshot.logs.get(conversation.id)}
       touch={touch}
       writing={(mine === undefined ? undefined : writings.get(mine.id)) ?? NOTHING_WRITTEN}
