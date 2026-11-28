@@ -1,20 +1,20 @@
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessage, ChatMessageBubble, ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
 import { Icon } from "@astryxdesign/core/Icon";
+import { Lightbox } from "@astryxdesign/core/Lightbox";
 import { Fragment, type RefObject, useLayoutEffect, useRef, useState } from "react";
 
-import type { HouseActor, HouseEvent, HousePersonView } from "@penelope/contract";
+import type { HouseActor, HouseEvent, HouseImage, HousePersonView } from "@penelope/contract";
 
-import type { RoomLog } from "../model/log.ts";
-import { EnterIcon, LeaveIcon, MoonIcon } from "./icons.tsx";
+import type { ConversationEvent, ConversationLog } from "../model/log.ts";
+import { EnterIcon, LeaveIcon, MoonIcon, WarningIcon } from "./icons.tsx";
 import { keyOf, ResidentAvatar, type Shown, speakerOf } from "./residents.tsx";
 import { dayOf, timeOf, words } from "./words.ts";
 
-type Speech = Extract<HouseEvent, { kind: "speech" }>;
-
+type Speech = Extract<ConversationEvent, { kind: "speech" }>;
 
 export type TimelineProps = {
-  log: RoomLog;
+  log: ConversationLog;
   you: HousePersonView["you"];
   residents: ReadonlyMap<string, Shown>;
   undelivered: ReadonlyMap<string, readonly HouseActor[]>;
@@ -65,7 +65,7 @@ export function Timeline({ log, you, residents, undelivered, narrow, scroller, o
         const divider = day !== lastDay ? <ChatSystemMessage variant="divider">{day}</ChatSystemMessage> : null;
         if (divider) lastSpeaker = undefined;
         lastDay = day;
-        const speaker = event.kind === "speech" ? keyOf(event.actor) : undefined;
+        const speaker = event.kind === "speech" ? `${keyOf(event.actor)}:${event.expression ?? "neutral"}` : undefined;
         const continued = speaker !== undefined && speaker === lastSpeaker;
         lastSpeaker = speaker;
         return (
@@ -85,6 +85,21 @@ export function Timeline({ log, you, residents, undelivered, narrow, scroller, o
   );
 }
 
+function Images({ images }: { images: readonly HouseImage[] }) {
+  const [shown, setShown] = useState<HouseImage>();
+  const url = ({ id }: HouseImage) => `/api/images/${encodeURIComponent(id)}`;
+  return (
+    <div className="speech-images">
+      {images.map((image) => (
+        <button type="button" key={image.id} className="speech-image" aria-label={words.viewImage(image.name)} onClick={() => setShown(image)}>
+          <img src={url(image)} alt={image.name} loading="lazy" width={112} height={96} />
+        </button>
+      ))}
+      {shown ? <Lightbox isOpen media={{ src: url(shown), alt: shown.name }} onOpenChange={(open) => { if (!open) setShown(undefined); }} hasZoom /> : null}
+    </div>
+  );
+}
+
 function Move({ event, far }: { event: HouseEvent; far: boolean }) {
   const came = event.kind === "enter";
   return (
@@ -101,13 +116,13 @@ function Words({ event, you, residents }: { event: Speech; you: HousePersonView[
   const known = [...residents.values()];
   return (
     <span className="speech-text">
-      {event.to.map((id) => (
+      {"to" in event ? event.to.map((id) => (
         <Fragment key={id}>
           <span className={id === you.id ? "speech-to speech-to-you" : "speech-to"} translate="no">
             @{known.find((resident) => resident.id === id)?.name ?? id}
           </span>{" "}
         </Fragment>
-      ))}
+      )) : null}
       {event.text}
     </span>
   );
@@ -117,7 +132,7 @@ function Theirs({ event, you, residents, narrow, continued, far }: { event: Spee
   const speaker = speakerOf(residents, event.actor);
   const name = continued ? undefined : (
     <span className="speech-who">
-      {narrow ? <ResidentAvatar resident={speaker} size={24} plain /> : null}
+      {narrow ? <ResidentAvatar resident={speaker} size={24} expression={event.expression} plain /> : null}
       <span className="speech-name" translate="no">
         {event.actor.name}
       </span>
@@ -125,12 +140,13 @@ function Theirs({ event, you, residents, narrow, continued, far }: { event: Spee
     </span>
   );
   const avatar = narrow ? undefined : (
-    <span className="speech-avatar">{continued ? null : <ResidentAvatar resident={speaker} size={36} plain />}</span>
+    <span className="speech-avatar">{continued ? null : <ResidentAvatar resident={speaker} size={36} expression={event.expression} plain />}</span>
   );
   return (
     <ChatMessage sender="assistant" {...(avatar ? { avatar } : {})} className={[continued ? "speech-continued" : "", far ? "timeline-far" : ""].join(" ").trim()}>
       <ChatMessageBubble variant="ghost" className="speech-plain" {...(name ? { name } : {})} data-speech={event.id}>
         <Words event={event} you={you} residents={residents} />
+        {event.images?.length ? <Images images={event.images} /> : null}
       </ChatMessageBubble>
     </ChatMessage>
   );
@@ -140,6 +156,12 @@ function Mine({ event, you, residents, undelivered, far }: { event: Speech; you:
   const metadata = (
     <span className="speech-meta">
       <time dateTime={event.occurred_at}>{timeOf(event.occurred_at)}</time>
+      {"dm" in event && event.delivery_status === "expired" ? (
+        <span className="speech-undelivered" role="status">
+          <Icon icon={WarningIcon} size="xsm" color="inherit" />
+          <span>{words.directExpired}</span>
+        </span>
+      ) : null}
       {undelivered ? (
         <span className="speech-undelivered">
           <Icon icon={MoonIcon} size="xsm" color="inherit" />
@@ -151,6 +173,7 @@ function Mine({ event, you, residents, undelivered, far }: { event: Speech; you:
   return (
     <ChatMessage sender="user" {...(far ? { className: "timeline-far" } : {})}>
       <ChatMessageBubble variant="filled" data-speech={event.id} metadata={metadata}>
+        {event.images?.length ? <Images images={event.images} /> : null}
         <Words event={event} you={you} residents={residents} />
       </ChatMessageBubble>
     </ChatMessage>

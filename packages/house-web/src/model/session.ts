@@ -1,11 +1,11 @@
 // The procedure of docs/house.md (接続と居場所): each `ready` gives the
-// connection to act with and has the records of the rooms on the screen read
+// connection to act with and has the records of the conversations on the screen read
 // again; a stream the house refuses is not opened again before the session
 // was checked.
-import type { HouseActor, HousePersonEvent, HousePersonView, HouseStreamReady } from "@penelope/contract";
+import type { HouseActor, HousePersonDirectEvent, HousePersonEvent, HousePersonView, HouseSpeech, HouseStreamReady } from "@penelope/contract";
 
 import { type Api, Refused, Unauthorized } from "./api.ts";
-import { caughtUp, EMPTY_LOG, reachOf, type RoomLog, withEvent, withOlder, withPage } from "./log.ts";
+import { caughtUp, type Conversation, type ConversationLog, EMPTY_LOG, logKey, reachOf, withEvent, withOlder, withPage } from "./log.ts";
 
 /**
  * The line to the house. Only an open line has a connection, so nothing can
@@ -26,8 +26,7 @@ export type Snapshot = {
   signedIn: boolean | undefined;
   house: HousePersonView | undefined;
   line: Line;
-  /** The room records held by this tab, including events received off screen. */
-  logs: ReadonlyMap<string, RoomLog>;
+  logs: ReadonlyMap<string, ConversationLog>;
   /** By the speech's id: the residents of the room it did not reach. */
   undelivered: ReadonlyMap<string, readonly HouseActor[]>;
   /** The `seq` of the newest event of the person's room that was on the screen. */
@@ -36,7 +35,11 @@ export type Snapshot = {
 };
 
 /** What became of a speech. `refused`: it was not said. `unknown`: no answer came, so it may be recorded. */
-export type Said = "sent" | "refused" | "unknown";
+export type Said = "sent" | "refused" | "unknown" | "in-room" | "deployment-unsupported" | "invalid-images";
+
+export function directWith(house: HousePersonView | undefined, agent: string) {
+  return house?.direct?.find(({ agent_id }) => agent_id === agent);
+}
 
 /** The part of EventSource the session uses; the tests give their own. */
 export type Source = Pick<EventSource, "addEventListener" | "close" | "readyState">;
@@ -88,7 +91,7 @@ export class Session {
   private readonly listeners = new Set<() => void>();
   private snapshot = INITIAL;
   private source: Source | undefined;
-  private viewed: string | undefined;
+  private viewed: Conversation | undefined;
   private opens = 0;
   private refusals = 0;
   /** Counts the floors the stream brought. */
@@ -124,8 +127,8 @@ export class Session {
     else this.connect();
   }
 
-  show(room: string | undefined): void {
-    this.viewed = room;
+  show(conversation: Conversation | undefined): void {
+    this.viewed = conversation;
     this.refreshShown();
   }
 
@@ -161,30 +164,40 @@ export class Session {
     }
   }
 
-  /** Says it in `room` if the person is in it. Nothing is kept to send later, and nothing is sent twice. */
-  async say(room: string, text: string, to: readonly string[]): Promise<Said> {
-    const { line } = this.snapshot;
-    if (line.kind !== "open" || room !== myRoom(this.snapshot)) return "refused";
+  async say(conversation: Conversation, speech: HouseSpeech): Promise<Said> {
+    const { line, house } = this.snapshot;
+    if (line.kind !== "open") return "refused";
+    if (conversation.kind === "room") {
+      if (conversation.id !== myRoom(this.snapshot)) return "refused";
+    } else {
+      const access = directWith(house, conversation.id)?.send;
+      if (access !== "ready") return access ?? "refused";
+    }
     try {
-      const { id, not_delivered } = await this.api.say(room, { text, ...(to.length > 0 ? { to: [...to] } : {}) }, line.connection);
+      const { id, not_delivered } = await this.api.say(conversation, speech, line.connection);
       if (not_delivered.length > 0) this.set({ undelivered: new Map(this.snapshot.undelivered).set(id, not_delivered) });
       return "sent";
     } catch (error) {
       if (error instanceof Unauthorized) this.signedOut();
       else this.connectionLost(error, line.connection);
-      // The house refuses with a 4xx before it records anything. Any other answer, or none, may follow a recording.
-      return error instanceof Refused && error.status < 500 ? "refused" : "unknown";
+      if (error instanceof Refused) {
+        if (error.code === "agent-in-room") return "in-room";
+        if (error.code === "deployment-unsupported") return error.code;
+        if (error.status === 413 && speech.images?.length) return "invalid-images";
+        if (error.status < 500) return "refused";
+      }
+      return error instanceof Unauthorized ? "refused" : "unknown";
     }
   }
 
-  /** Reads the page before what is held of a room. */
-  async older(room: string): Promise<void> {
-    const log = this.snapshot.logs.get(room);
+  async older(conversation: Conversation): Promise<void> {
+    const key = logKey(conversation);
+    const log = this.snapshot.logs.get(key);
     if (log?.before === undefined) return;
     const { before } = log;
     try {
-      const page = await this.api.history(room, before);
-      this.updateLog(room, (now) => (now.before === before ? withOlder(now, page.events, page.before) : now));
+      const page = await this.api.history(conversation, before);
+      this.updateLog(key, (now) => (now.before === before ? withOlder(now, page.events, page.before) : now));
     } catch (error) {
       this.failed(error);
     }
@@ -231,9 +244,8 @@ export class Session {
       if (source !== this.source) return;
       const ready = JSON.parse((message as MessageEvent<string>).data) as HouseStreamReady;
       this.refusals = 0;
-      this.set({ signedIn: true, line: { kind: "open", connection: ready.connection } });
       this.floors += 1;
-      this.setHouse(ready.house);
+      this.setHouse(ready.house, { signedIn: true, line: { kind: "open", connection: ready.connection } });
     });
     source.addEventListener("house", (message) => {
       if (source !== this.source) return;
@@ -245,6 +257,14 @@ export class Session {
       if (source !== this.source || line.kind !== "open") return;
       const event = JSON.parse((message as MessageEvent<string>).data) as HousePersonEvent;
       this.updateLog(event.room.id, (log) => withEvent(log, event, line.connection));
+    });
+    source.addEventListener("dm", (message) => {
+      const { house, line } = this.snapshot;
+      if (source !== this.source || line.kind !== "open") return;
+      const event = JSON.parse((message as MessageEvent<string>).data) as HousePersonDirectEvent;
+      const agent = event.dm.agent_id;
+      if (event.dm.owner_id !== house?.you.id || !directWith(house, agent)) return;
+      this.updateLog(logKey({ kind: "dm", id: agent }), (log) => withEvent(log, event, line.connection));
     });
     source.addEventListener("error", () => {
       if (source !== this.source) return;
@@ -286,33 +306,37 @@ export class Session {
   private refreshShown(): void {
     const { line } = this.snapshot;
     if (line.kind !== "open") return;
-    for (const room of [myRoom(this.snapshot), this.viewed]) {
-      if (room === undefined) continue;
-      const log = this.snapshot.logs.get(room);
+    const room = myRoom(this.snapshot);
+    const own: Conversation | undefined = room === undefined ? undefined : { kind: "room", id: room };
+    for (const conversation of [own, this.viewed]) {
+      if (!conversation || (conversation.kind === "dm" && !directWith(this.snapshot.house, conversation.id))) continue;
+      const key = logKey(conversation);
+      const log = this.snapshot.logs.get(key);
       if (log?.sync?.connection === line.connection) continue;
-      this.updateLog(room, (now) => ({ ...now, sync: { connection: line.connection, phase: "reading" } }));
-      void this.read(room, line.connection);
+      this.updateLog(key, (now) => ({ ...now, sync: { connection: line.connection, phase: "reading" } }));
+      void this.read(conversation, line.connection);
     }
   }
 
-  private async read(room: string, connection: string): Promise<void> {
-    const current = () => this.snapshot.line.kind === "open" && this.snapshot.line.connection === connection;
+  private async read(conversation: Conversation, connection: string): Promise<void> {
+    const key = logKey(conversation);
+    const current = () => this.snapshot.line.kind === "open" && this.snapshot.line.connection === connection && this.snapshot.logs.get(key)?.sync?.connection === connection;
     let before: string | undefined;
     for (let tries = 0; current(); ) {
       try {
-        const page = await this.api.history(room, before);
+        const page = await this.api.history(conversation, before);
         if (!current()) return;
-        const log = this.snapshot.logs.get(room)!;
+        const log = this.snapshot.logs.get(key)!;
         const reach = reachOf(log);
         const lowest = page.events.at(-1)?.seq;
         before = page.before;
         const more = before !== undefined && reach !== undefined && lowest !== undefined && lowest > reach;
-        this.updateLog(room, (now) => {
+        this.updateLog(key, (now) => {
           const merged = withPage(now, page.events);
           return more ? merged : caughtUp(merged, before, connection);
         });
         if (!more) {
-          if (log.whole === undefined && room === myRoom(this.snapshot)) this.see();
+          if (log.whole === undefined && conversation.kind === "room" && conversation.id === myRoom(this.snapshot)) this.see();
           return;
         }
         tries = 0;
@@ -322,22 +346,33 @@ export class Session {
           this.signedOut();
           return;
         }
+        if (conversation.kind === "dm" && error instanceof Refused && error.status === 404) {
+          this.updateLog(key, () => ({ ...EMPTY_LOG, sync: { connection, phase: "unavailable" } }));
+          return;
+        }
         await this.wait(backoff(tries++));
       }
     }
   }
 
-  private setHouse(house: HousePersonView): void {
+  private setHouse(house: HousePersonView, change?: Partial<Snapshot>): void {
     const moved = roomOf(house, house.you.id) !== myRoom(this.snapshot);
-    this.set({ house, ...(moved ? { seen: undefined } : {}) });
+    const removed = this.snapshot.house?.direct?.filter(({ agent_id }) => !directWith(house, agent_id)) ?? [];
+    let logs = this.snapshot.logs;
+    if (removed.length > 0) {
+      const remaining = new Map(logs);
+      for (const { agent_id: id } of removed) remaining.delete(logKey({ kind: "dm", id }));
+      logs = remaining;
+    }
+    this.set({ ...change, logs, house, ...(moved ? { seen: undefined } : {}) });
     this.refreshShown();
     if (moved) this.see();
   }
 
-  private updateLog(room: string, change: (log: RoomLog) => RoomLog): void {
-    const log = this.snapshot.logs.get(room) ?? EMPTY_LOG;
+  private updateLog(key: string, change: (log: ConversationLog) => ConversationLog): void {
+    const log = this.snapshot.logs.get(key) ?? EMPTY_LOG;
     const changed = change(log);
-    if (changed !== log) this.set({ logs: new Map(this.snapshot.logs).set(room, changed) });
+    if (changed !== log) this.set({ logs: new Map(this.snapshot.logs).set(key, changed) });
   }
 
   private failed(error: unknown, connection?: string): void {

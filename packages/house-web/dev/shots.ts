@@ -6,7 +6,7 @@
 //   CHROMIUM=<path to chrome> node --conditions=penelope-source dev/shots.ts <directory>
 //
 // Nothing in CI runs it.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright-core";
@@ -167,6 +167,40 @@ if (wanted("phone-dark")) {
   const page = await open(house, PHONE, { dark: true });
   await settle(house, page);
   await shot(page, "phone-07-dark");
+  await end(house);
+}
+
+if (wanted("house-first")) {
+  const house = await evening();
+  const sayaka = house.agent("sayaka");
+  const picture = { name: "似顔絵.webp", data: readFileSync(new URL("../../../assets/avatars/sayaka/icons/happy.webp", import.meta.url)).toString("base64") };
+  await sayaka.reply({ text: "散歩の途中で似顔絵を描いたよ。どうかな？", expression: "happy", images: [picture] });
+
+  const pc = await open(house, PC);
+  const direct = pc.getByRole("link", { name: "さやかとの1対1を開く" });
+  await direct.scrollIntoViewIfNeeded();
+  await shot(pc, "house-first-pc-away");
+  await direct.click();
+  await pc.getByText("散歩の途中で似顔絵を描いたよ。どうかな？").waitFor();
+  await shot(pc, "house-first-pc-direct");
+
+  const phone = await open(house, PHONE, { dark: true });
+  await phone.getByRole("link", { name: "さやかとの1対1を開く" }).click();
+  await sayaka.sync({ mood: null, sleepiness: 90, sleep: { state: "asleep", wake_at: new Date(house.now() + 3_600_000).toISOString() } });
+  await phone.getByText("寝ています。起きたら届きます").waitFor();
+  await phone.getByLabel("さやかへの発言").fill("いいね。起きたらこれも見てね。");
+  await phone.getByLabel("画像を添付する").setInputFiles({ name: "お返し.webp", mimeType: "image/webp", buffer: Buffer.from(picture.data, "base64") });
+  await phone.getByText("お返し.webp").waitFor();
+  await shot(phone, "house-first-phone-attachment");
+  await phone.getByRole("button", { name: "送信" }).click();
+  await phone.locator(".speech-text", { hasText: "いいね。起きたらこれも見てね。" }).waitFor();
+  await house.advance(24 * 3_600_000 + 1_000);
+  await phone.getByText("配信期限切れ").waitFor();
+  await shot(phone, "house-first-phone-expired");
+
+  await sayaka.enter("living");
+  await pc.getByText("相手は部屋にいます。1対1では送れません。").waitFor();
+  await shot(pc, "house-first-pc-read-only");
   await end(house);
 }
 

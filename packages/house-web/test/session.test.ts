@@ -195,14 +195,14 @@ describe("the line to the house", () => {
     house.happen(speech(BATH, FERN, "before"), { heard: false });
     const session = start(house);
     house.ready();
-    session.show(BATH.id);
+    session.show({ kind: "room", id: BATH.id });
     await settle();
     session.show(undefined);
     house.drop();
     for (const text of ["one", "two", "three"]) house.happen(speech(BATH, FERN, text), { heard: false });
     house.ready();
     house.happen(speech(BATH, FERN, "after"));
-    session.show(BATH.id);
+    session.show({ kind: "room", id: BATH.id });
     await settle();
 
     assert.deepEqual(texts(session, BATH.id), ["before", "one", "two", "three", "after"]);
@@ -215,13 +215,13 @@ describe("the line to the house", () => {
     house.ready();
     await settle();
     const late = house.hold("history");
-    session.show(BATH.id);
+    session.show({ kind: "room", id: BATH.id });
     await settle();
 
     house.drop();
     session.show(undefined);
     for (let line = 2; line <= 53; line += 1) house.happen(speech(BATH, FERN, String(line)), { heard: false });
-    session.show(BATH.id);
+    session.show({ kind: "room", id: BATH.id });
     house.ready();
     await settle();
     late.give();
@@ -280,7 +280,7 @@ describe("the line to the house", () => {
     await settle();
     house.failures.say = 1;
 
-    assert.equal(await session.say(LIVING.id, "did this arrive?", []), "unknown");
+    assert.equal(await session.say({ kind: "room", id: LIVING.id }, { text: "did this arrive?" }), "unknown");
   });
 
   it("asks the house to say nothing in a room the person is no longer in", async () => {
@@ -290,7 +290,7 @@ describe("the line to the house", () => {
     await settle();
     house.floor(house.withLeeIn(BATH.id));
 
-    assert.equal(await session.say(LIVING.id, "only for the living room", []), "refused");
+    assert.equal(await session.say({ kind: "room", id: LIVING.id }, { text: "only for the living room" }), "refused");
     assert.deepEqual(house.writes, []);
   });
 
@@ -392,7 +392,7 @@ describe("the line to the house", () => {
     await settle();
     house.refusals.say = "connection-required";
     const late = house.hold("say");
-    const saying = session.say(LIVING.id, "hello", []);
+    const saying = session.say({ kind: "room", id: LIVING.id }, { text: "hello" });
     await settle();
 
     house.hold("house");

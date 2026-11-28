@@ -10,7 +10,7 @@ import { type AddressInfo, createServer as createTcpServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
-import type { HouseAgentStatus, HouseDelivery, HouseSyncResult } from "@penelope/contract";
+import { HOUSE_EXPRESSIONS, type HouseAgentStatus, type HouseConversationDelivery, type HouseConversationSyncResult, type HouseSpeech } from "@penelope/contract";
 import { parseConfig, startHouse } from "@penelope/house";
 
 const AVATARS = path.join(import.meta.dirname, "../../../assets/avatars");
@@ -46,12 +46,13 @@ const AWAKE: HouseAgentStatus = { mood: null, sleepiness: 20, sleep: { state: "a
 
 export type FakeAgent = {
   /** Sends the status; the agent then stays connected until `stop`. Returns what the house had for it. */
-  sync: (status?: HouseAgentStatus) => Promise<HouseDelivery[]>;
+  sync: (status?: HouseAgentStatus) => Promise<HouseConversationDelivery[]>;
   /** The deployment goes quiet: the house shows the agent as not connected once its last word is 15 seconds old. */
   stop: () => void;
   enter: (room: string) => Promise<void>;
   leave: () => Promise<void>;
   say: (room: string, text: string, to?: string[]) => Promise<void>;
+  reply: (speech: HouseSpeech) => Promise<void>;
 };
 
 export type FakeHouse = {
@@ -84,7 +85,7 @@ export type FakeHouseOptions = {
   /** Adds to each page the front serves, before `</body>`. */
   pageTail?: string;
   /** Called with what an agent was delivered each time it syncs: the development server answers from here. */
-  onDelivery?: (agent: AgentId, delivery: HouseDelivery, house: FakeHouse) => void;
+  onDelivery?: (agent: AgentId, delivery: HouseConversationDelivery, house: FakeHouse) => void;
 };
 
 export async function startFakeHouse({ webDir, port, behindMs = 0, pageTail, onDelivery }: FakeHouseOptions): Promise<FakeHouse> {
@@ -105,8 +106,9 @@ export async function startFakeHouse({ webDir, port, behindMs = 0, pageTail, onD
       id,
       name,
       service_account: `example/${id}`,
-      avatar_url: `${origin}${AVATAR_PATH}${id}/icons/neutral.webp`,
-      chat_url: `https://${id}.example.com/`,
+      owner_login: "lee",
+      avatar_urls: Object.fromEntries(HOUSE_EXPRESSIONS.map((expression) => [expression, `${origin}${AVATAR_PATH}${id}/icons/${expression}.webp`])),
+      personal_url: `https://${id}.example.com/`,
     })),
     people: PEOPLE.map(({ login, name }) => ({ login, name })),
     web_dir: webDir,
@@ -148,11 +150,12 @@ export async function startFakeHouse({ webDir, port, behindMs = 0, pageTail, onD
     if (!response.ok) throw new Error(`${agent} ${method} ${pathname}: ${response.status} ${await response.text()}`);
     return response;
   };
-  const sync = async (id: AgentId, status?: HouseAgentStatus): Promise<HouseDelivery[]> => {
+  const sync = async (id: AgentId, status?: HouseAgentStatus): Promise<HouseConversationDelivery[]> => {
     if (status) statuses.set(id, status);
-    const { pending } = (await (await call(id, "/sync", "POST", { status: statuses.get(id) ?? AWAKE })).json()) as HouseSyncResult;
+    const payload = { protocol: 2, status: statuses.get(id) ?? AWAKE };
+    const { pending } = (await (await call(id, "/sync", "POST", payload)).json()) as HouseConversationSyncResult;
     if (pending.length > 0) {
-      await call(id, "/sync", "POST", { status: statuses.get(id) ?? AWAKE, ack: pending.map(({ event }) => event.id) });
+      await call(id, "/sync", "POST", { ...payload, ack: pending.map(({ event }) => event.id) });
       for (const delivery of pending) onDelivery?.(id, delivery, house);
     }
     return pending;
@@ -190,7 +193,6 @@ export async function startFakeHouse({ webDir, port, behindMs = 0, pageTail, onD
         });
       });
       upstream.on("error", () => response.destroy());
-      // A closed tab closes its stream at the house too, which is what starts the wait before the person leaves.
       response.on("close", () => upstream.destroy());
       request.pipe(upstream);
     })().catch(() => response.destroy());
@@ -218,6 +220,7 @@ export async function startFakeHouse({ webDir, port, behindMs = 0, pageTail, onD
       enter: async (room) => void (await call(id, `/rooms/${room}/enter`, "POST")),
       leave: async () => void (await call(id, "/room", "DELETE")),
       say: async (room, text, to) => void (await call(id, `/rooms/${room}/say`, "POST", { text, ...(to ? { to } : {}) })),
+      reply: async (speech) => void (await call(id, "/reply", "POST", speech)),
     }),
     advance: async (ms) => {
       skew += ms;

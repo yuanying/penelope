@@ -4,10 +4,11 @@
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { Icon } from "@astryxdesign/core/Icon";
-import type { ReactNode, RefObject } from "react";
+import type { MouseEvent, ReactNode, RefObject } from "react";
 
 import type { HousePersonView } from "@penelope/contract";
 
+import { directWith } from "../model/session.ts";
 import { EyeIcon, ForwardIcon } from "./icons.tsx";
 import { AwayResident, keyOf, ResidentAvatar, ResidentCard, ResidentStack } from "./residents.tsx";
 import { timeOf, withUnread, words } from "./words.ts";
@@ -30,6 +31,7 @@ export type PlanProps = {
   onPeek: (room: string) => void;
   onEnter: (room: string) => void;
   onOpenTalk: () => void;
+  onDirect: (event: MouseEvent<HTMLAnchorElement>, agent: string) => void;
   onLogout: () => void;
 };
 
@@ -45,7 +47,7 @@ function Capacity({ room }: { room: Room }) {
   );
 }
 
-export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onLogout }: PlanProps) {
+export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unread, lineNotice, heading, dock, onPeek, onEnter, onOpenTalk, onDirect, onLogout }: PlanProps) {
   const myRoom = house.rooms.find(({ id }) => id === mine);
   const unreadBadge = unread > 0 ? (
     <span className="unread" aria-hidden>
@@ -86,7 +88,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
                 {room.occupants.length > 0 ? (
                   <ul className="residents" role="list">
                     {room.occupants.map((resident) => (
-                      <ResidentCard key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} />
+                      <ResidentCard key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} onDirect={resident.kind === "agent" && directWith(house, resident.id) ? onDirect : undefined} />
                     ))}
                   </ul>
                 ) : null}
@@ -148,7 +150,7 @@ export function Plan({ house, mine, peek, online, phone, openTalkFromTile, unrea
             {house.away.length > 0 ? (
               <ul className="residents" role="list">
                 {house.away.map((resident) => (
-                  <AwayResident key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} />
+                  <AwayResident key={keyOf(resident)} resident={resident} self={resident.kind === "person" && resident.id === house.you.id} onDirect={resident.kind === "agent" && directWith(house, resident.id) ? onDirect : undefined} />
                 ))}
               </ul>
             ) : (

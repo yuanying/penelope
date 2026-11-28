@@ -5,6 +5,8 @@ import { watch } from "node:fs";
 import { createServer } from "node:http";
 import path from "node:path";
 
+import type { HouseConversationDelivery } from "@penelope/contract";
+
 import { buildUi } from "./build.ts";
 import { type AgentId, EVENING_BEHIND_MS, type FakeHouse, PEOPLE, playEvening, startFakeHouse } from "./dev/house.ts";
 
@@ -62,11 +64,11 @@ const GREETINGS: Record<AgentId, string> = { penelope: "おかえりなさい", 
 let line = 0;
 
 /** An awake resident answers a person who addressed them, and greets one who came in. */
-function answer(agent: AgentId, { event, answer_via }: { event: import("@penelope/contract").HouseEvent; answer_via?: unknown }, house: FakeHouse): void {
+function answer(agent: AgentId, { event, answer_via }: HouseConversationDelivery, house: FakeHouse): void {
   if (event.actor.kind !== "person" || house.statusOf(agent)?.sleep.state !== "awake") return;
   const words = event.kind === "enter" ? GREETINGS[agent] : event.kind === "speech" && answer_via ? LINES[agent][line++ % LINES[agent].length]! : undefined;
   if (words === undefined) return;
-  setTimeout(() => void house.agent(agent).say(event.room.id, words, [event.actor.id]).catch(() => {}), 1_200);
+  setTimeout(() => void house.agent(agent).reply({ text: words, expression: "happy", to: [event.actor.id] }).catch(() => {}), 1_200);
 }
 
 const house = await startFakeHouse({
@@ -80,4 +82,4 @@ await playEvening(house, { long: true });
 
 console.log(`\nThe house's screen over a made-up house: ${house.origin}/\n\nSign in as (the screen's own button signs in as the first):`);
 for (const person of PEOPLE) console.log(`  ${person.name.padEnd(6)} ${house.origin}/auth/github/start?as=${person.login}`);
-console.log("\nAddress a resident with @ to be answered; a resident who is asleep is not reached.\n");
+console.log("\nAddress a resident with @ or send a direct message to Sayaka. Sleeping residents receive only direct messages after waking.\n");

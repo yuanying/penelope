@@ -1,11 +1,11 @@
-// Those who are out show nothing but their name, their picture and the way
-// to their own screen (ADR-0075, 6).
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Icon } from "@astryxdesign/core/Icon";
+import type { MouseEvent } from "react";
 
-import type { HouseActor, HousePersonOccupant, HousePersonView, HousePublicIdentity } from "@penelope/contract";
+import type { HouseActor, HouseExpression, HousePersonOccupant, HousePersonView, HousePublicIdentity } from "@penelope/contract";
 
 import { ExternalIcon, MoonIcon, WarningIcon } from "./icons.tsx";
+import { hashOf } from "./route.ts";
 import { timeOf, words } from "./words.ts";
 
 export type Shown = HousePersonOccupant | HousePublicIdentity;
@@ -43,12 +43,17 @@ export type AvatarSize = 24 | 32 | 36 | 40;
  * sleeper has a moon over the same picture and one the house does not hear
  * from is faded. `named` is for where no name stands beside the picture.
  */
-export function ResidentAvatar({ resident, size, plain = false, named = false }: { resident: Shown; size: AvatarSize; plain?: boolean; named?: boolean }) {
+export function avatarOf(resident: Shown, expression: HouseExpression = "neutral"): string | undefined {
+  return (resident.kind === "agent" ? resident.avatar_urls?.[expression] ?? resident.avatar_urls?.neutral : undefined) ?? resident.avatar_url;
+}
+
+export function ResidentAvatar({ resident, size, expression, plain = false, named = false }: { resident: Shown; size: AvatarSize; expression?: HouseExpression | undefined; plain?: boolean; named?: boolean }) {
   const asleep = !plain && isAsleep(resident);
+  const src = avatarOf(resident, expression);
   return (
     <span className={!plain && isDown(resident) ? "resident-avatar resident-avatar-down" : "resident-avatar"}>
       <Avatar
-        {...(resident.avatar_url === undefined ? {} : { src: resident.avatar_url })}
+        {...(src === undefined ? {} : { src })}
         name={resident.name}
         alt={named ? `${resident.name}${asleep ? words.asleepMark : ""}` : ""}
         size={size}
@@ -64,13 +69,36 @@ export function ResidentAvatar({ resident, size, plain = false, named = false }:
   );
 }
 
-function ChatLink({ resident }: { resident: Shown }) {
-  if (resident.kind !== "agent" || resident.chat_url === undefined) return null;
+function personalPage(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password && !url.href.includes("#") ? url.href : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type DirectOpener = (event: MouseEvent<HTMLAnchorElement>, agent: string) => void;
+
+function ResidentLinks({ resident, onDirect }: { resident: Shown; onDirect?: DirectOpener | undefined }) {
+  if (resident.kind !== "agent") return null;
+  const personal = personalPage(resident.personal_url);
+  if (!personal && !onDirect) return null;
   return (
-    <a className="resident-chat" href={resident.chat_url} target="_blank" rel="noreferrer" aria-label={words.chatWith(resident.name)}>
-      {words.chat}
-      <ExternalIcon width={12} height={12} />
-    </a>
+    <div className="resident-links">
+      {onDirect ? (
+        <a className="resident-link" href={hashOf({ at: "dm", agent: resident.id })} aria-label={words.directWith(resident.name)} onClick={(event) => onDirect(event, resident.id)}>
+          {words.direct}
+        </a>
+      ) : null}
+      {personal ? (
+        <a className="resident-link" href={personal} target="_blank" rel="noreferrer" aria-label={words.personalOf(resident.name)}>
+          {words.personal}
+          <ExternalIcon width={12} height={12} aria-hidden />
+        </a>
+      ) : null}
+    </div>
   );
 }
 
@@ -100,7 +128,7 @@ function StateLine({ resident, self }: { resident: HousePersonOccupant; self: bo
   );
 }
 
-export function ResidentCard({ resident, self }: { resident: HousePersonOccupant; self: boolean }) {
+export function ResidentCard({ resident, self, onDirect }: { resident: HousePersonOccupant; self: boolean; onDirect?: DirectOpener | undefined }) {
   const status = statusOf(resident);
   return (
     <li className="resident">
@@ -111,7 +139,6 @@ export function ResidentCard({ resident, self }: { resident: HousePersonOccupant
             {resident.name}
           </span>
           {self ? <span className="resident-self">{words.self}</span> : null}
-          <ChatLink resident={resident} />
         </div>
         <StateLine resident={resident} self={self} />
         {status?.mood ? <div className="resident-mood">「{status.mood}」</div> : null}
@@ -124,12 +151,13 @@ export function ResidentCard({ resident, self }: { resident: HousePersonOccupant
             <span className="resident-number">{Math.round(status.sleepiness)}</span>
           </div>
         ) : null}
+        <ResidentLinks resident={resident} onDirect={onDirect} />
       </div>
     </li>
   );
 }
 
-export function AwayResident({ resident, self }: { resident: HousePublicIdentity; self: boolean }) {
+export function AwayResident({ resident, self, onDirect }: { resident: HousePublicIdentity; self: boolean; onDirect?: DirectOpener | undefined }) {
   return (
     <li className="resident resident-away">
       <ResidentAvatar resident={resident} size={40} />
@@ -139,8 +167,8 @@ export function AwayResident({ resident, self }: { resident: HousePublicIdentity
             {resident.name}
           </span>
           {self ? <span className="resident-self">{words.self}</span> : null}
-          <ChatLink resident={resident} />
         </div>
+        <ResidentLinks resident={resident} onDirect={onDirect} />
       </div>
     </li>
   );

@@ -1,6 +1,8 @@
 // The house's API for people (docs/house.md, 人の画面の API). To enter, to
 // leave and to speak carry the connection of the stream open in this tab.
-import type { HouseHistory, HousePersonView, HouseSpeech, HouseSpeechResult } from "@penelope/contract";
+import type { HouseDirectHistory, HouseHistory, HousePersonView, HouseSpeech, HouseSpeechResult } from "@penelope/contract";
+
+import type { Conversation } from "./log.ts";
 
 export type Fetch = typeof fetch;
 
@@ -21,10 +23,10 @@ export class Refused extends Error {
 export type Api = {
   house: () => Promise<HousePersonView>;
   /** A page of a room's record, newest first. `before` is the cursor the page read before it gave. */
-  history: (room: string, before?: string) => Promise<HouseHistory>;
+  history: (conversation: Conversation, before?: string) => Promise<HouseHistory | HouseDirectHistory>;
   enter: (room: string, connection: string) => Promise<HousePersonView>;
   leave: (connection: string) => Promise<void>;
-  say: (room: string, speech: HouseSpeech, connection: string) => Promise<HouseSpeechResult>;
+  say: (conversation: Conversation, speech: HouseSpeech, connection: string) => Promise<HouseSpeechResult>;
   logout: () => Promise<void>;
 };
 
@@ -47,16 +49,20 @@ export function createApi(fetch: Fetch): Api {
     return response;
   };
   const room = (id: string) => `/api/rooms/${encodeURIComponent(id)}`;
+  const pathOf = ({ kind, id }: Conversation) => kind === "room" ? room(id) : `/api/dms/${encodeURIComponent(id)}`;
   return {
     house: async () => (await (await call("/api/house")).json()) as HousePersonView,
-    history: async (id, before) =>
-      (await (await call(`${room(id)}/history${before === undefined ? "" : `?before=${encodeURIComponent(before)}`}`)).json()) as HouseHistory,
+    history: async (conversation, before) =>
+      (await (await call(`${pathOf(conversation)}/history${before === undefined ? "" : `?before=${encodeURIComponent(before)}`}`)).json()) as HouseHistory | HouseDirectHistory,
     enter: async (id, connection) => (await (await call(`${room(id)}/enter`, { method: "POST", connection })).json()) as HousePersonView,
     leave: async (connection) => {
       await call("/api/room", { method: "DELETE", connection });
     },
-    say: async (id, speech, connection) =>
-      (await (await call(`${room(id)}/say`, { method: "POST", connection, body: speech })).json()) as HouseSpeechResult,
+    say: async (conversation, speech, connection) => {
+      const { to, ...message } = speech;
+      const body = conversation.kind === "room" ? speech : message;
+      return (await (await call(`${pathOf(conversation)}/say`, { method: "POST", connection, body })).json()) as HouseSpeechResult;
+    },
     logout: async () => {
       await call("/auth/logout", { method: "POST" });
     },

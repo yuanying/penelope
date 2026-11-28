@@ -1,7 +1,7 @@
 // A stand-in for the house's API for people (docs/house.md), answered through
 // the fetch and the stream the app is given. The test moves the residents,
 // writes to the stream as the house would, and drops the line when it wants.
-import type { HouseEvent, HousePersonEvent, HousePersonOccupant, HousePersonView, HouseSpeech, HouseSpeechResult } from "@penelope/contract";
+import type { HouseEvent, HouseMessage, HousePersonDirectEvent, HousePersonEvent, HousePersonOccupant, HousePersonView, HouseSpeech, HouseSpeechResult } from "@penelope/contract";
 
 import type { Source } from "../src/model/session.ts";
 
@@ -51,6 +51,11 @@ export function speech(room: { id: string; name: string }, actor: HouseEvent["ac
   return { id: `e-${counter}`, seq: counter, occurred_at: new Date(Date.UTC(2026, 10, 27, 12, 0, counter)).toISOString(), room, actor, kind: "speech", text, to };
 }
 
+export function directSpeech(agent: typeof IVY | typeof FERN, text: string, actor: HouseEvent["actor"] = agent): HousePersonDirectEvent {
+  counter += 1;
+  return { id: `e-${counter}`, seq: counter, occurred_at: new Date(Date.UTC(2026, 10, 27, 12, 0, counter)).toISOString(), dm: { agent_id: agent.id, owner_id: LEE.id }, actor, kind: "speech", text };
+}
+
 export const LIVING = { id: "living", name: "Living" };
 export const BATH = { id: "bath", name: "Bath" };
 
@@ -73,6 +78,8 @@ export class FakeHouse {
   streamStatus = 200;
   /** The rooms' records, oldest first. */
   readonly records = new Map<string, HousePersonEvent[]>();
+  readonly directRecords = new Map<string, HousePersonDirectEvent[]>();
+  readonly sentDirect: Array<{ agent: string; message: HouseMessage; connection: string | null }> = [];
   /** How many events a page of a record holds. */
   pageSize = 50;
   /** Rooms that filled up since the floor was sent: entering them is refused. */
@@ -146,6 +153,12 @@ export class FakeHouse {
     this.source.emit("room", event);
   }
 
+  direct(event: HousePersonDirectEvent, { heard = true } = {}): void {
+    const { agent_id: agent } = event.dm;
+    this.directRecords.set(agent, [...(this.directRecords.get(agent) ?? []).filter(({ id }) => id !== event.id), event].sort((a, b) => a.seq - b.seq));
+    if (heard) this.source.emit("dm", event);
+  }
+
   /** The floor changed. */
   floor(house: HousePersonView): void {
     this.house = house;
@@ -185,8 +198,9 @@ export class FakeHouse {
     const url = new URL(String(input), "http://house.example.com");
     const method = init?.method ?? "GET";
     const room = /^\/api\/rooms\/([^/]+)\/(history|enter|say)$/.exec(url.pathname);
+    const dm = /^\/api\/dms\/([^/]+)\/(history|say)$/.exec(url.pathname);
     const kind: Kind | undefined =
-      url.pathname === "/api/house" ? "house" : url.pathname === "/auth/logout" ? "logout" : (room?.[2] as Kind | undefined);
+      url.pathname === "/api/house" ? "house" : url.pathname === "/auth/logout" ? "logout" : ((room ?? dm)?.[2] as Kind | undefined);
     if (kind !== undefined && (this.failures[kind] ?? 0) > 0) {
       this.failures[kind]! -= 1;
       return Response.json({ error: "unavailable" }, { status: 503 });
@@ -203,7 +217,7 @@ export class FakeHouse {
     }
     const refusal = kind === undefined ? undefined : this.refusals[kind];
     if (refusal !== undefined) delete this.refusals[kind!];
-    const answer = refusal === undefined ? this.answer(url, method, init, room) : Response.json({ error: refusal }, { status: 409 });
+    const answer = refusal === undefined ? this.answer(url, method, init, room, dm) : Response.json({ error: refusal }, { status: 409 });
     const held = kind === undefined ? undefined : this.held.get(kind);
     if (held !== undefined) {
       this.held.delete(kind!);
@@ -212,7 +226,7 @@ export class FakeHouse {
     return answer;
   };
 
-  private answer(url: URL, method: string, init: RequestInit | undefined, room: RegExpExecArray | null): Response {
+  private answer(url: URL, method: string, init: RequestInit | undefined, room: RegExpExecArray | null, dm: RegExpExecArray | null): Response {
     const json = (body: unknown, status = 200) => Response.json(body, { status });
     if (!this.signedIn) return json({ error: "unauthorized" }, 401);
     if (method !== "GET") this.writes.push(`${method} ${url.pathname}`);
@@ -222,8 +236,9 @@ export class FakeHouse {
       this.signedIn = false;
       return new Response(null, { status: 204 });
     }
-    if (room?.[2] === "history") {
-      const newestFirst = (this.records.get(room[1]!) ?? []).toReversed();
+    if (dm && !this.house.direct?.some(({ agent_id }) => agent_id === dm[1])) return json({ error: "not found" }, 404);
+    if ((room ?? dm)?.[2] === "history") {
+      const newestFirst = (room ? this.records.get(room[1]!) ?? [] : this.directRecords.get(dm![1]!) ?? []).toReversed();
       const before = url.searchParams.get("before");
       const from = before === null ? 0 : newestFirst.findIndex(({ id }) => id === before) + 1;
       const events = newestFirst.slice(from, from + this.pageSize);
@@ -233,6 +248,17 @@ export class FakeHouse {
       if (this.filled.has(room[1]!)) return json({ error: "room is full" }, 409);
       this.house = this.withLeeIn(room[1]!);
       return json(this.house);
+    }
+    if (dm?.[2] === "say") {
+      const availability = this.house.direct?.find(({ agent_id }) => agent_id === dm[1]);
+      if (availability?.send === "in-room") return json({ error: "agent-in-room" }, 409);
+      if (availability?.send !== "ready") return json({ error: "deployment-unsupported" }, 409);
+      const agent = dm[1] === IVY.id ? IVY : FERN;
+      const message = JSON.parse(String(init?.body)) as HouseMessage;
+      this.sentDirect.push({ agent: agent.id, message, connection });
+      const event = directSpeech(agent, message.text, LEE);
+      this.direct(event);
+      return json({ id: event.id, not_delivered: [] } satisfies HouseSpeechResult);
     }
     if (room?.[2] === "say") {
       const said = JSON.parse(String(init?.body)) as HouseSpeech;

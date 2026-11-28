@@ -283,24 +283,29 @@ time,
   font-size: 0.86em;
   font-weight: 400;
 }
-.resident-chat {
-  flex: none;
+.resident-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.resident-link {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  margin-inline-start: auto;
-  padding: 2px 8px;
+  gap: 4px;
+  min-height: 28px;
+  padding-inline: 8px;
   border-radius: 9999px;
   color: var(--color-text-secondary);
   font-size: 12px;
   font-weight: 500;
-  text-decoration: none;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
-.resident-chat:hover {
+.resident-link:hover {
   background: var(--color-neutral);
   color: var(--color-text-primary);
 }
-.resident-chat:focus-visible {
+.resident-link:focus-visible {
   outline: 2px solid var(--color-text-info);
   outline-offset: 1px;
 }
@@ -368,8 +373,8 @@ time,
 .house-phone .resident-mood {
   font-size: 14px;
 }
-.house-phone .resident-chat {
-  min-height: 32px;
+.house-phone .resident-link {
+  min-height: 44px;
   padding-inline: 12px;
   font-size: 13px;
 }
@@ -702,6 +707,13 @@ button.plan-dock:hover {
 .room-entry-status:empty {
   position: absolute;
 }
+.direct-note {
+  padding: 8px 12px;
+  border-radius: var(--radius-container);
+  background: var(--color-neutral);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
 .room-nowhere {
   flex: 1;
   display: flex;
@@ -873,7 +885,91 @@ button.plan-dock:hover {
   margin-top: 3px;
 }
 
+.speech-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-block: 4px;
+}
+.speech-image {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-element);
+  background: var(--color-neutral);
+  cursor: zoom-in;
+}
+.speech-image img {
+  display: block;
+  max-width: 100%;
+  border-radius: inherit;
+  object-fit: contain;
+}
+.speech-image:hover {
+  outline: 1px solid var(--color-border);
+}
+.speech-image:focus-visible,
+.speak-attachment button:focus-visible {
+  outline: 2px solid var(--color-text-info);
+  outline-offset: 2px;
+}
+
 /* The field */
+.house-phone .speak-attach {
+  min-height: 44px;
+}
+.speak-attachments {
+  display: grid;
+  gap: 6px;
+  max-height: min(28dvh, 210px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  padding: 4px;
+  margin: 0;
+}
+.speak-attachment {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-inline-start: 8px;
+  border-radius: var(--radius-element);
+  background: var(--color-neutral);
+  font-size: 13px;
+}
+.speak-attachment img {
+  flex: none;
+  object-fit: contain;
+}
+.speak-attachment-name {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.speak-attachment-status {
+  display: block;
+  color: var(--color-text-secondary);
+}
+.speak-attachment button {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: var(--radius-element);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.house-phone .speak-attachment button {
+  width: 44px;
+  height: 44px;
+}
+.speak-attachment button:hover {
+  background: var(--color-neutral);
+}
 .speak-to {
   display: flex;
   flex-wrap: wrap;
@@ -939,8 +1035,10 @@ button.plan-dock:hover {
   font-size: 13px;
   line-height: 1.5;
 }
-.speak-unsent-text {
+.speak-unsent p {
   overflow-wrap: anywhere;
+}
+.speak-unsent-text {
   white-space: pre-wrap;
   color: var(--color-text-primary);
 }
