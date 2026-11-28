@@ -38,12 +38,13 @@ async function evening(t: TestContext, options: { long?: boolean } = {}): Promis
 }
 
 /** A browser of its own, signed in, with the floor on the screen. */
-async function open(t: TestContext, house: FakeHouse, viewport: { width: number; height: number }, as = "lee"): Promise<Page> {
+async function open(t: TestContext, house: FakeHouse, viewport: { width: number; height: number }, as = "lee", prepare?: (page: Page) => Promise<void>): Promise<Page> {
   const phone = viewport.width < 768;
   const context = await browser.newContext({ viewport, hasTouch: phone, isMobile: phone });
   // Before the house: a page left open would go on asking a house that is gone.
   t.after(() => context.close());
   const page = await context.newPage();
+  await prepare?.(page);
   await page.goto(`${house.origin}/auth/github/start?as=${as}`);
   await page.locator(".plan-tiles").waitFor();
   return page;
@@ -161,6 +162,75 @@ describe("the house's screen in a browser", () => {
     enter();
     await field(page, "ミャオの部屋").waitFor();
     assert.equal(await focused(page), "ミャオの部屋");
+  });
+
+  it("keeps the selected record readable when entry succeeds before the floor confirms it", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PHONE, "lee", (page) => page.addInitScript(() => {
+      window.EventSource = class extends EventSource {
+        constructor(url: string | URL, options?: EventSourceInit) {
+          super(url, options);
+          let held: string | undefined;
+          let released = false;
+          this.addEventListener("house", (event: MessageEvent<string>) => {
+            const floor = JSON.parse(event.data) as HousePersonView;
+            const entered = floor.rooms.some(({ occupants }) => occupants.some(({ id }) => id === floor.you.id));
+            if (entered && !released) {
+              event.stopImmediatePropagation();
+              held = event.data;
+            }
+          });
+          window.addEventListener("release-floor", () => {
+            released = true;
+            if (held !== undefined) this.dispatchEvent(new MessageEvent("house", { data: held }));
+          }, { once: true });
+        }
+      };
+    }));
+    const { promise: pending, resolve: enter } = Promise.withResolvers<void>();
+    await page.route("**/api/rooms/living/enter", async (route) => {
+      await pending;
+      await route.continue();
+    });
+    t.after(enter);
+
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    const speech = page.getByText("そのまま寝ちゃいそうだね", { exact: true });
+    await speech.waitFor();
+    await house.agent("aki").sync({ mood: null, sleepiness: 5, sleep: { state: "awake" } });
+    await page.getByText("ペネロペ・アキ", { exact: true }).waitFor();
+    const response = page.waitForResponse("**/api/rooms/living/enter");
+    enter();
+    const entered = await response;
+    assert.equal(entered.status(), 200);
+    await entered.finished();
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+
+    assert.ok(await speech.isVisible());
+    assert.equal(await field(page, "居間").count(), 0);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("release-floor")));
+    await field(page, "居間").waitFor();
+  });
+
+  it("keeps focus on the older history button when entry fails", async (t) => {
+    const house = await evening(t, { long: true });
+    const page = await open(t, house, PHONE);
+    const { promise: pending, resolve: fail } = Promise.withResolvers<void>();
+    await page.route("**/api/rooms/living/enter", async (route) => {
+      await pending;
+      await route.fulfill({ status: 503, json: { error: "unavailable" } });
+    });
+    t.after(fail);
+
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    await page.getByRole("button", { name: "前の会話を読む" }).focus();
+    fail();
+    await page.getByText("居間に入れたか確かめられませんでした。", { exact: true }).waitFor();
+
+    assert.equal(await page.evaluate(() => document.activeElement?.tagName), "BUTTON");
+    assert.equal(await focused(page), "前の会話を読む");
+    assert.equal(await field(page, "居間").count(), 0);
   });
 
   it("leaves the peek and its focus alone when Forward overtakes a pending entry", async (t) => {
