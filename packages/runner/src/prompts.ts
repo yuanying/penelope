@@ -93,7 +93,7 @@ function appended(files: PromptFile[]): string {
 
 /** What folding leaves of an ended turn, as the system prompt says it when folding is on (ADR-0015). */
 export const FOLDING =
-  "Ended turns keep their events, your text and your replies, omit thinking, and retain other calls with their original arguments and placeholder results, except that calls with long arguments become history-only `folded` calls with the original tool name. The session record keeps the full turn.";
+  "Ended turns keep their events, your text and your replies, and omit thinking. Other tool calls keep their arguments if they fit within 200 JSON characters. Calls with longer arguments are replaced by a marker naming the original tool. Their results are placeholders. The session record keeps the full turn.";
 
 const escapeXml = (text: string) =>
   text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
