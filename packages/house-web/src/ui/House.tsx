@@ -8,7 +8,7 @@ import { myRoom, type Session, type Snapshot, unread } from "../model/session.ts
 import { Plan } from "./Plan.tsx";
 import { residentsOf } from "./residents.tsx";
 import { LineNotice, MyRoom, PeekRoom } from "./Room.tsx";
-import { hashOf, type Route, useRoute } from "./route.ts";
+import { useRoute } from "./route.ts";
 import { NOTHING_WRITTEN, type Writing } from "./Speak.tsx";
 import { words } from "./words.ts";
 
@@ -24,16 +24,8 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const phone = useMediaQuery(PHONE);
   const wide = useMediaQuery(WIDE);
   const touch = useMediaQuery(TOUCH) || phone;
-  const [route, setRoute] = useRoute();
-  /** The address the screen last set itself. Any other address the browser reports is the person's doing. */
-  const ownAddress = useRef(window.location.hash);
-  const go = useCallback(
-    (to: Route, replace = false) => {
-      ownAddress.current = hashOf(to);
-      setRoute(to, replace);
-    },
-    [setRoute],
-  );
+  const [route, go] = useRoute();
+  const [entry, setEntry] = useState<{ room: string }>();
   const [writings, setWritings] = useState<ReadonlyMap<string, Writing>>(new Map());
   const writers = useRef(new Map<string, (change: (writing: Writing) => Writing) => void>());
   /** The way to change what is written for one room: the same function for the same room, whoever calls it later. */
@@ -46,19 +38,20 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   };
 
   const mine = house.rooms.find(({ id }) => id === myRoom(snapshot));
-  const peeked = route.at === "peek" ? house.rooms.find(({ id }) => id === route.room && id !== mine?.id) : undefined;
-  const swapped = peeked !== undefined && (phone || !wide);
-  const talkShown = phone ? route.at === "talk" : !swapped;
+  const peeked = route.at === "peek" ? house.rooms.find(({ id }) => id === route.room) : undefined;
+  const swapped = peeked !== undefined && (phone || !wide || peeked.id === mine?.id);
+  const target = route.at === "talk" && entry !== undefined ? house.rooms.find(({ id }) => id === entry.room) : undefined;
+  const conversation = target ?? mine;
+  const entering = target !== undefined && target.id !== mine?.id;
+  const talkShown = !entering && (phone ? route.at === "talk" : !swapped);
   const count = unread(snapshot);
   const online = snapshot.line.kind === "open";
 
   useEffect(() => {
     document.title = house.name;
   }, [house.name]);
-  useEffect(() => {
-    if (route.at === "peek" && peeked === undefined) go(route.room === mine?.id ? { at: "talk" } : { at: "plan" }, true);
-  }, [route, peeked, mine?.id, go]);
-  useEffect(() => session.peek(peeked?.id), [session, peeked?.id]);
+  const viewed = peeked?.id ?? target?.id;
+  useEffect(() => session.show(viewed), [session, viewed]);
   // A tab in the background has shown nothing.
   const myLog = mine === undefined ? undefined : snapshot.logs.get(mine.id);
   const newest = myLog?.events.at(-1)?.id;
@@ -78,16 +71,6 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const peekHeading = useRef<HTMLHeadingElement>(null);
   const opener = useRef<Element | null>(null);
   const wanted = useRef<FocusTarget | undefined>(undefined);
-  /** Counts what the person did to change what the screen shows. What an earlier act brings later does not move the screen. */
-  const acts = useRef(0);
-  // The browser's own back and forward buttons are such acts too, and all the screen hears of them is the address.
-  useEffect(() => {
-    const moved = () => {
-      if (window.location.hash !== ownAddress.current) acts.current += 1;
-    };
-    window.addEventListener("hashchange", moved);
-    return () => window.removeEventListener("hashchange", moved);
-  }, []);
   useEffect(() => {
     const target = wanted.current;
     if (target === undefined) return;
@@ -115,36 +98,35 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   };
 
   const peek = (room: string) => {
-    acts.current += 1;
     if (peeked === undefined) open("peek");
     else want("peek");
     go({ at: "peek", room });
   };
   const toPlan = () => {
-    acts.current += 1;
     want("opener");
     go({ at: "plan" });
   };
   const openTalk = () => {
-    acts.current += 1;
     if (phone) open("room");
     else want("field");
     go({ at: "talk" });
   };
-  const enter = async (room: string) => {
-    const act = ++acts.current;
-    // The person is in the room either way. The screen follows only if they did nothing else with it meanwhile.
-    if (!(await session.enter(room)) || act !== acts.current) return;
-    // Focusing the field on a phone would raise the keyboard over the room just entered.
-    want(phone ? "room" : "field");
-    go({ at: "talk" }, route.at === "peek");
+  const backFromNotice = () => {
+    session.dismiss();
+    want("plan");
+    go({ at: "plan" });
   };
-  const leave = async () => {
-    const act = ++acts.current;
-    await session.leave();
-    if (act !== acts.current) return;
+  const enter = (room: string) => {
+    const attempt = { room };
+    setEntry(attempt);
+    want("room");
+    go({ at: "talk" }, route.at === "peek");
+    void session.enter(room).then(() => setEntry((current) => (current === attempt ? undefined : current)));
+  };
+  const leave = () => {
     want(phone ? "plan" : "room");
     if (phone) go({ at: "plan" });
+    void session.leave();
   };
   const older = useCallback((room: string) => session.older(room), [session]);
 
@@ -152,16 +134,19 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const shared = { you: house.you, residents, undelivered: snapshot.undelivered, phone, line: snapshot.line, onRetry: () => session.retry() };
   const notice = snapshot.notice;
   const nameOf = (room: string) => house.rooms.find(({ id }) => id === room)?.name ?? room;
+  const entryFailed = notice?.kind === "full" || notice?.kind === "enter-failed";
   const noticeTitle =
     notice === undefined ? undefined
-    : "room" in notice ? (notice.kind === "full" ? words.enterFull : words.returnFailed)(nameOf(notice.room))
+    : notice.kind === "return-failed" ? words.returnFailed(nameOf(notice.room))
+    : notice.kind === "full" ? words.enterFull(nameOf(notice.room))
+    : notice.kind === "enter-failed" ? words.enterFailed(nameOf(notice.room))
     : notice.kind === "failed" ? words.failed
     : words.logoutUnconfirmed;
   const notices = (
     <div className="house-notices" role="status" aria-live="polite">
       {notice ? (
         <Banner
-          status={notice.kind === "failed" || notice.kind === "logout-unconfirmed" ? "error" : "warning"}
+          status={notice.kind === "failed" || notice.kind === "logout-unconfirmed" || notice.kind === "enter-failed" ? "error" : "warning"}
           title={noticeTitle}
           elevation="med"
           isDismissable
@@ -169,7 +154,9 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
           onDismiss={() => session.dismiss()}
           {...(notice.kind === "logout-unconfirmed"
             ? { endContent: <Button label={words.logoutAgain} variant="secondary" size="sm" onClick={() => void session.logout()} /> }
-            : {})}
+            : entryFailed
+              ? { endContent: <Button label={words.backToPlan} variant="secondary" size="sm" onClick={backFromNotice} /> }
+              : {})}
         />
       ) : null}
     </div>
@@ -200,7 +187,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       heading={planHeading}
       dock={dock}
       onPeek={peek}
-      onEnter={(room) => void enter(room)}
+      onEnter={enter}
       onOpenTalk={openTalk}
       onLogout={() => void session.logout()}
     />
@@ -209,14 +196,15 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     <MyRoom
       {...shared}
       narrow={phone || peeked !== undefined}
-      room={mine}
-      log={mine === undefined ? undefined : snapshot.logs.get(mine.id)}
+      room={conversation}
+      entering={entering}
+      log={conversation === undefined ? undefined : snapshot.logs.get(conversation.id)}
       touch={touch}
       writing={(mine === undefined ? undefined : writings.get(mine.id)) ?? NOTHING_WRITTEN}
       onWriting={writerOf(mine?.id ?? "")}
       onSay={(text, to) => (mine === undefined ? Promise.resolve("refused") : session.say(mine.id, text, to))}
-      onOlder={() => (mine === undefined ? Promise.resolve() : older(mine.id))}
-      onLeave={() => void leave()}
+      onOlder={() => (conversation === undefined ? Promise.resolve() : older(conversation.id))}
+      onLeave={leave}
       onBack={toPlan}
       heading={roomHeading}
     />
@@ -232,7 +220,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
         swapped={swapped}
         unread={count}
         onOlder={() => older(peeked.id)}
-        onEnter={() => void enter(peeked.id)}
+        onEnter={() => enter(peeked.id)}
         onClose={toPlan}
         onBackToMine={openTalk}
         heading={peekHeading}

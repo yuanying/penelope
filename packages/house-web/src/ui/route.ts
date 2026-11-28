@@ -15,7 +15,7 @@ export function parseRoute(hash: string): Route {
   return { at: "plan" };
 }
 
-export function hashOf(route: Route): string {
+function hashOf(route: Route): string {
   if (route.at === "peek") return `#/peek/${encodeURIComponent(route.room)}`;
   return route.at === "talk" ? "#/talk" : "#/";
 }

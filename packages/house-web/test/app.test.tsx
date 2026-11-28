@@ -42,13 +42,10 @@ describe("the house's screen", () => {
     await open(house);
 
     fireEvent.click(screen.getByRole("button", { name: "Bathを覗く" }));
-    await act(async () => {
-      house.ready();
-    });
 
     const peeked = screen.getByRole("region", { name: "覗いている部屋" });
     await within(peeked).findByText("warm in here");
-    assert.match(house.sources.at(-1)!.url, /\?peek=bath$/);
+    assert.deepEqual(house.sources.map(({ url }) => url), ["/api/stream"]);
     assert.deepEqual(house.writes, []);
   });
 
@@ -68,6 +65,11 @@ describe("the house's screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Livingに入る" }));
 
     await screen.findByText("Livingは満員で入れませんでした。");
+    assert.equal(window.location.hash, "#/talk");
+
+    fireEvent.click(screen.getByRole("button", { name: "間取りに戻る" }));
+
+    assert.equal(window.location.hash, "#/");
   });
 
   // ADR-0075, 5: a sleeper is never reached, also not after waking, and the speaker is told so.
@@ -149,10 +151,9 @@ describe("the house's screen", () => {
     fireEvent.click(screen.getByRole("button", { name: "Bathを覗く" }));
 
     await act(async () => {
-      house.ready();
+      house.floor(house.withLeeIn(LIVING.id));
       answer.give();
     });
-    await screen.findByLabelText("Livingで話す").catch(() => {});
 
     assert.ok(screen.getByRole("region", { name: "覗いている部屋" }));
     assert.equal(window.location.hash, "#/peek/bath");
@@ -163,9 +164,6 @@ describe("the house's screen", () => {
     house.house = house.withLeeIn(undefined);
     await open(house);
     fireEvent.click(screen.getByRole("button", { name: "Livingを覗く" }));
-    await act(async () => {
-      house.ready();
-    });
     const answer = house.hold("enter");
     fireEvent.click(await screen.findByRole("button", { name: "ここに入る" }));
 

@@ -155,7 +155,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
           (request.headers.origin && request.headers.origin !== config.auth.github?.origin)) {
         return send(response, 403, { error: "wrong-origin" });
       }
-      return people.connect(session, query.get("peek"), response);
+      return people.connect(session, response);
     }
     if (room?.[2] === "history") return send(response, 200, house.history(room[1]!, query.get("before")));
 

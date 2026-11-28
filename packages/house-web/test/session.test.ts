@@ -195,15 +195,14 @@ describe("the line to the house", () => {
     house.happen(speech(BATH, FERN, "before"), { heard: false });
     const session = start(house);
     house.ready();
-    session.peek(BATH.id);
-    house.ready();
+    session.show(BATH.id);
     await settle();
-    session.peek(undefined);
+    session.show(undefined);
     house.drop();
     for (const text of ["one", "two", "three"]) house.happen(speech(BATH, FERN, text), { heard: false });
     house.ready();
     house.happen(speech(BATH, FERN, "after"));
-    session.peek(BATH.id);
+    session.show(BATH.id);
     await settle();
 
     assert.deepEqual(texts(session, BATH.id), ["before", "one", "two", "three", "after"]);
@@ -216,13 +215,13 @@ describe("the line to the house", () => {
     house.ready();
     await settle();
     const late = house.hold("history");
-    session.peek(BATH.id);
+    session.show(BATH.id);
     await settle();
 
     house.drop();
-    session.peek(undefined);
+    session.show(undefined);
     for (let line = 2; line <= 53; line += 1) house.happen(speech(BATH, FERN, String(line)), { heard: false });
-    session.peek(BATH.id);
+    session.show(BATH.id);
     house.ready();
     await settle();
     late.give();
@@ -265,10 +264,12 @@ describe("the line to the house", () => {
 
     house.floor(olderFloor);
     answer.give();
-    await settle();
+    await entering;
+    assert.equal(myRoom(session.getSnapshot()), undefined);
+
     house.floor(house.withLeeIn(LIVING.id));
 
-    assert.equal(await entering, true);
+    assert.equal(myRoom(session.getSnapshot()), LIVING.id);
   });
 
   // docs/house.md: a 5xx may come from in front of the house, after the house recorded the speech.

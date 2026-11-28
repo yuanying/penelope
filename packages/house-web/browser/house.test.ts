@@ -125,13 +125,13 @@ describe("the house's screen in a browser", () => {
     assert.deepEqual(delivered?.answer_via, { command: "house say" });
   });
 
-  it("puts the focus in the field of a room entered on a PC, and on the word of being in no room after leaving", async (t) => {
+  it("focuses the conversation heading on a PC when entering and leaving", async (t) => {
     const house = await evening(t);
     const page = await open(t, house, PC);
 
     await page.getByRole("button", { name: "居間に入る" }).click();
     await field(page, "居間").waitFor();
-    await page.waitForFunction(() => document.activeElement?.getAttribute("contenteditable") === "true");
+    assert.equal(await focused(page), "居間");
 
     await page.getByRole("button", { name: "部屋を出る" }).click();
     await page.getByText("いまはどの部屋にもいません").waitFor();

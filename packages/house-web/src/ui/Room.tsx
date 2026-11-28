@@ -54,7 +54,7 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | u
         density="spacious"
         aria-label={words.roomLog(room.name)}
         composer={bottom}
-        emptyState={log?.read ? <EmptyState title={words.emptyRoom} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
+        emptyState={log?.whole !== undefined ? <EmptyState title={words.emptyRoom} headingLevel={3} /> : <p className="room-reading">{words.reading}</p>}
       >
         {log !== undefined && log.events.length > 0 ? <Timeline log={log} scroller={scroller} {...timeline} /> : null}
       </ChatLayout>
@@ -64,6 +64,7 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | u
 
 export type MyRoomProps = Shared & {
   room: Room | undefined;
+  entering: boolean;
   log: RoomLog | undefined;
   touch: boolean;
   /** What is written for this room, and a way to change it that still means this room after the person left it. */
@@ -75,7 +76,7 @@ export type MyRoomProps = Shared & {
   onBack: () => void;
 };
 
-export function MyRoom({ room, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
+export function MyRoom({ room, entering, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState(false);
   // Astryx keeps the record's end in view as the record grows, not as what stands over the end grows.
@@ -115,7 +116,7 @@ export function MyRoom({ room, log, touch, writing, onWriting, onSay, onOlder, o
           </h2>
           <p>{phone ? room.occupants.map((resident) => `${resident.name}${isAsleep(resident) ? words.asleepMark : ""}`).join("・") : room.description}</p>
         </div>
-        {phone ? (
+        {entering ? null : phone ? (
           <button type="button" className="room-people" aria-label={words.showResidents} onClick={() => setSheet(true)}>
             <ResidentStack residents={room.occupants} size={32} max={4} />
           </button>
@@ -135,11 +136,15 @@ export function MyRoom({ room, log, touch, writing, onWriting, onSay, onOlder, o
         bottom={
           <div className="room-bottom">
             <LineNotice line={line} onRetry={onRetry} />
-            <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
+            {entering ? (
+              <p className="room-reading" role="status">{words.entering}</p>
+            ) : (
+              <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
+            )}
           </div>
         }
       />
-      {phone ? (
+      {phone && !entering ? (
         <BottomSheet isOpen={sheet} onOpenChange={setSheet} label={words.residentsOf(room.name)}>
           <div className="room-sheet">
             <div className="room-sheet-head">
@@ -184,7 +189,9 @@ export type PeekRoomProps = Shared & {
 
 export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, onClose, onBackToMine, heading, phone, line, onRetry, ...shared }: PeekRoomProps) {
   const scroller = useRef<HTMLDivElement>(null);
+  const alreadyIn = mine?.id === room.id;
   const full = room.capacity !== null && room.occupants.length >= room.capacity;
+  const backLabel = mine === undefined ? "" : (alreadyIn ? words.openTalkOf(mine.name) : words.backTo(mine.name));
   return (
     <section className="room room-peek" aria-label={words.peekedRoom}>
       <header className="room-head">
@@ -230,7 +237,7 @@ export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, o
                 <span>{words.peekNote}</span>
               </p>
               <div className="peek-actions">
-                {full ? (
+                {alreadyIn ? null : full ? (
                   <span className="peek-full">{words.fullNoEntryOf(room.capacity ?? 0)}</span>
                 ) : (
                   <Button
@@ -244,10 +251,10 @@ export function PeekRoom({ room, log, mine, swapped, unread, onOlder, onEnter, o
                 )}
                 {swapped && mine !== undefined ? (
                   <Button
-                    label={words.backTo(mine.name)}
+                    label={backLabel}
                     variant="secondary"
                     size={phone ? "lg" : "md"}
-                    aria-label={withUnread(words.backTo(mine.name), unread)}
+                    aria-label={withUnread(backLabel, unread)}
                     onClick={onBackToMine}
                     {...(unread > 0
                       ? {
