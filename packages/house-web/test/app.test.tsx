@@ -28,9 +28,14 @@ async function say(text: string) {
 }
 
 const myRoom = () => screen.getByRole("region", { name: "自分のいる部屋" });
+const readOnlyRoom = () => screen.getByRole("region", { name: "読み取り専用の会話" });
+const viewport = (width: number) => {
+  (window as unknown as { happyDOM: { setViewport: (size: { width: number; height: number }) => void } }).happyDOM.setViewport({ width, height: 844 });
+};
 
 afterEach(() => {
   cleanup();
+  viewport(1024);
   window.location.hash = "";
 });
 
@@ -122,6 +127,33 @@ describe("the house's screen", () => {
     assert.equal(house.said.length, 1);
   });
 
+  it("resends to the remaining addressee only after the person chooses to omit one who left", async () => {
+    const house = new FakeHouse();
+    const [living, bath] = house.house.rooms;
+    const emptyBath = { ...bath!, occupants: [] };
+    house.house = { ...house.house, rooms: [{ ...living!, occupants: [...living!.occupants, awake(FERN)] }, emptyBath] };
+    await open(house);
+    const address = screen.getByRole("button", { name: "@ 宛先" });
+    for (const name of [/Ivy/, /Fern/]) {
+      fireEvent.click(address);
+      fireEvent.click(await screen.findByRole("menuitem", { name }));
+    }
+    const answer = house.hold("say");
+    await say("did you hear?");
+    await act(async () => answer.lose());
+    assert.deepEqual(house.said[0]?.speech, { text: "did you hear?", to: [IVY.id, FERN.id] });
+
+    const withoutIvy = { ...living!, occupants: [awake(FERN), { ...LEE, connected: true }] };
+    await act(async () => house.floor({ ...house.house, rooms: [withoutIvy, emptyBath], away: [IVY] }));
+
+    const unsent = within(myRoom()).getByRole("group", { name: "送れたか確かめられなかった発言" });
+    assert.ok(within(unsent).getByText("@Ivy"));
+    assert.equal(within(unsent).queryByRole("button", { name: "もう一度送る" }), null);
+    assert.equal(house.said.length, 1);
+    fireEvent.click(within(unsent).getByRole("button", { name: "Ivyを宛先から外して送る" }));
+    assert.deepEqual(house.said[1]?.speech, { text: "did you hear?", to: [FERN.id] });
+  });
+
   it("opens a speech with no answer only when it is asked to", async () => {
     const house = new FakeHouse();
     await open(house);
@@ -178,6 +210,119 @@ describe("the house's screen", () => {
     await screen.findByLabelText("Livingで話す");
 
     assert.equal(window.location.hash, "#/");
+  });
+
+  it("keeps the selected conversation readable while the floor has not confirmed entry", async () => {
+    viewport(390);
+    const house = new FakeHouse();
+    const beforeEntry = house.withLeeIn(undefined);
+    house.house = beforeEntry;
+    house.happen(speech(LIVING, IVY, "hello from the living room"), { heard: false });
+    await open(house);
+    const answer = house.hold("enter");
+
+    fireEvent.click(screen.getByRole("button", { name: "Livingに入る" }));
+    const heading = await within(readOnlyRoom()).findByRole("heading", { name: "Living" });
+    assert.equal(document.activeElement, heading);
+    await within(readOnlyRoom()).findByText("hello from the living room");
+    await act(async () => {
+      house.floor(beforeEntry);
+      answer.give();
+    });
+
+    assert.equal(window.location.hash, "#/talk/living");
+    assert.ok(within(readOnlyRoom()).getByText("hello from the living room"));
+    assert.ok(within(readOnlyRoom()).getByText("入室を確認しています。"));
+    assert.equal(screen.queryByLabelText("Livingで話す"), null);
+    assert.equal(document.activeElement, heading);
+
+    await act(async () => house.floor(house.withLeeIn(LIVING.id)));
+    assert.ok(screen.getByLabelText("Livingで話す"));
+    assert.equal(document.activeElement, heading);
+    await act(async () => house.floor(beforeEntry));
+    assert.ok(within(readOnlyRoom()).getByText("この部屋に入室すると発言できます。"));
+  });
+
+  it("keeps focus on the earlier history when entry fails", async () => {
+    viewport(390);
+    const house = new FakeHouse();
+    house.house = house.withLeeIn(undefined);
+    house.pageSize = 1;
+    house.happen(speech(LIVING, IVY, "the first page"), { heard: false });
+    house.happen(speech(LIVING, IVY, "the newest page"), { heard: false });
+    await open(house);
+    house.refusals.enter = "unavailable";
+    const letEntryFail = house.stall("enter");
+    fireEvent.click(screen.getByRole("button", { name: "Livingに入る" }));
+    const older = await within(readOnlyRoom()).findByRole("button", { name: "前の会話を読む" });
+    older.focus();
+
+    await act(async () => letEntryFail());
+
+    const conversation = within(readOnlyRoom());
+    assert.ok(conversation.getByText("Livingに入れたか確かめられませんでした。"));
+    assert.ok(conversation.getByText("the newest page"));
+    assert.equal(document.activeElement, older);
+  });
+
+  it("announces an entry failure in the conversation's existing status region", async () => {
+    const house = new FakeHouse();
+    house.house = house.withLeeIn(undefined);
+    await open(house);
+    house.refusals.enter = "unavailable";
+    const letEntryFail = house.stall("enter");
+    fireEvent.click(screen.getByRole("button", { name: "Livingに入る" }));
+    const conversation = within(readOnlyRoom());
+    const confirming = conversation.getByText("入室を確認しています。");
+    const status = conversation.getAllByRole("status").find((region) => region.contains(confirming));
+    assert.ok(status);
+
+    await act(async () => letEntryFail());
+
+    assert.ok(conversation.getAllByRole("status").includes(status));
+    assert.ok(within(status).getByText("Livingに入れたか確かめられませんでした。"));
+  });
+
+  it("names the unread count in the current room's button while a PC shows another conversation", async () => {
+    viewport(1400);
+    window.location.hash = "#/talk/bath";
+    const house = await open();
+    assert.ok(within(readOnlyRoom()).getByRole("heading", { name: "Bath" }));
+
+    await act(async () => house.happen(speech(LIVING, IVY, "still there?")));
+
+    const tile = screen.getByRole("article", { name: "Living" });
+    const button = within(tile).getByRole("button", { name: "会話を開く（まだ読んでいない発言 1 件）" });
+    assert.ok(within(button).getByText("1"));
+  });
+
+  it("lets the skip link focus the conversation shown instead of the current room", async () => {
+    viewport(1100);
+    await open();
+    fireEvent.click(screen.getByRole("button", { name: "Bathを覗く" }));
+    const peeked = screen.getByRole("region", { name: "覗いている部屋" });
+
+    fireEvent.click(screen.getByRole("link", { name: "会話へ移動" }));
+
+    assert.equal(document.activeElement, within(peeked).getByRole("heading", { name: /^Bath/ }));
+  });
+
+  it("lets the skip link focus the strip that opens the conversation on a phone", async () => {
+    viewport(390);
+    await open();
+
+    fireEvent.click(screen.getByRole("link", { name: "会話へ移動" }));
+
+    assert.equal(document.activeElement, screen.getByRole("button", { name: "Livingの会話を開く" }));
+  });
+
+  it("names the unread count in the strip that opens the conversation on a phone", async () => {
+    viewport(390);
+    const house = await open();
+
+    await act(async () => house.happen(speech(LIVING, IVY, "still there?")));
+
+    assert.ok(screen.getByRole("button", { name: "Livingの会話を開く（まだ読んでいない発言 1 件）" }));
   });
 
   it("lets a PC switch from a selected read-only conversation to the current room", async () => {

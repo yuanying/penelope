@@ -206,8 +206,9 @@ describe("the house's screen in a browser", () => {
     enter();
     const entered = await response;
     assert.equal(entered.status(), 200);
-    await confirming.waitFor({ state: "hidden" });
+    assert.equal(await entered.finished(), null);
 
+    assert.ok(await confirming.isVisible());
     assert.ok(await speech.isVisible());
     assert.equal(await field(page, "居間").count(), 0);
 
@@ -215,7 +216,7 @@ describe("the house's screen in a browser", () => {
     await field(page, "居間").waitFor();
   });
 
-  it("keeps focus on the older history button when entry fails", async (t) => {
+  it("shows the entry failure in a status region without covering the earlier history", async (t) => {
     const house = await evening(t, { long: true });
     const page = await open(t, house, PHONE);
     let fail!: () => void;
@@ -230,10 +231,11 @@ describe("the house's screen in a browser", () => {
     const older = page.getByRole("button", { name: "前の会話を読む" });
     await older.focus();
     fail();
-    await page.getByText("居間に入れたか確かめられませんでした。", { exact: true }).waitFor();
+    const conversation = page.getByRole("region", { name: "読み取り専用の会話" });
+    const failure = conversation.getByRole("status").filter({ hasText: "居間に入れたか確かめられませんでした。" });
+    await failure.waitFor();
 
-    assert.equal(await page.evaluate(() => document.activeElement?.tagName), "BUTTON");
-    assert.equal(await focused(page), "前の会話を読む");
+    assert.match(await failure.ariaSnapshot(), /- status:[\s\S]*居間に入れたか確かめられませんでした。/);
     assert.ok(await older.evaluate((button) => {
       const { x, y, width, height } = button.getBoundingClientRect();
       return button.contains(document.elementFromPoint(x + width / 2, y + height / 2));
@@ -426,45 +428,6 @@ describe("the house's screen in a browser", () => {
     assert.equal(await candidate.textContent(), "アキ");
   });
 
-  it("takes the way past the floor to the room looked into where that is the conversation shown", async (t) => {
-    const house = await evening(t);
-    const page = await open(t, house, { width: 1100, height: 800 });
-    await page.getByRole("button", { name: "居間に入る" }).click();
-    await field(page, "居間").waitFor();
-    await page.getByRole("button", { name: "風呂を覗く" }).click();
-    await page.getByText("覗いています").waitFor();
-
-    await page.getByRole("link", { name: "会話へ移動" }).focus();
-    await page.keyboard.press("Enter");
-
-    assert.match(await focused(page), /^風呂/);
-    assert.equal(await page.evaluate(() => document.activeElement?.tagName), "H2");
-  });
-
-  it("takes the way past the floor to the strip that opens the conversation on a phone", async (t) => {
-    const house = await evening(t);
-    const page = await open(t, house, PHONE);
-    await page.getByRole("button", { name: "居間に入る" }).click();
-    await page.getByRole("button", { name: "間取りに戻る" }).click();
-    await page.getByRole("region", { name: "自分のいる部屋" }).waitFor({ state: "detached" });
-
-    await page.getByRole("link", { name: "会話へ移動" }).focus();
-    await page.keyboard.press("Enter");
-
-    assert.equal(await focused(page), "居間の会話を開く");
-  });
-
-  it("names the count of what was not read in the name of the strip that shows it", async (t) => {
-    const house = await evening(t);
-    const page = await open(t, house, PHONE);
-    await page.getByRole("button", { name: "居間に入る" }).click();
-    await page.getByRole("button", { name: "間取りに戻る" }).click();
-
-    await house.agent("penelope").say("living", "まだいる?");
-
-    await page.getByRole("button", { name: "居間の会話を開く（まだ読んでいない発言 1 件）" }).waitFor();
-  });
-
   it("says of a candidate that is on the screen that they woke", async (t) => {
     const house = await evening(t);
     const page = await open(t, house, PC);
@@ -479,6 +442,23 @@ describe("the house's screen in a browser", () => {
     await candidate.getByText("寝ている・届かない").waitFor({ state: "detached" });
   });
 
+  it("no longer offers a resident in the open @ menu after they leave", async (t) => {
+    const house = await evening(t);
+    const page = await open(t, house, PC);
+    await page.getByRole("button", { name: "居間に入る" }).click();
+    const input = field(page, "居間");
+    await input.click();
+    await page.keyboard.type("聞きたい @あき");
+    const candidate = page.getByRole("option", { name: /アキ/ });
+    await candidate.waitFor();
+
+    await house.agent("aki").leave();
+
+    await candidate.waitFor({ state: "detached", timeout: 2_000 });
+    assert.equal(await focused(page), "居間で話す");
+    assert.equal(await input.textContent(), "聞きたい @あき");
+  });
+
   /** Says it in the living room; the house records it, and its answer is lost on the way. */
   async function sayUnanswered(page: Page): Promise<void> {
     await page.route("**/api/rooms/living/say", async (route) => {
@@ -488,27 +468,6 @@ describe("the house's screen in a browser", () => {
     await page.getByRole("button", { name: "送信" }).click();
     await page.getByRole("group", { name: "送れたか確かめられなかった発言" }).waitFor();
   }
-
-  // ADR-0075, 7: whom a speech is addressed to decides who is asked to answer. Sending it again must not change that unseen.
-  it("offers to send a speech again without one who left only in so many words", async (t) => {
-    const house = await evening(t);
-    const page = await open(t, house, PC);
-    await page.getByRole("button", { name: "居間に入る" }).click();
-    await field(page, "居間").click();
-    await page.keyboard.type("@ぺね");
-    await page.getByRole("option", { name: /ペネロペ/ }).waitFor();
-    await page.keyboard.press("Enter");
-    await page.keyboard.type("聞こえる?");
-    await sayUnanswered(page);
-    const unsent = page.getByRole("group", { name: "送れたか確かめられなかった発言" });
-
-    await house.agent("penelope").leave();
-    await page.getByText("ペネロペが居間を出た").waitFor();
-
-    assert.ok(await unsent.getByText("@ペネロペ").isVisible());
-    assert.equal(await unsent.getByRole("button", { name: "もう一度送る" }).count(), 0);
-    assert.ok(await unsent.getByRole("button", { name: "ペネロペを宛先から外して送る" }).isVisible());
-  });
 
   it("leaves the record to be read on a phone beside a long speech that got no answer", async (t) => {
     const house = await evening(t);
