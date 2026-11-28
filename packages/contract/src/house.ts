@@ -24,15 +24,17 @@ export type HouseView = {
 };
 
 export const HOUSE_EXPRESSIONS = ["neutral", "happy", "laughing", "surprised", "thinking", "worried", "sad", "sleepy", "angry"] as const;
+export const HOUSE_REPLY_TEXT_MAX = 20_000;
 export type HouseExpression = typeof HOUSE_EXPRESSIONS[number];
 export type HouseImage = { id: string; name: string; mime_type: typeof REPLY_IMAGE_TYPES[number]; size: number };
 export type HouseMessage = { text: string; expression?: HouseExpression; images?: ReplyImageUpload[] };
 export type HouseSpeech = HouseMessage & { to?: string[] };
+export type HouseReply = Omit<HouseMessage, "expression"> & { expression?: string; to?: unknown };
 export type HouseSpeechResult = { id: string; not_delivered: HouseActor[] };
 export type HouseDirect = { agent_id: string; owner_id: string };
 export type HouseReplyResult = HouseSpeechResult & (
-  | { destination: { kind: "room"; room: Pick<HouseRoom, "id" | "name"> }; ignored_to?: never }
-  | { destination: { kind: "dm"; dm: HouseDirect }; ignored_to?: string[] }
+  | { destination: { kind: "room"; room: Pick<HouseRoom, "id" | "name"> }; absent_to: string[]; ignored_to?: never }
+  | { destination: { kind: "dm"; dm: HouseDirect }; absent_to?: never; ignored_to?: unknown }
 );
 export type HouseEnterResult = { occupants: HouseResident[] };
 
@@ -81,8 +83,9 @@ export type HouseDirectAvailability = {
   agent_id: string;
   send: "ready" | "in-room" | "deployment-unsupported";
   sleeping: boolean;
+  connected: boolean;
 };
-export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity; direct?: HouseDirectAvailability[] };
+export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity; direct: HouseDirectAvailability[] };
 /** An event as people are given it. `seq` is its place in the house's record: a later event has a greater one. */
 export type HousePersonEvent = HouseEvent & { seq: number };
 export type HouseDirectDeliveryStatus = "pending" | "delivered" | "expired";

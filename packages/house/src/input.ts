@@ -1,11 +1,12 @@
 import {
-  HOUSE_EXPRESSIONS, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX,
+  HOUSE_EXPRESSIONS, HOUSE_REPLY_TEXT_MAX, REPLY_IMAGE_MAX_BYTES, REPLY_IMAGES_MAX,
   type HouseAgentStatus, type HouseExpression, type HouseImage, type HouseSync,
 } from "@penelope/contract";
 
 export type ImageInput = Pick<HouseImage, "name" | "mime_type"> & { data: Buffer };
 export type MessageInput = { text: string; expression?: HouseExpression; images: ImageInput[] };
 export type SpeechInput = MessageInput & { to: string[] };
+export type ReplyInput = MessageInput & { to: unknown };
 export type SyncInput = HouseSync & { ack: string[] };
 
 export const PENDING_LIMIT = 50;
@@ -41,13 +42,8 @@ export function residentId(value: unknown, label: string): string {
   return id;
 }
 
-export function expressionOf(value: unknown): HouseExpression {
-  const expression = HOUSE_EXPRESSIONS.find((candidate) => candidate === value);
-  if (expression === undefined) throw new InvalidInput("unknown expression");
-  return expression;
-}
-
 const MESSAGE_KEYS = ["text", "expression", "images"];
+const SPEECH_KEYS = [...MESSAGE_KEYS, "to"];
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}(?![\s\S])/;
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 const JPEG = Buffer.from([0xff, 0xd8, 0xff]);
@@ -72,24 +68,37 @@ function imageOf(value: unknown, index: number): ImageInput {
   throw new InvalidInput(`${label} is not a PNG, JPEG, GIF or WebP image`);
 }
 
-function messageFields({ text, expression, images }: Record<string, unknown>): MessageInput {
+function mediaOf(fields: Record<string, unknown>): Omit<MessageInput, "text"> {
+  const expression = HOUSE_EXPRESSIONS.find((candidate) => candidate === fields.expression);
   return {
-    text: string(text, "text", 4000),
-    ...(expression === undefined ? {} : { expression: expressionOf(expression) }),
-    images: images === undefined ? [] : array(images, "images", REPLY_IMAGES_MAX).map(imageOf),
+    ...(expression === undefined ? {} : { expression }),
+    images: fields.images === undefined ? [] : array(fields.images, "images", REPLY_IMAGES_MAX).map(imageOf),
   };
 }
 
 export function messageOf(value: unknown): MessageInput {
-  return messageFields(object(value, "message", MESSAGE_KEYS));
+  const fields = object(value, "message", MESSAGE_KEYS);
+  return { text: string(fields.text, "text", 4000), ...mediaOf(fields) };
+}
+
+export function toOf(value: unknown): string[] {
+  return [...new Set(array(value === undefined ? [] : value, "to", 50).map((id) => residentId(id, "to item")))];
 }
 
 export function speechOf(value: unknown, legacy = false): SpeechInput {
-  const fields = object(value, "speech", legacy ? ["text", "to"] : [...MESSAGE_KEYS, "to"]);
-  return {
-    ...messageFields(fields),
-    to: [...new Set(array(fields.to === undefined ? [] : fields.to, "to", 50).map((id) => residentId(id, "to item")))],
-  };
+  const fields = object(value, "speech", legacy ? ["text", "to"] : SPEECH_KEYS);
+  return { text: string(fields.text, "text", 4000), ...mediaOf(fields), to: toOf(fields.to) };
+}
+
+export function replyOf(value: unknown): ReplyInput {
+  const fields = object(value, "reply", SPEECH_KEYS);
+  const { text, to } = fields;
+  if (typeof text !== "string" || text.length > HOUSE_REPLY_TEXT_MAX) {
+    throw new InvalidInput(`text must be a string up to ${HOUSE_REPLY_TEXT_MAX} characters`);
+  }
+  const media = mediaOf(fields);
+  if (text.trim() === "" && media.images.length === 0) throw new InvalidInput("reply must have text or an image");
+  return { text, to, ...media };
 }
 
 function sleepOf(value: unknown): HouseAgentStatus["sleep"] {

@@ -9,7 +9,7 @@ import type {
 } from "@penelope/contract";
 
 import { DIRECT_STREAM_PREFIX, type Agent, type HouseConfig, type Person, type Resident } from "./config.ts";
-import { InvalidInput, PENDING_LIMIT, type ImageInput, type MessageInput, type SpeechInput, type SyncInput } from "./input.ts";
+import { InvalidInput, PENDING_LIMIT, toOf, type ImageInput, type MessageInput, type ReplyInput, type SpeechInput, type SyncInput } from "./input.ts";
 
 const STATUS_LEASE_MS = 15_000;
 const DELIVERY_TTL_MS = 24 * 60 * 60 * 1000;
@@ -79,6 +79,11 @@ const DIRECT_SCHEMA = `
   PRAGMA user_version = 4;
 `;
 
+const PROTOCOL_SCHEMA = `
+  ALTER TABLE agent_status ADD COLUMN protocol INTEGER CHECK (protocol = 2);
+  PRAGMA user_version = 5;
+`;
+
 const HISTORY_LIMIT = 50;
 
 export type PersonSession = { person: Person; tokenHash: string; expires: number };
@@ -128,7 +133,7 @@ export class House {
   private readonly residents: Map<string, Resident>;
   private readonly ids: Set<string>;
   private readonly directByAgent = new Map<string, DirectPair>();
-  private readonly seen = new Map<string, { at: number; protocol?: 2 }>();
+  private readonly seen = new Map<string, number>();
 
   constructor(config: HouseConfig, now: number) {
     this.name = config.name;
@@ -147,12 +152,13 @@ export class House {
     try {
       this.db.exec("PRAGMA journal_mode = WAL");
       const version = this.db.prepare("PRAGMA user_version").get()?.user_version;
-      if (version !== 0 && version !== 1 && version !== 2 && version !== 3 && version !== 4) throw new Error("unknown house database version");
+      if (typeof version !== "number" || !Number.isInteger(version) || version < 0 || version > 5) throw new Error("unknown house database version");
       this.transaction(() => {
         if (version === 0) this.db.exec(SCHEMA);
         if (version < 2) this.db.exec(PEOPLE_SCHEMA);
         if (version < 3) this.db.exec(SESSION_SCHEMA);
         if (version < 4) this.db.exec(DIRECT_SCHEMA);
+        if (version < 5) this.db.exec(PROTOCOL_SCHEMA);
         this.reconcileConfig(now);
       });
     } catch (error) {
@@ -243,9 +249,13 @@ export class House {
 
   directAvailability(person: Person, now: number): HouseDirectAvailability[] {
     return [...this.directByAgent.values()].filter(({ owner }) => owner.subject === person.subject).map(({ agent }) => {
-      const send = this.roomOf(agent) !== undefined ? "in-room" : this.supportsDirect(agent, now) ? "ready" : "deployment-unsupported";
-      const sleep = send === "ready" ? this.agentStatus(agent)?.sleep : undefined;
-      return { agent_id: agent.actor.id, send, sleeping: sleep !== undefined && sleep.state !== "awake" };
+      const connected = this.agentConnected(agent, now);
+      const deployment = this.deployment(agent);
+      const modern = deployment?.protocol === 2;
+      const inRoom = this.roomOf(agent) !== undefined;
+      const send = inRoom ? "in-room" : modern ? "ready" : "deployment-unsupported";
+      const sleeping = connected && !inRoom && modern && (JSON.parse(deployment.body) as HouseAgentStatus).sleep.state !== "awake";
+      return { agent_id: agent.actor.id, send, sleeping, connected };
     });
   }
 
@@ -324,20 +334,19 @@ export class House {
     });
   }
 
-  reply(agent: Agent, speech: SpeechInput, now: number): { result: HouseReplyResult; event: PersonEvent } {
+  reply(agent: Agent, { to, ...message }: ReplyInput, now: number): { result: HouseReplyResult; event: PersonEvent } {
     return this.transaction(() => {
       const roomId = this.roomOf(agent);
       if (roomId !== undefined) {
         const room = this.room(roomId);
-        const { result, event } = this.sayInRoom(agent, room, speech, now);
-        return { result: { ...result, destination: { kind: "room", room: event.room } }, event };
+        const { result, event, absent_to } = this.sayInRoom(agent, room, { ...message, to: toOf(to) }, now);
+        return { result: { ...result, destination: { kind: "room", room: event.room }, absent_to }, event };
       }
       const pair = this.directByAgent.get(agent.actor.id);
       if (!pair) throw new Conflict("owner-not-configured");
-      const event = this.recordDirect(pair, agent, speech, now);
+      const event = this.recordDirect(pair, agent, message, now);
       const destination = { kind: "dm", dm: event.dm } as const;
-      const ignored = speech.to.length === 0 ? {} : { ignored_to: speech.to };
-      return { result: { id: event.id, destination, not_delivered: [], ...ignored }, event };
+      return { result: { id: event.id, destination, not_delivered: [], ...(to === undefined ? {} : { ignored_to: to }) }, event };
     });
   }
 
@@ -345,22 +354,26 @@ export class House {
     const pair = this.directPair(owner, agentId);
     return this.transaction(() => {
       if (this.roomOf(pair.agent) !== undefined) throw new Conflict("agent-in-room");
-      if (!this.supportsDirect(pair.agent, now)) throw new Conflict("deployment-unsupported");
+      if (this.deployment(pair.agent)?.protocol !== 2) throw new Conflict("deployment-unsupported");
       return this.recordDirect(pair, owner, message, now);
     });
   }
 
-  private sayInRoom(resident: Resident, room: HouseRoom, speech: SpeechInput, now: number, echo = false): { result: HouseSpeechResult; event: HousePersonEvent } {
+  private sayInRoom(resident: Resident, room: HouseRoom, speech: SpeechInput, now: number, echo = false): {
+    result: HouseSpeechResult; event: HousePersonEvent; absent_to: string[];
+  } {
     if (speech.to.some((id) => !this.ids.has(id))) throw new InvalidInput("to contains an unknown resident ID");
     const listeners: Occupant[] = [];
     const not_delivered: HouseActor[] = [];
-    for (const member of this.inRoom(room.id)) {
+    const members = this.inRoom(room.id);
+    for (const member of members) {
       if (!echo && member.resident.subject === resident.subject) continue;
       if (member.status && member.status.sleep.state !== "awake") not_delivered.push(member.resident.actor);
       else listeners.push(member);
     }
     const event = this.record(room, resident, { kind: "speech", ...speech }, listeners, now);
-    return { result: { id: event.id, not_delivered }, event };
+    const absent_to = speech.to.filter((id) => !members.some(({ resident }) => resident.actor.id === id));
+    return { result: { id: event.id, not_delivered }, event, absent_to };
   }
 
   sync(agent: Agent, { status, ack, protocol }: SyncInput, now: number): {
@@ -371,9 +384,10 @@ export class House {
     const owner = protocol === 2 ? agent.owner?.subject ?? null : null;
     const rows = this.transaction(() => {
       this.db.prepare(`
-        INSERT INTO agent_status (subject, body) VALUES (?, ?)
-        ON CONFLICT (subject) DO UPDATE SET body = excluded.body WHERE agent_status.body != excluded.body
-      `).run(agent.subject, JSON.stringify(status));
+        INSERT INTO agent_status (subject, body, protocol) VALUES (?, ?, ?)
+        ON CONFLICT (subject) DO UPDATE SET body = excluded.body, protocol = excluded.protocol
+        WHERE agent_status.body != excluded.body OR agent_status.protocol IS NOT excluded.protocol
+      `).run(agent.subject, JSON.stringify(status), protocol ?? null);
       const acknowledge = this.db.prepare(`
         DELETE FROM pending WHERE recipient = ? AND expires_ms > ? AND event_seq = (
           SELECT seq FROM events WHERE id = ? AND (dm_owner IS NULL OR (dm_owner = ? AND dm_agent = ?))
@@ -400,7 +414,7 @@ export class House {
         ORDER BY p.event_seq LIMIT ?
       `).all(agent.subject, now, status.sleep.state === "awake" ? owner : null, agent.subject, PENDING_LIMIT) as PendingRow[];
     });
-    this.seen.set(agent.subject, { at: now, protocol });
+    this.seen.set(agent.subject, now);
     const house = this.view(agent, now);
     const result = protocol === 2
       ? { house, protocol, pending: rows.map((row) => conversationDelivery(row, agent.owner)) }
@@ -481,18 +495,14 @@ export class House {
     }));
   }
 
-  private agentStatus(agent: Agent): HouseAgentStatus | undefined {
-    const row = this.db.prepare("SELECT body FROM agent_status WHERE subject = ?").get(agent.subject);
-    return row === undefined ? undefined : JSON.parse(row.body as string) as HouseAgentStatus;
+  private deployment(agent: Agent): { body: string; protocol: 2 | null } | undefined {
+    return this.db.prepare("SELECT body, protocol FROM agent_status WHERE subject = ?").get(agent.subject) as
+      { body: string; protocol: 2 | null } | undefined;
   }
 
   private agentConnected(resident: Resident, now: number): boolean {
     const seen = this.seen.get(resident.subject);
-    return seen !== undefined && now - seen.at < STATUS_LEASE_MS;
-  }
-
-  private supportsDirect(agent: Agent, now: number): boolean {
-    return this.seen.get(agent.subject)?.protocol === 2 && this.agentConnected(agent, now);
+    return seen !== undefined && now - seen < STATUS_LEASE_MS;
   }
 
   visibleIn(room: string, now: number): HouseResident[] {

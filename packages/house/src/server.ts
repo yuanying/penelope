@@ -6,7 +6,7 @@ import { GatedAssertion, identify, TokenReview, type SenderCheck } from "@penelo
 
 import type { HouseConfig } from "./config.ts";
 import { Conflict, House, NotFound } from "./house.ts";
-import { InvalidInput, messageOf, speechOf, syncOf } from "./input.ts";
+import { InvalidInput, messageOf, replyOf, speechOf, syncOf } from "./input.ts";
 import { PeopleLogin } from "./login.ts";
 import { People } from "./people.ts";
 import { serveWeb } from "./web.ts";
@@ -28,7 +28,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
   const house = new House(config, now());
   const people = new People(house, now, log);
   const login = new PeopleLogin(config.auth.github, house, now, github);
-  const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 15_000 }, (request, response) => {
+  const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 120_000 }, (request, response) => {
     void handle(request, response).catch((error: unknown) => {
       if (response.destroyed) return;
       if (response.headersSent) {
@@ -101,7 +101,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     if (view) return send(response, 200, house.view(agent, now()));
     if (image) return sendImage(response, house.agentImage(agent, image[1]!, now()));
     if (reply) {
-      const message = speechOf(await readJson(request, SPEECH_BODY_LIMIT));
+      const message = replyOf(await readJson(request, SPEECH_BODY_LIMIT));
       const { result, event } = house.reply(agent, message, now());
       people.publish([event]);
       return send(response, 200, result);
@@ -174,7 +174,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     }
     if (room?.[2] === "history") return send(response, 200, house.history(room[1]!, query.get("before")));
     if (direct?.[2] === "history") return send(response, 200, house.directHistory(person, direct[1]!, query.get("before"), now()));
-    if (image) return sendImage(response, house.personImage(person, image[1]!));
+    if (image) return sendImage(response, house.personImage(person, image[1]!), "browser");
 
     const connection = request.headers["x-house-connection"];
     const id = typeof connection === "string" ? connection : undefined;
@@ -230,9 +230,10 @@ async function readJson(request: http.IncomingMessage, limit = BODY_LIMIT): Prom
   }
 }
 
-function sendImage(response: http.ServerResponse, image: { mime_type: string; bytes: Uint8Array }): void {
+function sendImage(response: http.ServerResponse, image: { mime_type: string; bytes: Uint8Array }, cache?: "browser"): void {
+  const caching = cache === "browser" ? { "cache-control": "private, max-age=300, immutable", vary: "Cookie" } : { "cache-control": "no-store" };
   response.writeHead(200, {
-    "cache-control": "no-store", "content-type": image.mime_type, "content-length": image.bytes.byteLength,
+    ...caching, "content-type": image.mime_type, "content-length": image.bytes.byteLength,
     "x-content-type-options": "nosniff",
   }).end(image.bytes);
 }

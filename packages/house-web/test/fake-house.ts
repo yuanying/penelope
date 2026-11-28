@@ -66,6 +66,7 @@ export class FakeHouse {
       { ...BATH, description: "One at a time", capacity: 1, occupants: [awake(FERN)], last_speech: null },
     ],
     away: [],
+    direct: [],
   };
   signedIn = true;
   /** What GET /api/stream answers. */

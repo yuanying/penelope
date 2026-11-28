@@ -473,11 +473,12 @@ test("an away reply goes only to the configured owner's history and SSE", { time
   const owner = await lee.stream();
   const visitor = await sam.stream();
 
-  const response = await house.agent("/reply", "POST", { text: "For Lee", to: ["unlisted"] });
+  const to = { mention: "Lee" };
+  const response = await house.agent("/reply", "POST", { text: "For Lee", to });
   assert.equal(response.status, 200);
   const { id, destination, ignored_to } = await response.json() as HouseReplyResult;
   assert.deepEqual(destination, { kind: "dm", dm: { agent_id: "fern", owner_id: "lee" } });
-  assert.deepEqual(ignored_to, ["unlisted"]);
+  assert.deepEqual(ignored_to, to);
   const event = await owner.next<HousePersonDirectEvent>("dm", "room");
   assert.equal(event.id, id);
   assert.equal(event.text, "For Lee");
@@ -487,6 +488,27 @@ test("an away reply goes only to the configured owner's history and SSE", { time
   const history = await (await lee.call(`${directPath}/history`)).json() as HouseDirectHistory;
   assert.deepEqual(history.events, [event]);
   assert.equal((await sam.call(`${directPath}/history`)).status, 404);
+});
+
+test("reply accepts a blank body only when an image is attached", async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  const text = "  ";
+  assert.equal((await house.agent("/reply", "POST", { text, images: [{ name: "photo.png", data: png }] })).status, 200);
+  assert.equal((await house.agent("/reply", "POST", { text })).status, 400);
+});
+
+test("an away reply without a configured owner fails without leaving a message", async (t) => {
+  const database = databaseFile(t);
+  const before = await open(t, database);
+  const refused = await before.agent("/reply", "POST", { text: "Do not record" });
+  assert.equal(refused.status, 409);
+  assert.deepEqual(await refused.json(), { error: "owner-not-configured" });
+  await before.close();
+
+  const after = await open(t, database, undefined, owned);
+  const lee = await after.signIn();
+  const history = await (await lee.call(`${directPath}/history`)).json() as HouseDirectHistory;
+  assert.deepEqual(history.events, []);
 });
 
 test("sending a direct message after the recipient enters a room fails without recording it", async (t) => {
@@ -512,7 +534,7 @@ test("the owner can send while the recipient sleeps and receives no private stat
   const lee = await house.signIn();
   const sam = await house.signIn("sam");
   const { ready } = await lee.stream();
-  assert.deepEqual(ready.house.direct, [{ agent_id: "fern", send: "ready", sleeping: true }]);
+  assert.deepEqual(ready.house.direct, [{ agent_id: "fern", send: "ready", sleeping: true, connected: true }]);
   assert.deepEqual((await sam.view()).direct, []);
   assert.equal((await sam.call(`${directPath}/say`, "POST", (await sam.stream()).ready.connection, { text: "Not the owner" })).status, 404);
 
@@ -550,6 +572,22 @@ test("a legacy sync cannot receive or acknowledge a direct message already queue
   assert.equal((await conversationSync(house)).pending[0]?.event.id, id);
 });
 
+test("after a house restart an owner can queue a direct message for a known modern recipient before it reconnects", async (t) => {
+  const database = databaseFile(t);
+  const before = await open(t, database, undefined, owned);
+  await conversationSync(before);
+  await before.close();
+
+  const after = await open(t, database, undefined, owned);
+  const lee = await after.signIn();
+  const { ready } = await lee.stream();
+  assert.deepEqual(ready.house.direct, [{ agent_id: "fern", send: "ready", sleeping: false, connected: false }]);
+  const response = await lee.call(`${directPath}/say`, "POST", ready.connection, { text: "For when you reconnect" });
+  assert.equal(response.status, 200);
+  const { id } = await response.json() as HouseSpeechResult;
+  assert.equal((await conversationSync(after)).pending[0]?.event.id, id);
+});
+
 test("a direct image copy is readable only by its owner and the pending recipient", async (t) => {
   const house = await open(t, undefined, undefined, owned);
   await conversationSync(house);
@@ -571,12 +609,38 @@ test("a direct image copy is readable only by its owner and the pending recipien
   const copy = await lee.call(`/api${path}`);
   assert.equal(copy.status, 200);
   assert.equal(copy.headers.get("content-type"), "image/png");
+  assert.match(copy.headers.get("cache-control") ?? "", /\bprivate\b/);
+  assert.equal(copy.headers.get("vary"), "Cookie");
   assert.deepEqual(Buffer.from(await copy.arrayBuffer()), Buffer.from(png, "base64"));
   assert.equal((await sam.call(`/api${path}`)).status, 404);
-  assert.equal((await house.agent(path)).status, 200);
+  const pendingCopy = await house.agent(path);
+  assert.equal(pendingCopy.status, 200);
+  assert.equal(pendingCopy.headers.get("cache-control"), "no-store");
   await conversationSync(house, awake, [delivery.event.id]);
   assert.equal((await house.agent(path)).status, 404);
   assert.equal((await lee.call(`/api${path}`)).status, 200);
+});
+
+test("a legacy plugin receives a person's room speech without the attached image", async (t) => {
+  const house = await open(t);
+  await house.agent("/rooms/living/enter", "POST");
+  const lee = await house.signIn();
+  const tab = await lee.stream();
+  await tab.enter("living");
+  const sent = await lee.call("/api/rooms/living/say", "POST", tab.ready.connection, {
+    text: "See attached", images: [{ name: "photo.png", data: png }],
+  });
+  assert.equal(sent.status, 200);
+  const { id } = await sent.json() as HouseSpeechResult;
+  const sync = await house.agent("/sync", "POST", { status: awake });
+  const { pending } = await sync.json() as HouseSyncResult;
+  const message = pending.find(({ event }) => event.id === id)?.event;
+  assert.ok(message?.kind === "speech");
+  assert.equal(message.images, undefined);
+  const history = await (await lee.call("/api/rooms/living/history")).json() as HouseHistory;
+  const saved = history.events.find((event) => event.id === id);
+  assert.ok(saved?.kind === "speech");
+  assert.equal(saved.images?.[0]?.name, "photo.png");
 });
 
 test("an unsupported image refuses the whole room speech even if another image is valid", async (t) => {
