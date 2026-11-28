@@ -37,7 +37,7 @@ Sentinel の承認は未実装だが、当初の設計では配置ごとの Web 
 
 ### 本 ADR で決定しないこと
 
-- 承認待ちと答えを運ぶ方式は、承認を実装するときの ADR で確かめる。承認の欄の開き方と画面、答えを取り込む契約の詳細は [家の仕様書](../house.md) と [Sentinel の設定仕様](../sentinel-config.md) に委ねる。
+- 承認待ちと答えを運ぶ方式、新しい承認待ちをオーナーに知らせる方法は、承認を実装するときの ADR で決める。承認の欄の開き方と画面、答えを取り込む契約の詳細は [家の仕様書](../house.md) と [Sentinel の設定仕様](../sentinel-config.md) に委ねる。
 - 個人のページの画面構成・パス、家のリンクの設定形式（委譲先: [UI 向けの API の仕様書](../ui-api.md) と [家の仕様書](../house.md)）。
 - 個人の部屋の名前・説明・定員（委譲先: 配置リポジトリの家の設定）。
 - 補助画面の配置（委譲先: [家の仕様書](../house.md) の「人の画面」）。
@@ -56,7 +56,7 @@ Sentinel の承認は未実装だが、当初の設計では配置ごとの Web 
 
 ## Related ADRs
 
-- Supersedes（一部）: [ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)（Decision 項 1（承認待ちの持ち主と答える場所）のうち、配置ごとの Web UI で答える点）。
+- Supersedes（一部）: [ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)（Decision 項 1（承認待ちの持ち主と答える場所）のうち、配置ごとの Web UI で答える点と、新しい承認待ちを Web Push か Slack で知らせる点）。
 - Supersedes（一部）: [ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md)（配置ごとの Web UI の会話と、アプリがその会話 API を使う方針）。
 - Supersedes: [ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ](0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)。
 - Supersedes: [ADR-0034 オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md)（配置ごとの会話に限定した決定。家の発言の画像は ADR-0078 で扱う）。

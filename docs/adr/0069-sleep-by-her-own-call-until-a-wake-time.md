@@ -124,6 +124,7 @@ runner は、制御の出来事をターンに割り込ませない。制御の�
 - Related: [ADR-0072 backend は数だけの metrics を別の待ち受けに出し、backup は眠りが済んだ時刻と比べて始める](0072-number-only-metrics-and-backups-after-sleep.md)
 - Related: [ADR-0073 receivers のプラグインは本体の status を読み、heartbeat に載せる様子を預けられる](0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md)（「起きた」出来事に載る様子）
 - Related: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（寝ている住人の扱い）
+- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（`reply` は本 ADR の Decision 項 1（寝るのはエージェントが決める）の「外のサービスにつながるものは CLI にする」の例外）。
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0018 A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる（Task の期限と上限）
 - Related: ADR-0022 サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする
