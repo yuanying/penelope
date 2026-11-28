@@ -1,6 +1,6 @@
 # 家のサーバー
 
-家は複数の penelope 配置がつながる独立したプロセスです。[ADR-0074](adr/0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) は配置とのつなぎ方、[ADR-0075](adr/0075-rooms-where-speech-starts-turns-of-awake-residents.md) は部屋と会話の決まりを定めます。人の接続と居場所の関係は [ADR-0090](adr/0090-keep-people-in-rooms-until-they-leave.md) で定めます。
+家は複数の penelope 配置がつながる独立したプロセスです。[ADR-0074](adr/0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) は配置とのつなぎ方、[ADR-0075](adr/0075-rooms-where-speech-starts-turns-of-awake-residents.md) は部屋と会話の決まりを定めます。人の接続と居場所の関係は [ADR-0082](adr/0082-keep-people-in-rooms-until-they-leave.md) で定めます。
 
 この仕様は家の HTTP API と `house` CLI を扱います。API の型は [`packages/contract/src/house.ts`](../packages/contract/src/house.ts) にあります。[receivers のプラグイン](receivers.md#家のプラグイン)と CLI は、サーバーと別のプロセスで動きます。
 

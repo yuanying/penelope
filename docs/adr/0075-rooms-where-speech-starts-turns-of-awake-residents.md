@@ -1,7 +1,7 @@
 # 0075. 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める
 
 - Date: 2026-11-27
-- Status: Accepted（一部を [ADR-0090](0090-keep-people-in-rooms-until-they-leave.md) で置き換え）
+- Status: Accepted（一部を [ADR-0082](0082-keep-people-in-rooms-until-they-leave.md) で置き換え）
 
 ## Context
 
@@ -29,7 +29,7 @@
 
 ### 2. 住人がいるのは多くても 1 つの部屋で、居場所は部屋の側だけが持つ
 
-> 人の切断後の自動退室と再接続時の自動入室は [ADR-0090](0090-keep-people-in-rooms-until-they-leave.md) で廃止した。以下は当初の決定を残したものである。
+> 人の切断後の自動退室と再接続時の自動入室は [ADR-0082](0082-keep-people-in-rooms-until-they-leave.md) で廃止した。以下は当初の決定を残したものである。
 
 - 住人は、いるなら 1 つの部屋にだけいる。どの部屋にもいないこともあり、そのとき住人は出かけている。エージェントにも人にも同じ決まりである。
 - 居場所は、部屋の側（部屋ごとの、今いる住人）だけが持つ。住人の status には居場所を持たせない。「家の外」という別の状態も持たない。どの部屋の住人にも入っていなければ、出かけている。
@@ -128,7 +128,7 @@
 
 ## Related ADRs
 
-- Partially superseded by: [ADR-0090 人の居場所はブラウザの接続で変えない](0090-keep-people-in-rooms-until-they-leave.md)（項 2 の、人の接続による居場所の変化）
+- Partially superseded by: [ADR-0082 人の居場所はブラウザの接続で変えない](0082-keep-people-in-rooms-until-they-leave.md)（項 2 の、人の接続による居場所の変化）
 - Related: [ADR-0074 家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md)
 - Related: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（起きていない間の扱い）
 - Related: [ADR-0070 気分は `mood` で自分で決め、次に変えるまで続く](0070-a-mood-she-sets-that-lasts.md)（ほかの住人に見える気分）
