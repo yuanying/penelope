@@ -126,7 +126,7 @@ receivers は Pod の 4 つ目のコンテナで、Slack・監視の警報・Git
 - Related: ADR-0014 sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける（receivers の TCP の口は外から呼ばれる口として確かめる）
 - Related: ADR-0020 コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す（自分で足すアラートの印の付け方はコネクタの文書に書く）
 - Related: ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ（オーナーへの知らせの仕組み）
-- Related: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの Web Push は廃止）。
+- Related: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの Web Push は廃止）。
 - Related: ADR-0028 Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す（Slack のプラグイン、外へ接続を張る種類）
 - Related（natsumi、このリポジトリの外）: ADR 0091「webhook の受け口を 1 つにし、届いたものの読み方は型としてコードに持つ」（前の形の受け口。URL と token を引き継ぐ）
 

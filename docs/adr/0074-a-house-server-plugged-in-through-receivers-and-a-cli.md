@@ -78,7 +78,7 @@ A2A の送り手を確かめる部品は backend にある。確かめ方は差�
 
 - package と image の名前、家の API の形、CLI の名前と引数、届け待ちの期限、家の設定の形（委譲先: 家の仕様書 `docs/house.md`。家を実装する作業単位で作る。プラグインの設定は [receivers の仕様書](../receivers.md) に足す）
 - 家が発行する token の形と配り方（委譲先: クラスタの外のエージェントを住ませるときの新しい ADR）
-- iPhone アプリへの組み込み（委譲先: そのときの新しい ADR。ADR-0063 の一本の木に足す形を見込む）
+- iPhone アプリへの組み込み（委譲先: ADR-0080）
 - 家の場所、住人の一覧、gated と OAuth の値、backup の置き場と間隔（委譲先: 配置のリポジトリ）
 
 ## Consequences
@@ -101,7 +101,7 @@ A2A の送り手を確かめる部品は backend にある。確かめ方は差�
 
 ## Related ADRs
 
-- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（1 対 1 の保管・配送、発言の出口と家の停止時の扱い）。
+- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（本 ADR の Decision 冒頭（適用範囲）の従来の 1 対 1 の口を変えない点、項 2（家が正として持つのは、居場所と会話だけ）の部屋だけを対象とする保管、項 3（配置からは、プラグイン・CLI・コネクタの 3 つで差し込む）の CLI による発言と runner が家に送らない点、項 4（家は発言と出入りを残し、住人ごとに少なくとも 1 回届ける）の部屋だけを対象とする配送、項 6（家が止まっているときと、家の backup）の 1 対 1 が家に依らない点）。
 - Related: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（家の中の決まり）
 - Related: [ADR-0073 receivers のプラグインは本体の status を読み、heartbeat に載せる様子を預けられる](0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md)
 - Related: [ADR-0068 眠気は backend が 1 つの値にし、元の事実と並べてターンの始まりと heartbeat に渡す](0068-sleepiness-as-one-value-with-its-facts.md)・[ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)・[ADR-0070 気分は `mood` で自分で決め、次に変えるまで続く](0070-a-mood-she-sets-that-lasts.md)（status の正）
@@ -118,7 +118,7 @@ A2A の送り手を確かめる部品は backend にある。確かめ方は差�
 - Related: ADR-0035 道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる
 - Related: ADR-0048 A2A は `ask-agent` で名前を指定して頼み、裏の仕事で返事を待つ（エージェントどうしの依頼は変えない）
 - Related: ADR-0063 複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る
-- Related: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)（iPhone アプリは家に接続する。Passive View の方針は維持）。
+- Related: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)（「本 ADR で決定しないこと」の iPhone アプリへの組み込み。Passive View の方針は維持）。
 
 ## References
 

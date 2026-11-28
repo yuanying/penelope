@@ -99,7 +99,7 @@ ADR-0012 は「戻せる形を保つ」「並べて確かめる」を条件に�
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 - Related: ADR-0012 なつみベースのペネロペからは、並べて立ち上げてから切り替え、戻せる形を保つ（ペネロペのための条件。本 ADR の 3 人には「並べて確かめる」「戻せる形を保つ」を当てはめない）
 - Related: ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ
-- Related: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（移行当時の Web Push。現在の話し口は家）。
+- Related: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（移行当時の Web Push。現在の話し口は家）。
 - Related（natsumi、このリポジトリの外）: ADR 0046「モデルの経路に名前を付けて並べ、本人が手で切り替える」
 
 ## References

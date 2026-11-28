@@ -37,7 +37,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0031 | [起きている時間に何もない時間が続いたら、backend が heartbeat の出来事を入れる](0031-a-heartbeat-event-after-quiet-minutes-in-awake-hours.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md)・[ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md)・[ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で置き換え） |
 | 0032 | [返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md) | Accepted（一部を [ADR-0078](0078-route-replies-through-the-house.md) で置き換え） |
 | 0033 | [Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す](0033-slack-posts-through-slackctl-with-the-token-stand-in.md) | Accepted |
-| 0034 | [オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md) | Superseded by [ADR-0079](0079-open-resident-pages-from-the-house.md) |
+| 0034 | [オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md) | Superseded by [ADR-0078](0078-route-replies-through-the-house.md) and [ADR-0079](0079-open-resident-pages-from-the-house.md) |
 | 0035 | [道具の使い方とどの配置にも同じ skill は sandbox の image に skill として入れ、オーナー・記憶の後に並べる](0035-tool-usage-and-shared-skills-as-image-skills.md) | Accepted（一部を ADR-0042 で置き換え） |
 | 0036 | [アバターは記憶の中で育て、最初の 1 回だけ backend が選んだアバターを写す](0036-the-avatar-grown-in-memory-copied-once-by-the-backend.md) | Accepted |
 | 0037 | [main への push ごとに image を `main` の tag で出し、脆弱性対応の係の PR がマージされたらすぐにパッチ版を出す](0037-a-main-image-to-scan-and-a-vulnerability-fix-released-at-once.md) | Accepted |
@@ -80,7 +80,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0076 | [人への配信は表示中の部屋で絞らず、入退室の応答で画面を移さない](0076-keep-house-stream-and-navigation-independent.md) | Accepted |
 | 0077 | [畳んだターンのツール呼び出しを、呼び出しと結果の組で残す](0077-keep-folded-tool-calls-as-tool-messages.md) | Accepted |
 | 0078 | [`reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md) | Accepted |
-| 0079 | [会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md) | Accepted |
+| 0079 | [会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md) | Accepted |
 | 0080 | [iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md) | Accepted |
 | 0081 | [`ask-agent` の終わりの出来事には頼んだ本文も載せる](0081-include-the-request-in-ask-agent-completion.md) | Accepted |
 | 0082 | [人の居場所はブラウザの接続で変えない](0082-keep-people-in-rooms-until-they-leave.md) | Accepted |

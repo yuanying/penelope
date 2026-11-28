@@ -11,7 +11,7 @@ iPhone アプリの当初の設計では、アプリが配置ごとに backend �
 
 ### 1. アプリは家の会話を読み、家で話す
 
-- アプリの接続先を複数の配置から一つの家へ替える。家の間取りと居場所を見て、部屋の会話と、出かけている住人との 1 対 1 を読み書きする。発言の表情と画像は家の Web と同じ記録から表示する。アプリを閉じることは退室ではなく、ブラウザから使うときと同じ居場所を使う。個人のページを開くときはブラウザーを使い、家の認証情報を渡さない。
+- アプリの接続先を複数の配置から一つの家へ替える。家の間取りと居場所を見て、部屋の会話を読み書きする。1 対 1 の履歴は相手の居場所にかかわらず読める。1 対 1 の発言を送れるのは相手が出かけている間だけである。発言の表情と画像は家の Web と同じ記録から表示する。アプリを閉じることは退室ではなく、ブラウザから使うときと同じ居場所を使う。個人のページを開くときはブラウザーを使い、家の認証情報を渡さない。
 - 配置ごとのアプリ用 token・会話の要約の流れ・既読・APNs を backend から外す。各配置の会話を購読する一覧は作らない。失敗を見たことを示す活動の記録は残す。
 - `apple/` の Xcode プロジェクトと Linux でも確かめられる Swift の Core、一本の Passive View と状態機械の構成は使い続ける。配置ごとの会話・一覧を前提にした画面と通信は残さない。TestFlight の内部テストだけに配り、PR の検証に署名の資格を渡さない方針も変えない。
 
@@ -40,7 +40,8 @@ iPhone アプリの当初の設計では、アプリが配置ごとに backend �
 - Supersedes（一部）: [ADR-0063 複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る](0063-native-iphone-app-with-a-passive-view-tree.md)（配置ごとの一覧、会話、接続先。Passive View と Core は残す）。
 - Supersedes: [ADR-0064 iPhone の Bearer token は配置の backend が端末ごとに発行する](0064-backend-issued-bearer-tokens-for-iphone.md)、[ADR-0065 iPhone へは各 backend が本文を暗号化して APNs で知らせる](0065-encrypted-reply-notifications-over-apns.md)、[ADR-0066 一覧は配置ごとの要約の流れを読み、未読は backend が持つ](0066-agent-summary-stream-and-shared-unread.md)。
 - Supersedes（一部）: [ADR-0067 iPhone アプリは CI で署名し、TestFlight の内部テストだけに配る](0067-distribute-iphone-builds-through-internal-testflight.md)（APNs の送信元のみ。TestFlight 版が production を使う点と、署名・配布の決定は変えない）。
-- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)、[ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)。
+- Related: [ADR-0074 家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md)（「本 ADR で決定しないこと」の iPhone アプリへの組み込みの委譲元）。
+- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)、[ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)。
 - Related: [ADR-0082 人の居場所はブラウザの接続で変えない](0082-keep-people-in-rooms-until-they-leave.md)（人の居場所は接続先の端末や接続の開閉では変わらない）。
 
 ## References

@@ -89,7 +89,7 @@
 - Related: ADR-0020 コネクタは Sentinel の登録と使い方の文書の組にし、文書の一覧をシステムプロンプトに出す
 - Related: ADR-0026 なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない
 - Related: ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ（知らせに画像の数を添える）
-- Related: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの Web Push は廃止）。
+- Related: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの Web Push は廃止）。
 - Related: ADR-0034 オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける（同じ置き場と確かめ方をオーナーの画像に広げる）
 - Related（natsumi、このリポジトリの外）: ADR 0044「なつみは作業環境の sdctl で画像を作り、ポッポさんへの依頼で Slack に投稿する」、ADR 0045「なつみは reply_to_mac の返事に画像を添えて、本人に見せる」
 

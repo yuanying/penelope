@@ -1,4 +1,4 @@
-# 0079. 会話は家で行い、個人のページは家から開く
+# 0079. 会話する配置は家に住み、承認は家で答え、個人のページは家から開く
 
 - Date: 2026-11-28
 - Status: Accepted
@@ -24,27 +24,30 @@ Sentinel の承認は未実装だが、当初の設計では配置ごとの Web 
 - リンク先は gated の入口と、backend の既存のオーナー確認を使う。リンク先の有効なセッションがあれば再ログインしない。なければその配置でログインする。家に入れるというだけでは、記憶・活動の記録・設定の閲覧や変更を許さない。
 - 守る対象は、各配置の記憶・活動の記録・設定と、それぞれの認証情報である。リンクの設定が無いか有効な行き先と確認できないときはリンクを出さない。リンク先でオーナーを確かめられなければ、個人のページとその API はアクセスを断る。
 
-### 3. ミャオも家に住む
+### 3. `reply` でオーナーと話す配置は家に住む
 
-- ミャオも家の住人とし、「ミャオの部屋」をほかの個人の部屋と同じ説明の形と定員 3 で置く。ミャオの配置にも家の受信プラグイン、コネクタ、Sentinel の登録をそろえる。会話の入口は家と Slack である。
+- `reply` でオーナーと話す配置は、すべて家の住人にする。家の受信プラグイン、コネクタ、Sentinel の登録をそろえる。
+- この決まりをミャオにも適用する。ミャオも家に住み、家と Slack で話す。
 
 ### 4. 承認はその住人との 1 対 1 の欄で答える
 
 - Sentinel の承認を実装するとき、オーナーは家で、その住人との 1 対 1 の欄から許すか断るかを選ぶ。承認の答えは発言として送らず、エージェントの入力にも通さない。発言を送れる居場所の条件は承認の権限とは別である。
-- 通信は配置から家に向ける。配置の receivers の家のプラグインが承認待ちを家に送り、家から答えを取る。家は各配置の管理口を呼ばない。承認待ちの正と許可の判定は Sentinel に残す。
+- 勧める方式は、配置の receivers の家のプラグインが承認待ちを家に送り、家から答えを取る形である。プラグインは backend を経由して Sentinel に届き、Sentinel の管理口は receivers に開かない。家は各配置の管理口を呼ばない。承認待ちの正と許可の判定は Sentinel に残す。
 - 家の画面で承認待ちを見て答えられるのは、その住人に結び付いたオーナーだけである。オーナーを認証できない、答えを承認待ちに結び付けられない、または家から答えが届かないときは、通信を通さない。
 
 ### 本 ADR で決定しないこと
 
-- 承認の欄の開き方と画面、配置から答えを取り込む契約（委譲先: 承認を実装する際の [家の仕様書](../house.md) と [Sentinel の設定仕様](../sentinel-config.md)）。
+- 承認待ちと答えを運ぶ方式は、承認を実装するときの ADR で確かめる。承認の欄の開き方と画面、答えを取り込む契約の詳細は [家の仕様書](../house.md) と [Sentinel の設定仕様](../sentinel-config.md) に委ねる。
 - 個人のページの画面構成・パス、家のリンクの設定形式（委譲先: [UI 向けの API の仕様書](../ui-api.md) と [家の仕様書](../house.md)）。
+- 個人の部屋の名前・説明・定員（委譲先: 配置リポジトリの家の設定）。
 - 補助画面の配置や、家でブラウザーの通知を扱うこと（委譲先: [家の仕様書](../house.md) の「人の画面」。本 ADR では家の Web Push を追加しない）。
 
 ## Consequences
 
 - 会話の入口は家になり、配置ごとのページを会話のために開く必要がなくなる。設定や記録を開くときは、配置ごとにログインを求められる場合がある。
 - 家の認証障害で会話が開けなくても、オーナーはリンク先を直接開いて記憶・活動の記録・設定を扱える。逆に、各 backend に入れなくても家の会話は読める。
-- 旧 Web UI の会話履歴、ブラウザー通知の購読、既読は家の会話に持ち越さない。
+- 旧 Web UI の会話履歴、ブラウザー通知の購読、既読は家の会話に持ち越さない。配置ごとの Web Push を廃止してから家の iPhone アプリが出るまで、1 対 1 の返事の通知はない。
+- 勧めた承認の方式では、家が侵害されると、つながっているすべての配置に対してオーナーを装った承認の答えを出され得る。個人のページの認証を分けても、承認の入口を家に置くことによるリスクは残る。
 
 ## Alternatives Considered
 
@@ -53,11 +56,11 @@ Sentinel の承認は未実装だが、当初の設計では配置ごとの Web 
 
 ## Related ADRs
 
-- Supersedes（一部）: [ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)（Decision 項 1（承認待ちの持ち主と答える場所）のうち、配置ごとの Web UI で答える点と、家と配置の間で承認待ちと答えを渡す向き）。
+- Supersedes（一部）: [ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)（Decision 項 1（承認待ちの持ち主と答える場所）のうち、配置ごとの Web UI で答える点）。
 - Supersedes（一部）: [ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md)（配置ごとの Web UI の会話と、アプリがその会話 API を使う方針）。
 - Supersedes: [ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ](0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)。
 - Supersedes: [ADR-0034 オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md)（配置ごとの会話に限定した決定。家の発言の画像は ADR-0078 で扱う）。
-- Supersedes（一部）: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)（住人から開くリンク先）。
+- Supersedes（一部）: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)のうち、Decision 項 6（様子を見せるのは、部屋にいる住人だけ）と項 9（家は自分の画面を持つ）の、住人から開くリンク先。
 - Related: [ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる](0010-github-oauth-for-people-tokenreview-for-a2a.md)（backend のオーナー確認を維持）。
 - Related: [ADR-0043 モデルと思考の深さはオーナーが設定画面で選ぶ](0043-the-owner-picks-the-model-and-thinking-level-in-the-web-ui.md)、[ADR-0057 オーナーによる記憶の編集と復元は、backend が 1 ファイルずつ確定する](0057-edit-existing-memory-in-the-backend.md)（個人のページに残る）。
 - Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)、[ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)。
@@ -67,4 +70,4 @@ Sentinel の承認は未実装だが、当初の設計では配置ごとの Web 
 - [Sentinel の設定仕様](../sentinel-config.md) の「設定」（2026-11-28 確認）: 既定を `ask` にする機能と承認は未実装。
 - [家の仕様書](../house.md) の「設定」「人のログイン」「人の画面」（2026-11-28 確認）: 住人ごとのリンクと家のログイン。
 - [UI 向けの API の仕様書](../ui-api.md) の「認証」「メッセージを送る」「会話の既読」「要約の流れ（SSE）」「Web Push の購読」「活動の記録」「設定」「記憶」と [backend の UI API](../../packages/backend/src/ui-api.ts) の `uiHandler`（2026-11-28 確認）。
-- 家の初期配置の決定「部屋」「住人」と入口の配置記録（運用記録、2026-11-28 確認）: 個人の部屋は定員 3。ミャオは入居対象外だった。各 backend の公開側の手前には gated がある。
+- 家の初期配置の運用記録 `notes/r2-plan.md` の「本人の答え」と、配置リポジトリ `yuanying/fleet-infra` の各 backend の入口の設定（非公開、2026-11-28 確認）: ミャオは初期の入居対象外。各 backend の公開側の手前には gated がある。

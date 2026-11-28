@@ -88,7 +88,7 @@ penelope には、オーナーへの知らせの仕組みが無い。エージ�
 
 ## Related ADRs
 
-- Superseded by: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)。
+- Superseded by: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)。
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく（backend の状態の SQLite）
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する（Sentinel が受け持つのは sandbox の外向き）
 - Related: ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える（承認待ちの知らせは本 ADR の範囲外）

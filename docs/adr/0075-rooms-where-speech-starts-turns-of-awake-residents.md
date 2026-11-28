@@ -128,8 +128,8 @@
 
 ## Related ADRs
 
-- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（出かけている相手との話し方、発言の道具と答える口）。
-- Superseded by（一部）: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（住人から開くリンク先）。
+- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（本 ADR の Decision 冒頭（適用範囲）の居場所と 1 対 1 を分ける点、項 3（部屋に入るのも出るのも、住人自身の操作）の家を通さない 1 対 1、項 4（発言と入室は、同じ部屋の起きている住人のターンを始める）のオーナーの判定元と自分の発言を戻す点、項 7（答える口は、宛先に入った住人への出来事にだけ付ける）の発言と答える口）。
+- Superseded by（一部）: [ADR-0079 会話する配置は家に住み、承認は家で答え、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（本 ADR の Decision 項 6（様子を見せるのは、部屋にいる住人だけ）と項 9（家は自分の画面を持つ）の、住人から開くリンク先）。
 - Partially superseded by: [ADR-0082 人の居場所はブラウザの接続で変えない](0082-keep-people-in-rooms-until-they-leave.md)（項 2 の、人の接続による居場所の変化）
 - Related: [ADR-0074 家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md)
 - Related: [ADR-0069 エージェントは `sleep` で自分で眠り、起きる時刻まで出来事を受け取らない](0069-sleep-by-her-own-call-until-a-wake-time.md)（起きていない間の扱い）
