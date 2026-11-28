@@ -31,6 +31,8 @@ export type Snapshot = {
   undelivered: ReadonlyMap<string, readonly HouseActor[]>;
   /** The `seq` of the newest event of the person's room that was on the screen. */
   seen: number | undefined;
+  /** Replies received live while their direct conversation was closed, by resident. */
+  directUnread: ReadonlyMap<string, number>;
   notice: Notice | undefined;
 };
 
@@ -63,6 +65,7 @@ const INITIAL: Snapshot = {
   logs: new Map(),
   undelivered: new Map(),
   seen: undefined,
+  directUnread: new Map(),
   notice: undefined,
 };
 
@@ -129,6 +132,11 @@ export class Session {
 
   show(conversation: Conversation | undefined): void {
     this.viewed = conversation;
+    if (conversation?.kind === "dm" && this.snapshot.directUnread.has(conversation.id)) {
+      const directUnread = new Map(this.snapshot.directUnread);
+      directUnread.delete(conversation.id);
+      this.set({ directUnread });
+    }
     this.refreshShown();
   }
 
@@ -264,7 +272,16 @@ export class Session {
       const event = JSON.parse((message as MessageEvent<string>).data) as HousePersonDirectEvent;
       const agent = event.dm.agent_id;
       if (event.dm.owner_id !== house?.you.id || !directWith(house, agent)) return;
-      this.updateLog(logKey({ kind: "dm", id: agent }), (log) => withEvent(log, event, line.connection));
+      const key = logKey({ kind: "dm", id: agent });
+      const log = this.snapshot.logs.get(key) ?? EMPTY_LOG;
+      const next = withEvent(log, event, line.connection);
+      if (next === log) return;
+      const open = this.viewed?.kind === "dm" && this.viewed.id === agent;
+      const unread = event.actor.kind === "agent" && !open;
+      this.set({
+        logs: new Map(this.snapshot.logs).set(key, next),
+        ...(unread ? { directUnread: new Map(this.snapshot.directUnread).set(agent, (this.snapshot.directUnread.get(agent) ?? 0) + 1) } : {}),
+      });
     });
     source.addEventListener("error", () => {
       if (source !== this.source) return;
@@ -358,13 +375,18 @@ export class Session {
   private setHouse(house: HousePersonView, change?: Partial<Snapshot>): void {
     const moved = roomOf(house, house.you.id) !== myRoom(this.snapshot);
     const removed = this.snapshot.house?.direct.filter(({ agent_id }) => !directWith(house, agent_id)) ?? [];
-    let logs = this.snapshot.logs;
+    let { logs, directUnread } = this.snapshot;
     if (removed.length > 0) {
-      const remaining = new Map(logs);
-      for (const { agent_id: id } of removed) remaining.delete(logKey({ kind: "dm", id }));
-      logs = remaining;
+      const remainingLogs = new Map(logs);
+      const remainingUnread = new Map(directUnread);
+      for (const { agent_id: id } of removed) {
+        remainingLogs.delete(logKey({ kind: "dm", id }));
+        remainingUnread.delete(id);
+      }
+      logs = remainingLogs;
+      directUnread = remainingUnread;
     }
-    this.set({ ...change, logs, house, ...(moved ? { seen: undefined } : {}) });
+    this.set({ ...change, logs, directUnread, house, ...(moved ? { seen: undefined } : {}) });
     this.refreshShown();
     if (moved) this.see();
   }

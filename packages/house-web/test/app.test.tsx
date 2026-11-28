@@ -52,136 +52,206 @@ function withAwayIvy(house: FakeHouse, availability: Partial<Omit<HouseDirectAva
 
 const ivyDirect = () => screen.getByRole("link", { name: "Ivy との1対1を開く" });
 
-it("opens an away resident's direct conversation without entering or reopening the stream", async () => {
-  const house = new FakeHouse();
-  house.house = withAwayIvy(house);
-  house.direct(directSpeech(IVY, "I am out"), { heard: false });
-  await open(house);
-  fireEvent.click(ivyDirect());
-
-  await screen.findByText("I am out");
-  await say("Can you see this?", "Ivy への発言");
-  assert.deepEqual(house.sentDirect, [{ agent: IVY.id, message: { text: "Can you see this?" }, connection: "c-1" }]);
-  assert.deepEqual(house.writes, ["POST /api/dms/ivy/say"]);
-  assert.deepEqual(house.sources.map(({ url }) => url), ["/api/stream"]);
-});
-
-it("keeps direct history readable after the resident enters a room, but cannot send there", async () => {
-  const house = new FakeHouse();
-  const inRoom = { ...house.house, direct: [{ agent_id: IVY.id, send: "in-room" as const, sleeping: false, connected: true }] };
-  house.house = withAwayIvy(house);
-  await open(house);
-  fireEvent.click(ivyDirect());
-  await act(async () => house.direct(directSpeech(IVY, "Before coming home")));
-  await act(async () => house.floor(inRoom));
-
-  await screen.findByText("Before coming home");
-  assert.ok(screen.getByText("相手は部屋にいます。1対1では送れません。"));
-  assert.equal(screen.getByRole("button", { name: "送信" }).getAttribute("aria-disabled"), "true");
-});
-
-it("explains why an older deployment cannot receive a direct message", async () => {
-  const house = new FakeHouse();
-  house.house = withAwayIvy(house, { send: "deployment-unsupported" });
-  await open(house);
-  fireEvent.click(ivyDirect());
-
-  await screen.findByText("相手の配置はまだ1対1に対応していません。");
-  assert.equal(screen.getByRole("button", { name: "送信" }).getAttribute("aria-disabled"), "true");
-});
-
-it("offers to queue direct messages while a supported resident is disconnected", async () => {
-  const house = new FakeHouse();
-  house.house = withAwayIvy(house, { connected: false });
-  await open(house);
-  fireEvent.click(ivyDirect());
-
-  await screen.findByText("相手はつながっていません。発言は届け待ちになります。");
-  await say("Read it later", "Ivy への発言");
-  assert.deepEqual(house.sentDirect[0]?.message, { text: "Read it later" });
-});
-
-it("shows the sleeping notice only inside the direct conversation", async () => {
-  const house = new FakeHouse();
-  house.house = withAwayIvy(house, { sleeping: true });
-  await open(house);
-  assert.equal(screen.queryByText("寝ています。起きたら届きます"), null);
-  fireEvent.click(ivyDirect());
-  await screen.findByText("寝ています。起きたら届きます");
-});
-
-it("updates the original direct message when the house reports an expired delivery", async () => {
-  const house = new FakeHouse();
-  house.house = withAwayIvy(house);
-  const pending = { ...directSpeech(IVY, "Did it reach you?", LEE), delivery_status: "pending" } as const;
-  house.direct(pending, { heard: false });
-  await open(house);
-  fireEvent.click(ivyDirect());
-
-  await screen.findByText("Did it reach you?");
-  assert.equal(screen.queryByText("配信期限切れ"), null);
-  await act(async () => house.direct({ ...pending, delivery_status: "expired" }));
-  await screen.findByText("配信期限切れ");
-  assert.equal(screen.getAllByText("Did it reach you?").length, 1);
-});
-
-it("catches up expired deliveries on older loaded pages after the stream reconnects", async () => {
-  const house = new FakeHouse();
-  house.pageSize = 1;
-  house.house = withAwayIvy(house);
-  const pending = { ...directSpeech(IVY, "Wait until morning", LEE), delivery_status: "pending" } as const;
-  house.direct(pending, { heard: false });
-  house.direct(directSpeech(IVY, "A newer reply"), { heard: false });
-  await open(house);
-  fireEvent.click(ivyDirect());
-  fireEvent.click(await screen.findByRole("button", { name: "前の会話を読む" }));
-  await screen.findByText("Wait until morning");
-
-  await act(async () => {
-    house.drop();
-    house.direct({ ...pending, delivery_status: "expired" }, { heard: false });
-    house.ready();
-  });
-  await screen.findByText("配信期限切れ");
-});
-
-it("links to a valid personal page without reusing the old chat URL", async () => {
-  const house = new FakeHouse();
-  house.house = { ...withAwayIvy(house), away: [{ ...IVY, personal_url: "https://ivy.example.com/", chat_url: "https://old.example.com/" }, { ...FERN, personal_url: "http://fern.example.com/" }] };
-  await open(house);
-  assert.equal(screen.getByRole("link", { name: "Ivy の個人ページ（別のタブで開く）" }).getAttribute("href"), "https://ivy.example.com/");
-  assert.equal(screen.queryByRole("link", { name: /Fern.*個人ページ/ }), null);
-});
-
-it("shows a different avatar when the speaker's expression changes and falls back to neutral", async () => {
-  const house = new FakeHouse();
-  const resident = { ...IVY, avatar_urls: { happy: "https://example.com/happy.webp", neutral: "https://example.com/neutral.webp" } };
-  house.house = { ...withAwayIvy(house), away: [resident] };
-  house.direct({ ...directSpeech(IVY, "Good news"), expression: "happy" }, { heard: false });
-  house.direct({ ...directSpeech(IVY, "Let me think"), expression: "thinking" }, { heard: false });
-  await open(house);
-  fireEvent.click(ivyDirect());
-
-  const log = await screen.findByRole("region", { name: "Ivy との1対1" });
-  await within(log).findByText("Let me think");
-  const pictures = [...log.querySelectorAll(".speech-avatar img")].map((image) => image.getAttribute("src"));
-  assert.deepEqual(pictures, ["https://example.com/happy.webp", "https://example.com/neutral.webp"]);
-});
-
-it("blocks a non-image attachment until removed, then lets the user send just the text", async () => {
-  const house = await open();
-  const picker = screen.getByLabelText("画像を添付する");
-  await act(async () => fireEvent.change(picker, { target: { files: [new File(["not a picture"], "letter.png", { type: "image/png" })] } }));
-  await screen.findByText(/PNG・JPEG・GIF・WebP の画像だけ/);
-  await say("hello");
-  assert.deepEqual(house.writes, []);
-
-  fireEvent.click(screen.getByRole("button", { name: "letter.png を外す" }));
-  await act(async () => fireEvent.click(screen.getByRole("button", { name: "送信" })));
-  assert.deepEqual(house.said[0]?.speech, { text: "hello" });
-});
-
 describe("the house's screen", () => {
+  it("opens an away resident's direct conversation without entering or reopening the stream", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house);
+    house.direct(directSpeech(IVY, "I am out"), { heard: false });
+    await open(house);
+    fireEvent.click(ivyDirect());
+
+    await screen.findByText("I am out");
+    await say("Can you see this?", "Ivy への発言");
+    assert.deepEqual(house.sentDirect, [{ agent: IVY.id, message: { text: "Can you see this?" }, connection: "c-1" }]);
+    assert.deepEqual(house.writes, ["POST /api/dms/ivy/say"]);
+    assert.deepEqual(house.sources.map(({ url }) => url), ["/api/stream"]);
+  });
+
+  it("counts new direct replies on the plan until their conversation is opened", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house);
+    house.direct(directSpeech(IVY, "Old history"), { heard: false });
+    await open(house);
+    ivyDirect();
+
+    const first = directSpeech(IVY, "First reply");
+    await act(async () => {
+      house.direct(first);
+      house.direct(first);
+      house.direct(directSpeech(IVY, "Owner's message", LEE));
+      house.direct(directSpeech(IVY, "Second reply"));
+    });
+    const link = screen.getByRole("link", { name: "Ivy との1対1を開く（まだ読んでいない発言 2 件）" });
+    assert.match(link.textContent ?? "", /2/);
+    fireEvent.click(link);
+
+    await screen.findByText("Second reply");
+    await act(async () => house.direct(directSpeech(IVY, "Reply while open")));
+    fireEvent.click(screen.getByRole("button", { name: "間取りに戻る" }));
+    assert.equal(ivyDirect().textContent, "1対1");
+    assert.deepEqual(house.writes, []);
+  });
+
+  it("keeps direct history readable after the resident enters a room, but cannot send there", async () => {
+    const house = new FakeHouse();
+    const inRoom = { ...house.house, direct: [{ agent_id: IVY.id, send: "in-room" as const, sleeping: false, connected: true }] };
+    house.house = withAwayIvy(house);
+    await open(house);
+    fireEvent.click(ivyDirect());
+    await act(async () => house.direct(directSpeech(IVY, "Before coming home")));
+    await act(async () => house.floor(inRoom));
+
+    await screen.findByText("Before coming home");
+    assert.ok(screen.getByText("相手は部屋にいます。1対1では送れません。"));
+    assert.equal(screen.getByRole("button", { name: "送信" }).getAttribute("aria-disabled"), "true");
+  });
+
+  it("sets a refused direct message aside if the resident entered a room before it arrived", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house);
+    await open(house);
+    fireEvent.click(ivyDirect());
+    house.refusals.say = "agent-in-room";
+    await say("Just missed you", "Ivy への発言");
+
+    const unsent = await screen.findByRole("group", { name: "送れなかった発言" });
+    within(unsent).getByText("Just missed you");
+    within(unsent).getByText("相手は部屋にいます。1対1では送れません。");
+    assert.deepEqual(house.sentDirect, []);
+  });
+
+  it("explains why an older deployment cannot receive a direct message", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house, { send: "deployment-unsupported" });
+    await open(house);
+    fireEvent.click(ivyDirect());
+
+    await screen.findByText("相手の配置はまだ1対1に対応していません。");
+    assert.equal(screen.getByRole("button", { name: "送信" }).getAttribute("aria-disabled"), "true");
+  });
+
+  it("offers to queue direct messages while a supported resident is disconnected", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house, { connected: false });
+    await open(house);
+    fireEvent.click(ivyDirect());
+
+    await screen.findByText("相手はつながっていません。発言は届け待ちになります。");
+    await say("Read it later", "Ivy への発言");
+    assert.deepEqual(house.sentDirect[0]?.message, { text: "Read it later" });
+  });
+
+  it("shows the sleeping notice only inside the direct conversation", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house, { sleeping: true });
+    await open(house);
+    assert.equal(screen.queryByText("寝ています。起きたら届きます"), null);
+    fireEvent.click(ivyDirect());
+    await screen.findByText("寝ています。起きたら届きます");
+  });
+
+  it("updates the original direct message when the house reports an expired delivery", async () => {
+    const house = new FakeHouse();
+    house.house = withAwayIvy(house);
+    const pending = { ...directSpeech(IVY, "Did it reach you?", LEE), delivery_status: "pending" } as const;
+    house.direct(pending, { heard: false });
+    await open(house);
+    fireEvent.click(ivyDirect());
+
+    await screen.findByText("Did it reach you?");
+    assert.equal(screen.queryByText("配信期限切れ"), null);
+    await act(async () => house.direct({ ...pending, delivery_status: "expired" }));
+    await screen.findByText("配信期限切れ");
+    assert.equal(screen.getAllByText("Did it reach you?").length, 1);
+  });
+
+  it("catches up expired deliveries on older loaded pages after the stream reconnects", async () => {
+    const house = new FakeHouse();
+    house.pageSize = 1;
+    house.house = withAwayIvy(house);
+    const pending = { ...directSpeech(IVY, "Wait until morning", LEE), delivery_status: "pending" } as const;
+    house.direct(pending, { heard: false });
+    house.direct(directSpeech(IVY, "A newer reply"), { heard: false });
+    await open(house);
+    fireEvent.click(ivyDirect());
+    fireEvent.click(await screen.findByRole("button", { name: "前の会話を読む" }));
+    await screen.findByText("Wait until morning");
+
+    await act(async () => {
+      house.drop();
+      house.direct({ ...pending, delivery_status: "expired" }, { heard: false });
+      house.ready();
+    });
+    await screen.findByText("配信期限切れ");
+  });
+
+  it("links to a valid personal page without reusing the old chat URL", async () => {
+    const house = new FakeHouse();
+    house.house = { ...withAwayIvy(house), away: [{ ...IVY, personal_url: "https://ivy.example.com/", chat_url: "https://old.example.com/" }, { ...FERN, personal_url: "http://fern.example.com/" }] };
+    await open(house);
+    assert.equal(screen.getByRole("link", { name: "Ivy の個人ページ（別のタブで開く）" }).getAttribute("href"), "https://ivy.example.com/");
+    assert.equal(screen.queryByRole("link", { name: /Fern.*個人ページ/ }), null);
+  });
+
+  it("shows a different avatar when the speaker's expression changes and falls back to neutral", async () => {
+    const house = new FakeHouse();
+    const resident = { ...IVY, avatar_urls: { happy: "https://example.com/happy.webp", neutral: "https://example.com/neutral.webp" } };
+    house.house = { ...withAwayIvy(house), away: [resident] };
+    house.direct({ ...directSpeech(IVY, "Good news"), expression: "happy" }, { heard: false });
+    house.direct({ ...directSpeech(IVY, "Let me think"), expression: "thinking" }, { heard: false });
+    await open(house);
+    fireEvent.click(ivyDirect());
+
+    const log = await screen.findByRole("region", { name: "Ivy との1対1" });
+    await within(log).findByText("Let me think");
+    const pictures = [...log.querySelectorAll(".speech-avatar img")].map((image) => image.getAttribute("src"));
+    assert.deepEqual(pictures, ["https://example.com/happy.webp", "https://example.com/neutral.webp"]);
+  });
+
+  it("blocks a non-image attachment until removed, then lets the user send just the text", async () => {
+    const house = await open();
+    const picker = screen.getByLabelText("画像を添付する");
+    await act(async () => fireEvent.change(picker, { target: { files: [new File(["not a picture"], "letter.png", { type: "image/png" })] } }));
+    await screen.findByText(/PNG・JPEG・GIF・WebP の画像だけ/);
+    await say("hello");
+    assert.deepEqual(house.writes, []);
+
+    fireEvent.click(screen.getByRole("button", { name: "letter.png を外す" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "送信" })));
+    assert.deepEqual(house.said[0]?.speech, { text: "hello" });
+  });
+
+  it("lets the owner send the remaining four valid images after removing an attachment", async () => {
+    const house = await open();
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+    const files = [new File(["not an image"], "broken.png"), ...[1, 2, 3, 4].map((n) => new File([png], `${n}.png`))];
+    await act(async () => fireEvent.change(screen.getByLabelText("画像を添付する"), { target: { files } }));
+    await screen.findByText("画像は 4 枚までです。");
+
+    fireEvent.click(screen.getByRole("button", { name: "broken.png を外す" }));
+    await say("Four photos");
+    await waitFor(() => assert.deepEqual(house.said[0]?.speech.images?.map(({ name }) => name), ["1.png", "2.png", "3.png", "4.png"]));
+  });
+
+  it("blocks another send and shows progress until an image send finishes", async () => {
+    const house = await open();
+    const answer = house.hold("say");
+    const png = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a);
+    await act(async () => fireEvent.change(screen.getByLabelText("画像を添付する"), { target: { files: [new File([png], "photo.png")] } }));
+    await say("First message");
+    await screen.findByText("送っています…（画像 1 枚）");
+    await waitFor(() => assert.equal(house.said.length, 1));
+    await say("Next message");
+    const send = screen.getByRole("button", { name: "送信" });
+    assert.equal(send.getAttribute("aria-disabled"), "true");
+    assert.equal(screen.getByLabelText("Livingで話す").textContent, "Next message");
+    assert.equal(house.said.length, 1);
+
+    await act(async () => answer.give());
+    assert.equal(screen.queryByText("送っています…（画像 1 枚）"), null);
+    assert.notEqual(send.getAttribute("aria-disabled"), "true");
+  });
+
   // ADR-0075, 8: looking in is not entering. No one is told, and no one's turn starts.
   it("shows a room's record when it is looked into, and enters nothing", async () => {
     const house = new FakeHouse();

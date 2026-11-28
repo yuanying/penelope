@@ -28,11 +28,11 @@ export type Unsent = { key: number; text: string; to: readonly { id: string; nam
 let unsentKeys = 0;
 let attachmentKeys = 0;
 /** What is written for one room. It stays that room's when the person moves. */
-export type Writing = { draft: Draft; unsent: readonly Unsent[] };
+export type Writing = { draft: Draft; unsent: readonly Unsent[]; sendingImages: number };
 
 const EMPTY_DRAFT: Draft = { text: "", to: [], attachments: [] };
 const NO_OTHERS: readonly HousePersonOccupant[] = [];
-export const NOTHING_WRITTEN: Writing = { draft: EMPTY_DRAFT, unsent: [] };
+export const NOTHING_WRITTEN: Writing = { draft: EMPTY_DRAFT, unsent: [], sendingImages: 0 };
 
 export type SpeakProps = {
   target: { kind: "room"; name: string; others: readonly HousePersonOccupant[] } | { kind: "dm"; name: string };
@@ -48,46 +48,48 @@ export type SpeakProps = {
 const folded = (text: string) => text.replace(/[ぁ-ゖ]/g, (char) => String.fromCharCode(char.charCodeAt(0) + 0x60)).toLowerCase();
 
 export function Speak({ target, online, touch, writing, onWriting, onSay }: SpeakProps) {
-  const { draft, unsent } = writing;
+  const { draft, unsent, sendingImages } = writing;
+  const sending = useRef(false);
   const isRoom = target.kind === "room";
   const others = isRoom ? target.others : NO_OTHERS;
   const to = others.filter(({ id }) => draft.to.includes(id));
   const isPresent = (id: string) => others.some((resident) => resident.id === id);
   const candidates = others.filter(({ id }) => !draft.to.includes(id));
   const readyImages = draft.attachments.filter((image): image is ReadyImage => image.kind === "ready");
-  const imagesReady = readyImages.length === draft.attachments.length;
-  const canSend = online && imagesReady && draft.text.trim() !== "";
+  const imagesReady = readyImages.length === draft.attachments.length && readyImages.length <= REPLY_IMAGES_MAX;
+  const canSubmit = online && imagesReady && sendingImages === 0;
+  const hasText = draft.text.trim() !== "";
 
   const onDraft = (change: (draft: Draft) => Draft) => onWriting((now) => ({ ...now, draft: change(now.draft) }));
   const address = (id: string) => onDraft((now) => (now.to.includes(id) ? now : { ...now, to: [...now.to, id] }));
-  const say = async (text: string, addressed: Unsent["to"], attachments: readonly ReadyImage[]) => {
-    const images = attachments.length === 0 ? [] : await Promise.all(attachments.map(({ file }) => encodeImage(file))).catch(() => undefined);
+  const say = async (text: string, addressed: Unsent["to"], attachments: readonly ReadyImage[], begin: (now: Writing) => Writing) => {
+    if (!online || sending.current || sendingImages > 0) return;
+    const count = attachments.length;
+    sending.current = count > 0;
+    onWriting((now) => ({ ...begin(now), sendingImages: count }));
+    const images = count === 0 ? [] : await Promise.all(attachments.map(({ file }) => encodeImage(file))).catch(() => undefined);
     const said = images === undefined ? "invalid-images" : await onSay({
       text,
       ...(addressed.length === 0 ? {} : { to: addressed.map(({ id }) => id) }),
       ...(images.length === 0 ? {} : { images }),
     });
-    if (said !== "sent") {
-      const next = { key: ++unsentKeys, text, to: addressed, attachments, said };
-      onWriting((now) => ({ ...now, unsent: [...now.unsent, next] }));
-    }
+    if (count > 0) sending.current = false;
+    const unsaid = said === "sent" ? undefined : { key: ++unsentKeys, text, to: addressed, attachments, said };
+    if (count > 0 || unsaid) onWriting((now) => ({
+      ...now,
+      sendingImages: count > 0 ? 0 : now.sendingImages,
+      unsent: unsaid ? [...now.unsent, unsaid] : now.unsent,
+    }));
   };
   const send = (written: string) => {
     const text = written.trim();
-    if (!online || !imagesReady || text === "") return;
-    onDraft(() => EMPTY_DRAFT);
-    void say(text, to.map(({ id, name }) => ({ id, name })), readyImages);
+    if (!canSubmit || text === "") return;
+    void say(text, to.map(({ id, name }) => ({ id, name })), readyImages, (now) => ({ ...now, draft: EMPTY_DRAFT }));
   };
   const attach = (files: File[]) => {
-    const count = draft.attachments.length;
-    const added = files.slice(0, REPLY_IMAGES_MAX + 1 - count).map((file, index): Attachment => ({
-      id: ++attachmentKeys,
-      file,
-      ...(count + index < REPLY_IMAGES_MAX ? { kind: "checking" } : { kind: "invalid", reason: "count" }),
-    }));
+    const added = files.slice(0, REPLY_IMAGES_MAX + 1 - draft.attachments.length).map((file) => ({ id: ++attachmentKeys, file, kind: "checking" as const }));
     onDraft((now) => ({ ...now, attachments: [...now.attachments, ...added] }));
     for (const image of added) {
-      if (image.kind !== "checking") continue;
       void checkImage(image.file).then((result) => onDraft((now) => ({
         ...now,
         attachments: now.attachments.map((item) => item.id === image.id ? { id: item.id, file: item.file, ...result } : item),
@@ -95,7 +97,7 @@ export function Speak({ target, online, touch, writing, onWriting, onSay }: Spea
     }
   };
   const picker = useRef<HTMLInputElement>(null);
-  const without = (speech: Unsent) => onWriting((now) => ({ ...now, unsent: now.unsent.filter((each) => each !== speech) }));
+  const without = (now: Writing, speech: Unsent): Writing => ({ ...now, unsent: now.unsent.filter((each) => each !== speech) });
 
   const input = useRef<HTMLDivElement>(null);
   const previousCandidates = useRef(candidates);
@@ -146,19 +148,17 @@ export function Speak({ target, online, touch, writing, onWriting, onSay }: Spea
               key={speech.key}
               speech={speech}
               isPresent={isPresent}
-              online={online}
+              canResend={online && sendingImages === 0}
               touch={touch}
               fieldEmpty={draft.text === "" && draft.to.length === 0 && draft.attachments.length === 0}
-              onResend={(addressed) => {
-                without(speech);
-                void say(speech.text, addressed, speech.attachments);
-              }}
-              onBackToField={() => onWriting((now) => ({ draft: { text: speech.text, to: speech.to.map(({ id }) => id), attachments: speech.attachments }, unsent: now.unsent.filter((each) => each !== speech) }))}
-              onDiscard={() => without(speech)}
+              onResend={(addressed) => void say(speech.text, addressed, speech.attachments, (now) => without(now, speech))}
+              onBackToField={() => onWriting((now) => ({ ...without(now, speech), draft: { text: speech.text, to: speech.to.map(({ id }) => id), attachments: speech.attachments } }))}
+              onDiscard={() => onWriting((now) => without(now, speech))}
             />
           ))}
         </div>
       ) : null}
+      <p className="speak-sending" role="status">{sendingImages > 0 ? words.sendingImages(sendingImages) : null}</p>
       <ChatComposer
         value={draft.text}
         onChange={(text) => onDraft((now) => ({ ...now, text }))}
@@ -166,7 +166,10 @@ export function Speak({ target, online, touch, writing, onWriting, onSay }: Spea
         isDisabled={!online}
         density="spacious"
         drawer={draft.attachments.length > 0 ? (
-          <Attachments attachments={draft.attachments} onRemove={(id) => onDraft((now) => ({ ...now, attachments: now.attachments.filter((image) => image.id !== id) }))} />
+          <div>
+            <Attachments attachments={draft.attachments} onRemove={(id) => onDraft((now) => ({ ...now, attachments: now.attachments.filter((image) => image.id !== id) }))} />
+            {hasText ? null : <p className="speak-hint">{words.imageNeedsText}</p>}
+          </div>
         ) : null}
         {...(to.length > 0
           ? {
@@ -202,7 +205,7 @@ export function Speak({ target, online, touch, writing, onWriting, onSay }: Spea
             onFiles={attach}
             {...(touch ? { enterKeyHint: "enter" as const, onKeyDown: breakLine } : {
               onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => {
-                if (!imagesReady && isPlainEnter(event)) event.preventDefault();
+                if ((!canSubmit || sending.current) && isPlainEnter(event)) event.preventDefault();
               },
             })}
           />
@@ -244,16 +247,16 @@ export function Speak({ target, online, touch, writing, onWriting, onSay }: Spea
             {touch ? null : <span className="speak-hint">{words.enterHint}</span>}
           </>
         }
-        sendButton={<ChatSendButton isDisabled={!canSend} onSend={() => send(draft.text)} />}
+        sendButton={<ChatSendButton isDisabled={!canSubmit || !hasText} onSend={() => send(draft.text)} />}
       />
     </>
   );
 }
 
-function UnsentSpeech({ speech, isPresent, online, touch, fieldEmpty, onResend, onBackToField, onDiscard }: {
+function UnsentSpeech({ speech, isPresent, canResend, touch, fieldEmpty, onResend, onBackToField, onDiscard }: {
   speech: Unsent;
   isPresent: (id: string) => boolean;
-  online: boolean;
+  canResend: boolean;
   touch: boolean;
   fieldEmpty: boolean;
   onResend: (to: Unsent["to"]) => void;
@@ -290,7 +293,7 @@ function UnsentSpeech({ speech, isPresent, online, touch, fieldEmpty, onResend, 
           label={gone.length > 0 ? words.resendWithout(gone.map(({ name }) => name)) : words.resend}
           variant="secondary"
           size={size}
-          isDisabled={!online || speech.said === "invalid-images"}
+          isDisabled={!canResend || speech.said === "invalid-images"}
           onClick={() => onResend(stillHere)}
         />
         <Button label={words.backToField} variant="secondary" size={size} isDisabled={!fieldEmpty} onClick={onBackToField} />

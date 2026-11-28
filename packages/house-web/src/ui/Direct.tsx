@@ -43,11 +43,11 @@ export function Direct({ resident, availability, log, heading, phone, line, onRe
           log={log}
           scroller={scroller}
           bottom={
-            <div className="room-bottom">
+            <>
               <LineNotice line={line} onRetry={onRetry} />
               <div className="room-entry-status" role="status">{note ? <p className="direct-note">{note}</p> : null}</div>
               <Speak target={{ kind: "dm", name: resident.name }} online={line.kind === "open" && availability.send === "ready"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
-            </div>
+            </>
           }
         />
       ) : <p className="room-nowhere" role="status">{words.directUnavailable}</p>}

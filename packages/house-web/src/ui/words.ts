@@ -93,6 +93,8 @@ export const words = {
   imageName: "ファイル名を変更して、もう一度添付してください。",
   imageCount: "画像は 4 枚までです。",
   imageReading: "画像を確認しています…",
+  imageNeedsText: "本文も書いてください。",
+  sendingImages: (count: number) => `送っています…（画像 ${count} 枚）`,
   imageReadFailed: "画像を読み込めませんでした。外してもう一度添付してください。",
   imagesRefused: "画像を添付できませんでした。入力欄に戻して、画像を外すか差し替えてください。",
   to: "宛先",

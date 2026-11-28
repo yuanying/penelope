@@ -1,7 +1,7 @@
 import { REPLY_IMAGE_MAX_BYTES, REPLY_IMAGE_TYPES, type ReplyImageUpload } from "@penelope/contract";
 
 type Mime = typeof REPLY_IMAGE_TYPES[number];
-type ImageCheck = { kind: "checking" } | { kind: "ready"; mime: Mime } | { kind: "invalid"; reason: "count" | "size" | "name" | "format" | "read" };
+type ImageCheck = { kind: "checking" } | { kind: "ready"; mime: Mime } | { kind: "invalid"; reason: "size" | "name" | "format" | "read" };
 
 export type Attachment = { id: number; file: File } & ImageCheck;
 

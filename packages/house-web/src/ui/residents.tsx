@@ -6,7 +6,8 @@ import type { HouseActor, HouseExpression, HousePersonOccupant, HousePersonView,
 
 import { ExternalIcon, MoonIcon, WarningIcon } from "./icons.tsx";
 import { hashOf } from "./route.ts";
-import { timeOf, words } from "./words.ts";
+import { UnreadBadge } from "./UnreadBadge.tsx";
+import { timeOf, withUnread, words } from "./words.ts";
 
 export type Shown = HousePersonOccupant | HousePublicIdentity;
 
@@ -81,15 +82,18 @@ function personalPage(value: string | undefined): string | undefined {
 
 type DirectOpener = (event: MouseEvent<HTMLAnchorElement>, agent: string) => void;
 
-function ResidentLinks({ resident, onDirect }: { resident: Shown; onDirect?: DirectOpener | undefined }) {
+type DirectLinkProps = { onDirect?: DirectOpener | undefined; directUnread?: number | undefined };
+
+function ResidentLinks({ resident, onDirect, directUnread = 0 }: { resident: Shown } & DirectLinkProps) {
   if (resident.kind !== "agent") return null;
   const personal = personalPage(resident.personal_url);
   if (!personal && !onDirect) return null;
   return (
     <div className="resident-links">
       {onDirect ? (
-        <a className="resident-link" href={hashOf({ at: "dm", agent: resident.id })} aria-label={words.directWith(resident.name)} onClick={(event) => onDirect(event, resident.id)}>
+        <a className="resident-link" href={hashOf({ at: "dm", agent: resident.id })} aria-label={withUnread(words.directWith(resident.name), directUnread)} onClick={(event) => onDirect(event, resident.id)}>
           {words.direct}
+          <UnreadBadge count={directUnread} />
         </a>
       ) : null}
       {personal ? (
@@ -128,7 +132,7 @@ function StateLine({ resident, self }: { resident: HousePersonOccupant; self: bo
   );
 }
 
-export function ResidentCard({ resident, self, onDirect }: { resident: HousePersonOccupant; self: boolean; onDirect?: DirectOpener | undefined }) {
+export function ResidentCard({ resident, self, ...direct }: { resident: HousePersonOccupant; self: boolean } & DirectLinkProps) {
   const status = statusOf(resident);
   return (
     <li className="resident">
@@ -151,13 +155,13 @@ export function ResidentCard({ resident, self, onDirect }: { resident: HousePers
             <span className="resident-number">{Math.round(status.sleepiness)}</span>
           </div>
         ) : null}
-        <ResidentLinks resident={resident} onDirect={onDirect} />
+        <ResidentLinks resident={resident} {...direct} />
       </div>
     </li>
   );
 }
 
-export function AwayResident({ resident, self, onDirect }: { resident: HousePublicIdentity; self: boolean; onDirect?: DirectOpener | undefined }) {
+export function AwayResident({ resident, self, ...direct }: { resident: HousePublicIdentity; self: boolean } & DirectLinkProps) {
   return (
     <li className="resident resident-away">
       <ResidentAvatar resident={resident} size={40} />
@@ -168,7 +172,7 @@ export function AwayResident({ resident, self, onDirect }: { resident: HousePubl
           </span>
           {self ? <span className="resident-self">{words.self}</span> : null}
         </div>
-        <ResidentLinks resident={resident} onDirect={onDirect} />
+        <ResidentLinks resident={resident} {...direct} />
       </div>
     </li>
   );

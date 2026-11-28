@@ -873,13 +873,17 @@ button.plan-dock:hover {
   font-size: 12px;
   line-height: 1.5;
 }
+.speech-expired,
 .speech-undelivered {
   display: inline-flex;
   align-items: flex-start;
   gap: 5px;
-  color: var(--color-text-info);
   text-align: right;
 }
+.speech-undelivered {
+  color: var(--color-text-info);
+}
+.speech-expired svg,
 .speech-undelivered svg {
   flex: none;
   margin-top: 3px;
@@ -916,6 +920,14 @@ button.plan-dock:hover {
 }
 
 /* The field */
+.speak-sending {
+  padding: 8px 12px;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+.speak-sending:empty {
+  position: absolute;
+}
 .house-phone .speak-attach {
   min-height: 44px;
 }

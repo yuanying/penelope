@@ -201,6 +201,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       phone={phone}
       openTalkFromTile={phone || directAgent !== undefined || (selected !== undefined && selected.id !== mine?.id)}
       unread={count}
+      directUnread={snapshot.directUnread}
       lineNotice={<LineNotice line={snapshot.line} onRetry={() => session.retry()} />}
       heading={planHeading}
       dock={dock}

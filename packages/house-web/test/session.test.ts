@@ -2,8 +2,9 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import { createApi } from "../src/model/api.ts";
+import { logKey } from "../src/model/log.ts";
 import { myRoom, Session } from "../src/model/session.ts";
-import { BATH, FakeHouse, FERN, IVY, LIVING, speech } from "./fake-house.ts";
+import { BATH, directSpeech, FakeHouse, FERN, IVY, LEE, LIVING, speech } from "./fake-house.ts";
 
 /** Lets what was started settle: the fake answers at once. */
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 5));
@@ -229,6 +230,37 @@ describe("the line to the house", () => {
 
     assert.deepEqual(texts(session, BATH.id), Array.from({ length: 50 }, (_, index) => String(index + 4)));
     assert.notEqual(session.getSnapshot().logs.get(BATH.id)!.before, undefined);
+  });
+
+  it("keeps delivered and expired direct messages when stale pending history arrives", { timeout: 2_000 }, async (t) => {
+    const house = new FakeHouse();
+    house.house = { ...house.house, direct: [{ agent_id: IVY.id, send: "ready", sleeping: false, connected: true }] };
+    const first = { ...directSpeech(IVY, "First", LEE), delivery_status: "pending" } as const;
+    const second = { ...directSpeech(IVY, "Second", LEE), delivery_status: "pending" } as const;
+    house.direct(first, { heard: false });
+    house.direct(second, { heard: false });
+    const session = start(house);
+    t.after(() => session.stop());
+    house.ready();
+    const late = house.hold("history");
+    const conversation = { kind: "dm", id: IVY.id } as const;
+    const log = () => session.getSnapshot().logs.get(logKey(conversation));
+    session.show(conversation);
+    house.direct({ ...first, delivery_status: "delivered" });
+    house.direct({ ...second, delivery_status: "expired" });
+
+    const read = new Promise<void>((resolve) => {
+      const unsubscribe = session.subscribe(() => {
+        if (log()?.sync?.phase === "caught-up") {
+          unsubscribe();
+          resolve();
+        }
+      });
+    });
+    late.give();
+    await read;
+
+    assert.deepEqual(log()?.events.map((event) => "dm" in event && event.delivery_status), ["delivered", "expired"]);
   });
 
   // The tab's place is the house's, and the stream is how the house tells it: an answer on the way is older than that.

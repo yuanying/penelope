@@ -1,21 +1,23 @@
 import { Icon } from "@astryxdesign/core/Icon";
 import { useEffect, useState } from "react";
 
+import { REPLY_IMAGES_MAX } from "@penelope/contract";
+
 import type { Attachment } from "../model/attachments.ts";
 import { words } from "./words.ts";
 
-const problems = { count: words.imageCount, size: words.imageSize, name: words.imageName, format: words.imageFormat, read: words.imageReadFailed };
+const problems = { size: words.imageSize, name: words.imageName, format: words.imageFormat, read: words.imageReadFailed };
 
 export function Attachments({ attachments, onRemove }: { attachments: readonly Attachment[]; onRemove: (id: number) => void }) {
   return (
     <ul className="speak-attachments" role="list">
-      {attachments.map((image) => (
+      {attachments.map((image, index) => (
         <li key={image.id} className="speak-attachment">
-          {image.kind === "ready" ? <Preview file={image.file} mime={image.mime} /> : null}
+          {index < REPLY_IMAGES_MAX && image.kind === "ready" ? <Preview file={image.file} mime={image.mime} /> : null}
           <div className="speak-attachment-name">
             <span translate="no">{image.file.name}</span>
             <span className="speak-attachment-status" role="status">
-              {image.kind === "checking" ? words.imageReading : image.kind === "invalid" ? problems[image.reason] : null}
+              {index >= REPLY_IMAGES_MAX ? words.imageCount : image.kind === "checking" ? words.imageReading : image.kind === "invalid" ? problems[image.reason] : null}
             </span>
           </div>
           <button type="button" aria-label={words.removeImage(image.file.name)} onClick={() => onRemove(image.id)}>

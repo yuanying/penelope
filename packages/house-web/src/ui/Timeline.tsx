@@ -157,7 +157,7 @@ function Mine({ event, you, residents, undelivered, far }: { event: Speech; you:
     <span className="speech-meta">
       <time dateTime={event.occurred_at}>{timeOf(event.occurred_at)}</time>
       {"dm" in event && event.delivery_status === "expired" ? (
-        <span className="speech-undelivered" role="status">
+        <span className="speech-expired">
           <Icon icon={WarningIcon} size="xsm" color="inherit" />
           <span>{words.directExpired}</span>
         </span>
@@ -173,8 +173,8 @@ function Mine({ event, you, residents, undelivered, far }: { event: Speech; you:
   return (
     <ChatMessage sender="user" {...(far ? { className: "timeline-far" } : {})}>
       <ChatMessageBubble variant="filled" data-speech={event.id} metadata={metadata}>
-        {event.images?.length ? <Images images={event.images} /> : null}
         <Words event={event} you={you} residents={residents} />
+        {event.images?.length ? <Images images={event.images} /> : null}
       </ChatMessageBubble>
     </ChatMessage>
   );
