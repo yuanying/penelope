@@ -1,6 +1,6 @@
 // ADR-0048: send and wait in the same runner job, using the image's a2a-cli.
 import { spawnSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { link, lstat, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { parse } from "yaml";
@@ -108,16 +108,35 @@ async function directory(path: string) {
   return path;
 }
 
-async function saveReply(dir: string, reply: string): Promise<string> {
-  for (let n = 1; ; n++) {
-    const path = join(dir, n === 1 ? "reply.md" : `reply-${n}.md`);
-    try {
-      await writeFile(path, reply, { flag: "wx", mode: 0o600 });
-      return path;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+async function saveMarkdown(dir: string, kind: "request" | "reply", text: string, first = 1n): Promise<string> {
+  const staging = await mkdtemp(join(dir, ".message-"));
+  try {
+    const staged = join(staging, "text");
+    await writeFile(staged, text, { mode: 0o600 });
+    for (let n = first; ; n++) {
+      const path = join(dir, n === 1n ? `${kind}.md` : `${kind}-${n}.md`);
+      try {
+        await link(staged, path);
+        return path;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      }
     }
+  } finally {
+    await rm(staging, { recursive: true, force: true });
   }
+}
+
+async function latestRequest(dir: string) {
+  let latest: { index: bigint; path: string } | undefined;
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const match = /^request(?:-([2-9]|[1-9][0-9]+))?\.md$/.exec(entry.name);
+    if (!match) continue;
+    const index = BigInt(match[1] ?? "1");
+    if (!latest || index > latest.index) latest = { index, path: join(dir, entry.name) };
+  }
+  return latest;
 }
 
 function displayPath(path: string) {
@@ -154,6 +173,7 @@ async function main(args: string[]) {
   const { name, label } = entry;
   const redact = (text: string) => text.replaceAll(token, token.length >= 10 ? "[redacted]" : "*");
   let id = req.taskId;
+  let requestLine: string | undefined;
   function report(state: string, options: { reply?: string; files?: string[]; replyFile?: string; reason?: string; next?: string } = {}) {
     const { reply = "", files = [], replyFile, reason, next } = options;
     const list = JSON.stringify(files.map(displayPath));
@@ -164,6 +184,7 @@ async function main(args: string[]) {
       `Task ID: ${id ?? "(none)"}`,
       `Images: ${images}`,
       `Reply file: ${replyFile ? displayPath(replyFile) : "(none)"}`,
+      ...(requestLine ? [requestLine] : []),
       ...(reason ? [`Reason: ${prefix(oneLine(redact(reason)), 600)}`] : []),
       ...(next ? [`Next: ${next}`] : []),
     ].join("\n"));
@@ -199,11 +220,25 @@ async function main(args: string[]) {
     try {
       const root = await directory(join(homedir(), "a2a"));
       taskDir = await directory(join(root, id));
+      let requestFile: string | undefined;
+      if (req.text !== undefined) {
+        try {
+          const latest = await latestRequest(taskDir);
+          requestFile = await saveMarkdown(taskDir, "request", req.text, (latest?.index ?? 0n) + 1n);
+        } catch {
+          report("error", { reason: "The request was sent, but its text could not be saved under HOME.", next: waitAgain });
+          return 1;
+        }
+      } else {
+        requestFile = (await latestRequest(taskDir).catch(() => undefined))?.path;
+      }
+      if (requestFile) requestLine = `Request file: ${displayPath(requestFile)}`;
       filesDir = await mkdtemp(join(taskDir, "result-"));
     } catch {
-      report("error", { reason: "Could not create the Task's output directory under HOME." });
+      report("error", { reason: "Could not create the Task's output directory under HOME.", next: req.text !== undefined ? waitAgain : undefined });
       return 1;
     }
+    if (requestLine) console.log(redact(requestLine));
     const got = callA2a(["task", "get", "--wait", "--poll-interval", "30s", "--timeout", "2h", "--save-fileparts", filesDir, id], auth, cwd);
     const files = (await readdir(filesDir)).sort().map((file) => join(filesDir, file));
     if (!files.length) await rm(filesDir, { recursive: true });
@@ -223,7 +258,7 @@ async function main(args: string[]) {
     let replyFile: string | undefined;
     if (reply) {
       try {
-        replyFile = await saveReply(taskDir, reply);
+        replyFile = await saveMarkdown(taskDir, "reply", reply);
       } catch {
         report(state, { reply, files, next, reason: "Could not save the full reply under HOME." });
         return 1;

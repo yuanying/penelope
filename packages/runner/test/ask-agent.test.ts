@@ -1,10 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import type { JobEnd } from "@penelope/contract";
+
+import { Backend } from "../src/backend.ts";
+import { Jobs } from "../src/jobs.ts";
 
 const script = fileURLToPath(new URL("../src/ask-agent.ts", import.meta.url));
 const connector = `---
@@ -31,13 +36,14 @@ fs.appendFileSync(${JSON.stringify(calls)}, JSON.stringify(args) + '\\n');
 if (args[0] === 'send') { ${send} }
 else { ${get} }
 `, { mode: 0o755 });
+  const env = { HOME: home, PATH: `${bin}:${process.env.PATH}`, PENELOPE_CONNECTORS_DIR: connectors,
+    HELPER_TOKEN: "test-placeholder", OTHER_TOKEN: "different-placeholder" };
   return {
     home,
+    env,
     run: (args: string[], job = "job-1") => spawnSync(process.execPath, [script, ...args], {
       encoding: "utf8", timeout: 5000, cwd: home,
-      env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}`,
-        PENELOPE_JOB_ID: job, PENELOPE_CONNECTORS_DIR: connectors,
-        HELPER_TOKEN: "test-placeholder", OTHER_TOKEN: "different-placeholder" },
+      env: { ...process.env, ...env, PENELOPE_JOB_ID: job },
     }),
     calls: async (): Promise<string[][]> => (await readFile(calls, "utf8").catch((error: NodeJS.ErrnoException) => {
       if (error.code !== "ENOENT") throw error;
@@ -97,7 +103,7 @@ test("a question gives a job_start command to answer the same task", async (t) =
   const [send] = await calls();
   assert.equal(send?.[send.indexOf("--task-id") + 1], "task-1");
   assert.equal(send?.at(-1), "Main");
-  assert.match(result.stdout, /Reply:\nWhich branch\?\nAgent: ヘルパー \(helper\)\nState: input-required\nTask ID: task-1\nImages: \[\]\nReply file: .*\/a2a\/task-1\/reply\.md\nNext: job_start .*--task.*task-1.*<answer>.*\n$/);
+  assert.match(result.stdout, /Reply:\nWhich branch\?\nAgent: ヘルパー \(helper\)\nState: input-required\nTask ID: task-1\nImages: \[\]\nReply file: .*\/a2a\/task-1\/reply\.md\nRequest file: .*\/a2a\/task-1\/request\.md\nNext: job_start .*--task.*task-1.*<answer>.*\n$/);
 });
 
 test("a wait timeout offers to wait again without resending or canceling the task", async (t) => {
@@ -109,6 +115,62 @@ test("a wait timeout offers to wait again without resending or canceling the tas
   assert.deepEqual(get?.slice(0, 2), ["task", "get"]);
   assert.equal(get?.[get.indexOf("--timeout") + 1], "2h");
   assert.match(result.stdout, /State: timed-out\nTask ID: task-1\nImages: \[\]\nReply file: \(none\)\nReason: The remote Task was not canceled\.\nNext: job_start .*--wait.*task-1.*\n$/);
+});
+
+test("the job end points to the exact text sent after shell expansion, without including the text", { timeout: 10_000 }, async (t) => {
+  const { home, env, calls } = await setup(t, `console.log(JSON.stringify({task: {id: 'task-1', status: {state: 'TASK_STATE_COMPLETED', message: {parts: [{text: 'Done.'}]}}}}));`);
+  const message = "  Check Friday's report.\nUse the latest draft.  ";
+  await writeFile(join(home, "body.md"), message);
+  let finish!: (end: JobEnd) => void;
+  const ended = new Promise<JobEnd>((resolve) => (finish = resolve));
+  const backend = new Backend({ url: "", token: "", agent: "main" });
+  backend.jobEvent = async ({ payload }) => finish(payload);
+  const jobs = new Jobs({ home, dir: join(home, "jobs"), backend, log: () => {}, retryMs: 20,
+    limits: { max: 1, maxSeconds: 5, tailChars: 4000 } });
+  t.after(() => jobs.stop());
+  const quote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+  const vars = Object.entries(env).map(([key, value]) => `${key}=${quote(value)}`).join(" ");
+  await jobs.start({ command: `${vars} ${quote(process.execPath)} ${quote(script)} helper "$(<body.md)"` });
+
+  const end = await ended;
+  assert.equal(end.exit_code, 0, end.tail);
+  const [send] = await calls();
+  assert.equal(send?.at(-1), message);
+  assert.ok(!JSON.stringify(end).includes("Check Friday's report."));
+  const paths = end.tail.match(/Reply file: (.+)\nRequest file: (.+)\n$/);
+  assert.ok(paths, end.tail);
+  const [, replyFile, requestFile] = paths;
+  const dir = join(home, "a2a", "task-1");
+  assert.equal(replyFile, join(dir, "reply.md"));
+  assert.equal(requestFile, join(dir, "request.md"));
+  assert.equal(await readFile(requestFile, "utf8"), message);
+  assert.equal((await stat(requestFile)).mode & 0o777, (await stat(replyFile)).mode & 0o777);
+});
+
+test("an answer survives a wait timeout without overwriting the original request", async (t) => {
+  const { home, run } = await setup(t, "process.exit(5);");
+  const dir = join(home, "a2a", "task-1");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "request.md"), "Check the report");
+
+  const result = run(["helper", "--task", "task-1", "Use the November report"]);
+  assert.equal(result.status, 5, result.stderr);
+  assert.ok(result.stdout.includes(`Request file: ${join(dir, "request-2.md")}\n`));
+  assert.equal(await readFile(join(dir, "request-2.md"), "utf8"), "Use the November report");
+  assert.equal(await readFile(join(dir, "request.md"), "utf8"), "Check the report");
+});
+
+test("--wait points to the latest numbered request without saving another one", async (t) => {
+  const { home, run } = await setup(t, `console.log(JSON.stringify({task: {id: 'task-1', status: {state: 'TASK_STATE_COMPLETED'}}}));`);
+  const dir = join(home, "a2a", "task-1");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "request-9.md"), "Use the draft");
+  await writeFile(join(dir, "request-10.md"), "Use the final version");
+
+  const result = run(["helper", "--wait", "task-1"]);
+  assert.equal(result.status, 0, result.stderr);
+  assert.ok(result.stdout.includes(`Request file: ${join(dir, "request-10.md")}\n`));
+  assert.deepEqual((await readdir(dir)).sort(), ["request-10.md", "request-9.md"]);
 });
 
 test("a long question leaves its beginning, full reply file and next step in the job tail", async (t) => {
