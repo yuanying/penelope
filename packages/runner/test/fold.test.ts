@@ -125,10 +125,10 @@ const providerCases = [
       messages: [
         { role: "assistant", tool_calls: [
           { type: "function", id: "call_1", function: { name: "bash", arguments: '{"command":"ls"}' } },
-          { type: "function", id: "call_2", function: { name: "read", arguments: '{"path":"notes.md"}' } },
+          { type: "function", id: "call_2", function: { name: "folded", arguments: '{"tool":"read"}' } },
         ] },
         { role: "tool", tool_call_id: "call_1", content: "(output folded)" },
-        { role: "tool", tool_call_id: "call_2", content: "(output folded)" },
+        { role: "tool", tool_call_id: "call_2", content: "(call and output folded)" },
       ],
     },
   },
@@ -137,9 +137,9 @@ const providerCases = [
     expected: {
       input: [
         { type: "function_call", call_id: "call_1", name: "bash", arguments: '{"command":"ls"}' },
-        { type: "function_call", call_id: "call_2", name: "read", arguments: '{"path":"notes.md"}' },
+        { type: "function_call", call_id: "call_2", name: "folded", arguments: '{"tool":"read"}' },
         { type: "function_call_output", call_id: "call_1", output: "(output folded)" },
-        { type: "function_call_output", call_id: "call_2", output: "(output folded)" },
+        { type: "function_call_output", call_id: "call_2", output: "(call and output folded)" },
       ],
     },
   },
@@ -149,11 +149,11 @@ const providerCases = [
       messages: [
         { role: "assistant", content: [
           { type: "tool_use", id: "call_1", name: "bash", input: { command: "ls" } },
-          { type: "tool_use", id: "call_2", name: "read", input: { path: "notes.md" } },
+          { type: "tool_use", id: "call_2", name: "folded", input: { tool: "read" } },
         ] },
         { role: "user", content: [
           { type: "tool_result", tool_use_id: "call_1", content: "(output folded)" },
-          { type: "tool_result", tool_use_id: "call_2", content: "(output folded)" },
+          { type: "tool_result", tool_use_id: "call_2", content: "(call and output folded)" },
         ] },
       ],
     },
@@ -169,7 +169,7 @@ for (const { api, expected } of providerCases) {
     } satisfies Omit<Model<typeof api>, "api">;
     const { messages } = foldTurns([
       user("go"),
-      { ...assistant(call("call_1|fc_1", "bash", { command: "ls" }), call("call_2|fc_2", "read", { path: "notes.md" })), api },
+      { ...assistant(call("call_1|fc_1", "bash", { command: "ls" }), call("call_2|fc_2", "read", { path: "x".repeat(200) })), api },
       result("call_1|fc_1", "bash", "original tool output"),
       result("call_2|fc_2", "read", "more output"),
       marker(),
@@ -194,44 +194,26 @@ for (const { api, expected } of providerCases) {
   });
 }
 
-test("folded arguments stay within 200 JSON characters without changing value types", () => {
-  const long = "🌱\\\n".repeat(100);
-  const { messages } = foldTurns([
-    assistant(call("c1", "bash", { timeout: 30, command: long })),
-    result("c1", "bash", "ok"),
-    marker(),
-  ]);
+test("a call with arguments at the 200-code-point JSON limit keeps them intact", () => {
+  const args = { command: "🌱".repeat(200 - JSON.stringify({ command: "" }).length) };
+  const original = call("c1", "bash", args);
+  const { messages } = foldTurns([assistant(original), result("c1", "bash", "ok"), marker()]);
   const [sent] = messages;
   assert.ok(sent?.role === "assistant");
-  const [tool] = sent.content;
-  assert.ok(tool?.type === "toolCall");
-  assert.equal(tool.arguments.timeout, 30);
-  assert.match(tool.arguments.command as string, /^🌱\\\n.*…$/s);
-  assert.ok([...JSON.stringify(tool.arguments)].length <= 200);
+  assert.deepEqual(sent.content, [original]);
 });
 
-test("an oversized edit keeps the target path and an empty edits array", () => {
+test("a call above the JSON limit keeps an ID-matched placeholder pair", () => {
+  const args = { command: "🌱".repeat(200 - JSON.stringify({ command: "" }).length) + "x" };
   const { messages } = foldTurns([
-    assistant(call("c1", "edit", { path: "notes.md", edits: [{ oldText: "old", newText: "new".repeat(100) }] })),
-    result("c1", "edit", "ok"),
+    assistant(call("call_1|fc_1", "bash", args)),
+    result("call_1|fc_1", "bash", "ok"),
     marker(),
   ]);
-  const [sent] = messages;
-  assert.ok(sent?.role === "assistant");
-  assert.deepEqual(sent.content, [call("c1", "edit", { path: "notes.md", edits: [] })]);
-});
-
-test("an argument with no room for its text is omitted rather than set to an empty string", () => {
-  const { messages } = foldTurns([
-    assistant(call("c1", "bash", { cwd: "/work", command: "x".repeat(300) })),
-    result("c1", "bash", "ok"),
-    marker(),
+  assert.partialDeepStrictEqual(messages, [
+    { role: "assistant", content: [call("call_1", "folded", { tool: "bash" })] },
+    { role: "toolResult", toolCallId: "call_1", toolName: "folded", content: [{ type: "text", text: "(call and output folded)" }] },
   ]);
-  const [sent] = messages;
-  assert.ok(sent?.role === "assistant");
-  const [tool] = sent.content;
-  assert.ok(tool?.type === "toolCall");
-  assert.equal(Object.hasOwn(tool.arguments, "cwd"), false);
 });
 
 test("the request before folding goes; her answer to it stays", () => {

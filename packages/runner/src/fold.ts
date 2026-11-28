@@ -27,6 +27,7 @@ export const FOLD_ASK = "penelope.fold_ask";
 export const KEPT_TOOLS = new Set(["reply", "reply_to_agent"]);
 const CALL_MAX_CHARS = 200;
 const FOLDED_OUTPUT = "(output folded)";
+const FOLDED_CALL_AND_OUTPUT = "(call and output folded)";
 /** What a call refused while the fold request is answered gets back. */
 export const NO_TOOLS = "No tool runs while the turn is being folded.";
 
@@ -80,17 +81,20 @@ function foldTurn(turn: AgentMessage[]): AgentMessage[] {
       const result = results.get(block.id);
       const id = callId(block.id);
       const keep = result !== undefined && KEPT_TOOLS.has(block.name);
+      const args = block.arguments ?? {};
+      const foldCall = !keep && exceedsCallLimit(args);
+      const name = foldCall ? "folded" : block.name;
       content.push({
-        type: "toolCall", id, name: block.name,
-        arguments: keep ? block.arguments : foldArguments(block.arguments ?? {}),
-        ...(block.namespace === undefined ? {} : { namespace: block.namespace }),
+        type: "toolCall", id, name,
+        arguments: foldCall ? { tool: block.name } : args,
+        ...(foldCall || block.namespace === undefined ? {} : { namespace: block.namespace }),
       });
       if (keep) {
         toolResults.push({ ...result, toolCallId: id, content: [{ type: "text", text: cut(textOf(result.content)) }] });
       } else {
         toolResults.push({
-          role: "toolResult", toolCallId: id, toolName: block.name,
-          content: [{ type: "text", text: FOLDED_OUTPUT }],
+          role: "toolResult", toolCallId: id, toolName: name,
+          content: [{ type: "text", text: foldCall ? FOLDED_CALL_AND_OUTPUT : FOLDED_OUTPUT }],
           timestamp: result?.timestamp ?? message.timestamp,
           isError: result?.isError ?? true,
         });
@@ -101,45 +105,12 @@ function foldTurn(turn: AgentMessage[]): AgentMessage[] {
   return out;
 }
 
-function jsonLength(value: ToolCall["arguments"] | string): number {
+function exceedsCallLimit(args: ToolCall["arguments"]): boolean {
   let length = 0;
-  for (const _ of JSON.stringify(value)) {
-    if (++length > CALL_MAX_CHARS + 2) break;
+  for (const _ of JSON.stringify(args)) {
+    if (++length > CALL_MAX_CHARS) return true;
   }
-  return length;
-}
-
-function foldArguments(args: ToolCall["arguments"]): ToolCall["arguments"] {
-  const nonStrings = Object.entries(args).filter(([, value]) => typeof value !== "string");
-  let short: ToolCall["arguments"] = Object.fromEntries(nonStrings.map(([key, value]) => [
-    key, value === null || typeof value !== "object" ? value : Array.isArray(value) ? [] : {},
-  ]));
-  if (jsonLength(short) > CALL_MAX_CHARS) return {};
-  const keys = new Set(["command", "pattern", "path", ...nonStrings.map(([key]) => key), ...Object.keys(args)]);
-  for (const key of keys) {
-    const value = args[key];
-    if (typeof value === "string") {
-      const budget = CALL_MAX_CHARS - jsonLength({ ...short, [key]: "" });
-      const text = fitString(value, budget);
-      if (text !== undefined) short = { ...short, [key]: text };
-    } else if (value !== undefined && value !== short[key]) {
-      const candidate = { ...short, [key]: value };
-      if (jsonLength(candidate) <= CALL_MAX_CHARS) short = candidate;
-    }
-  }
-  return short;
-}
-
-function fitString(value: string, budget: number): string | undefined {
-  if (jsonLength(value) - 2 <= budget) return value;
-  let prefix = "";
-  for (const char of value) {
-    const width = jsonLength(char) - 2;
-    if (width >= budget) break;
-    prefix += char;
-    budget -= width;
-  }
-  return prefix ? `${prefix}…` : undefined;
+  return false;
 }
 
 /** On one line, and no longer than the limit, with a mark where it was cut. */
