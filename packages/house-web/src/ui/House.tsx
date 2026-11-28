@@ -139,6 +139,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const notice = snapshot.notice;
   const nameOf = (room: string) => house.rooms.find(({ id }) => id === room)?.name ?? room;
   const entryFailed = notice?.kind === "full" || notice?.kind === "enter-failed";
+  const noticeInRoom = entryFailed && notice.room === selected?.id;
   const noticeTitle =
     notice === undefined ? undefined
     : notice.kind === "return-failed" ? words.returnFailed(nameOf(notice.room))
@@ -147,7 +148,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     : notice.kind === "failed" ? words.failed
     : words.logoutUnconfirmed;
   const notices = (
-    <div className="house-notices" role="status" aria-live="polite">
+    <div className={noticeInRoom ? undefined : "house-notices"} role="status" aria-live="polite">
       {notice ? (
         <Banner
           status={notice.kind === "failed" || notice.kind === "logout-unconfirmed" || notice.kind === "enter-failed" ? "error" : "warning"}
@@ -203,6 +204,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
       narrow={phone || peeked !== undefined}
       room={conversation}
       access={access}
+      entryNotice={noticeInRoom ? notices : undefined}
       log={conversation === undefined ? undefined : snapshot.logs.get(conversation.id)}
       touch={touch}
       writing={(mine === undefined ? undefined : writings.get(mine.id)) ?? NOTHING_WRITTEN}
@@ -237,7 +239,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
     return (
       <main ref={root} className="house house-phone">
         {skip}
-        {notices}
+        {noticeInRoom ? null : notices}
         <div className="house-plan" inert={covered}>
           {plan}
         </div>
@@ -248,7 +250,7 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   return (
     <main ref={root} className={peeked !== undefined && !swapped ? "house house-pc house-side" : "house house-pc"}>
       {skip}
-      {notices}
+      {noticeInRoom ? null : notices}
       <div className="house-plan">{plan}</div>
       {peekPane}
       {swapped ? null : myRoomPane}

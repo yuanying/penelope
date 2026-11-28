@@ -227,12 +227,17 @@ describe("the house's screen in a browser", () => {
     t.after(fail);
 
     await page.getByRole("button", { name: "居間に入る" }).click();
-    await page.getByRole("button", { name: "前の会話を読む" }).focus();
+    const older = page.getByRole("button", { name: "前の会話を読む" });
+    await older.focus();
     fail();
     await page.getByText("居間に入れたか確かめられませんでした。", { exact: true }).waitFor();
 
     assert.equal(await page.evaluate(() => document.activeElement?.tagName), "BUTTON");
     assert.equal(await focused(page), "前の会話を読む");
+    assert.ok(await older.evaluate((button) => {
+      const { x, y, width, height } = button.getBoundingClientRect();
+      return button.contains(document.elementFromPoint(x + width / 2, y + height / 2));
+    }), "the notice covers the focused history button");
     assert.equal(await field(page, "居間").count(), 0);
   });
 

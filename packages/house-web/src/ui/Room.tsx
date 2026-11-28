@@ -65,6 +65,7 @@ function Record({ log, room, scroller, bottom, ...timeline }: { log: RoomLog | u
 export type MyRoomProps = Shared & {
   room: Room | undefined;
   access: "member" | "entering" | "read-only";
+  entryNotice?: ReactNode;
   log: RoomLog | undefined;
   touch: boolean;
   /** What is written for this room, and a way to change it that still means this room after the person left it. */
@@ -76,7 +77,7 @@ export type MyRoomProps = Shared & {
   onBack: () => void;
 };
 
-export function MyRoom({ room, access, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
+export function MyRoom({ room, access, entryNotice, log, touch, writing, onWriting, onSay, onOlder, onLeave, onBack, heading, phone, line, onRetry, ...shared }: MyRoomProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const [sheet, setSheet] = useState(false);
   // Astryx keeps the record's end in view as the record grows, not as what stands over the end grows.
@@ -137,11 +138,12 @@ export function MyRoom({ room, access, log, touch, writing, onWriting, onSay, on
         bottom={
           <div className="room-bottom">
             <LineNotice line={line} onRetry={onRetry} />
-            {!member ? (
-              <p className="room-reading" role="status">{access === "entering" ? words.entering : words.readOnlyBody}</p>
-            ) : (
+            {entryNotice}
+            {member ? (
               <Speak key={room.id} room={room} others={others} online={line.kind === "open"} touch={touch} writing={writing} onWriting={onWriting} onSay={onSay} />
-            )}
+            ) : entryNotice === undefined ? (
+              <p className="room-reading" role="status">{access === "entering" ? words.entering : words.readOnlyBody}</p>
+            ) : null}
           </div>
         }
       />
