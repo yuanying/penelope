@@ -1,6 +1,6 @@
 # 家のサーバー
 
-家は複数の penelope 配置がつながる独立したプロセスです。[ADR-0074](adr/0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) は配置とのつなぎ方、[ADR-0075](adr/0075-rooms-where-speech-starts-turns-of-awake-residents.md) は部屋と会話の決まりを定めます。
+家は複数の penelope 配置がつながる独立したプロセスです。[ADR-0074](adr/0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) は配置とのつなぎ方、[ADR-0075](adr/0075-rooms-where-speech-starts-turns-of-awake-residents.md) は部屋と会話の決まりを定めます。人の接続と居場所の関係は [ADR-0090](adr/0090-keep-people-in-rooms-until-they-leave.md) で定めます。
 
 この仕様は家の HTTP API と `house` CLI を扱います。API の型は [`packages/contract/src/house.ts`](../packages/contract/src/house.ts) にあります。[receivers のプラグイン](receivers.md#家のプラグイン)と CLI は、サーバーと別のプロセスで動きます。
 
@@ -121,7 +121,7 @@
 | --- | --- |
 | `GET /auth/github/start` | GitHub に `302`。ログインが未設定なら `503` |
 | `GET /auth/github/callback` | 許可されたアカウントなら cookie を付けて `/` に `302`。ログイン名が一覧に無いか、登録済みの GitHub ID と違えば `403` (`account-not-allowed`) |
-| `POST /auth/logout` | 同じオリジンから呼ぶ。セッションとその SSE を閉じ、cookie を消して `204` |
+| `POST /auth/logout` | 同じオリジンから呼ぶ。セッションとその SSE を閉じ、cookie を消して `204`。部屋からは出ない |
 
 ログインの開始と完了には同じブラウザを使います。家は一度限りの `state` と PKCE で GitHub に接続します。`state` の有効期間は 10 分です。GitHub の access token はプロフィールの取得後に破棄します。
 
@@ -158,7 +158,7 @@
 
 | イベント | `data` | 受信時の扱い |
 | --- | --- | --- |
-| `ready` | `HouseStreamReady` | タブの `connection` と今の `house` を置き直す。自動で戻る部屋が満員なら `return_failed` にその部屋の ID が入る |
+| `ready` | `HouseStreamReady` | タブの `connection` と今の `house` を置き直す |
 | `house` | `HousePersonView` | 間取り全体を置き換える。出入り・発言の見出し・status・接続状態の変化が入る |
 | `room` | `HousePersonEvent` | 発言・出入りを `room.id` が示す部屋の記録に足す |
 
@@ -170,7 +170,9 @@ SSE に再生機能はありません。`ready` を受け取るたびに、自�
 
 SSE が切れたときは発言を止め、新しい `ready` を待ちます。古い `connection` や未送信の要求を送り直しません。`/api/stream` が `200` 以外を返した場合、`EventSource` は自動でつなぎ直しません。`error` で `readyState` が `CLOSED` になったら、`GET /api/house` でセッションを確かめます。`401` ならログイン画面へ戻します。セッションが有効なら接続エラーを表示します。
 
-居場所はタブではなく人ごとに 1 つです。最後の SSE が切れてから 30 秒を過ぎると退室し、通常の退室を記録します。待ち時間内につなぎ直すと移動しません。退室した後に接続を開くと、直前の部屋に戻ります。満員ならどの部屋にも入らず、次は自分で入る部屋を選びます。自分で部屋を出た場合も、次の接続ではどの部屋にも入りません。家を再起動すると前の接続は失われ、部屋にいた人の退室を記録します。前の居場所は次に接続するときの戻り先になります。
+居場所はタブではなく人ごとに 1 つです。最後の SSE が切れても、ブラウザを閉じたりログアウトしたりしても、居場所は変わりません。つなぎ直しても出入りは記録しません。家を再起動すると接続は失われますが、居場所は SQLite から戻ります。
+
+本人が部屋を出るか別の部屋に入ると、元の部屋から出ます。家の設定から本人や部屋を外した場合も、その居場所は残りません。接続していない人も定員に数え、エージェントには同室の住人として見せます。接続していない間の発言も部屋の記録に残り、画面を開き直したときに履歴から読めます。
 
 ### 静的ファイル
 

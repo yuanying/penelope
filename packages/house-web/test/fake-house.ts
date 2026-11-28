@@ -114,10 +114,10 @@ export class FakeHouse {
   }
 
   /** The stream connected: the house gives the tab a connection and the floor. */
-  ready(more: { return_failed?: string } = {}): string {
+  ready(): string {
     const connection = `c-${++this.connections}`;
     this.source.readyState = 1;
-    this.source.emit("ready", { connection, house: this.house, ...more });
+    this.source.emit("ready", { connection, house: this.house });
     return connection;
   }
 

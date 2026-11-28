@@ -390,15 +390,4 @@ describe("the house's screen", () => {
     assert.equal(tile.querySelector("img")?.getAttribute("src"), "https://ivy.example.com/neutral.png");
     assert.ok(within(tile).getByText(/^寝ている・\d{1,2}:30 に起きる$/));
   });
-
-  // docs/house.md, 接続と居場所: when the room to come back to is full, the person is in none and is told.
-  it("says so when the room to come back to was full", async () => {
-    const house = new FakeHouse();
-    render(<App fetch={house.fetch} open={house.open} wait={async () => {}} />);
-    await act(async () => {
-      house.ready({ return_failed: "bath" });
-    });
-
-    await waitFor(() => assert.ok(screen.getByText("Bathは満員なので、どの部屋にもいません。空いたら、間取りから入れます。")));
-  });
 });

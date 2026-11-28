@@ -33,6 +33,7 @@
 
 ## Related ADRs
 
+- Related: [ADR-0090 人の居場所はブラウザの接続で変えない](0090-keep-people-in-rooms-until-they-leave.md)（人が切断しても居場所を変えない。配信範囲と画面遷移の決まりは変えない）
 - Related: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)
 
 ## References

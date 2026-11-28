@@ -50,59 +50,23 @@ async function open(t: TestContext, house: FakeHouse, viewport: { width: number;
   return page;
 }
 
-/** Closes the page and waits until the house has seen its stream close: the wait before leaving starts there. */
-async function close(page: Page, house: FakeHouse): Promise<void> {
-  const context = page.context();
-  await page.close();
-  for (;;) {
-    const view = (await (await context.request.get(`${house.origin}/api/house`)).json()) as HousePersonView;
-    const me = view.rooms.flatMap(({ occupants }) => occupants).find(({ id }) => id === view.you.id);
-    if (me?.connected === false) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
 const field = (page: Page, room: string) => page.getByLabel(`${room}で話す`, { exact: true });
 const focused = (page: Page) => page.evaluate(() => document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.textContent ?? "");
 
 describe("the house's screen in a browser", () => {
-  // ADR-0075, 2: one who closed the screen has left once the wait is over, and is back in the same room on opening it.
-  it("leaves the room when the screen stays closed, and is back in it when opened again", async (t) => {
+  it("reads a speech sent while the screen was closed when opened again", async (t) => {
     const house = await evening(t);
     const lee = await open(t, house, PC);
     await lee.getByRole("button", { name: "居間に入る" }).click();
     await field(lee, "居間").waitFor();
-    const sam = await open(t, house, PC, "sam");
-    await sam.getByRole("button", { name: "居間を覗く" }).click();
-    await sam.getByText("Lee が居間に来た").waitFor();
+    const context = lee.context();
+    await lee.close();
 
-    await close(lee, house);
-    await house.advance(31_000);
-    await sam.getByText("Lee が居間を出た").waitFor();
+    await house.agent("penelope").say("living", "あとで読んでね");
 
-    const again = await lee.context().newPage();
+    const again = await context.newPage();
     await again.goto(house.origin);
-    await field(again, "居間").waitFor();
-    assert.equal(await sam.getByText("Lee が居間に来た").count(), 2);
-  });
-
-  // ADR-0075, 2: within the wait nothing happened as far as the room is concerned.
-  it("records no coming and going when the screen is opened again within the wait", async (t) => {
-    const house = await evening(t);
-    const lee = await open(t, house, PC);
-    await lee.getByRole("button", { name: "居間に入る" }).click();
-    await field(lee, "居間").waitFor();
-
-    await close(lee, house);
-    await house.advance(20_000);
-    const again = await lee.context().newPage();
-    await again.goto(house.origin);
-    await field(again, "居間").waitFor();
-    await house.agent("penelope").say("living", "まだいたんだね");
-    await again.locator(".speech-text", { hasText: "まだいたんだね" }).waitFor();
-
-    assert.equal(await again.getByText("Lee が居間に来た").count(), 1);
-    assert.equal(await again.getByText("Lee が居間を出た").count(), 0);
+    await again.locator(".speech-text", { hasText: "あとで読んでね" }).waitFor();
   });
 
   // ADR-0075, 7: whom a speech is addressed to is its own field. The `@` and what was typed after it are not text.

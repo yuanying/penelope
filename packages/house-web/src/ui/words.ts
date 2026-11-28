@@ -93,10 +93,9 @@ export const words = {
   discard: "捨てる",
 
   down: "接続が切れました。つなぎ直しています。",
-  downBody: "つながるまで話せません。しばらく戻らないと、部屋を出たことになります。",
+  downBody: "つながるまで話せません。接続が切れても居場所は変わりません。",
   refused: "家につながりません。しばらくしてつなぎ直します。",
   retry: "いますぐつなぎ直す",
-  returnFailed: (room: string) => `${room}は満員なので、どの部屋にもいません。空いたら、間取りから入れます。`,
   enterFull: (room: string) => `${room}は満員で入れませんでした。`,
   enterFailed: (room: string) => `${room}に入れたか確かめられませんでした。`,
   failed: "うまくいきませんでした。もう一度試してください。",

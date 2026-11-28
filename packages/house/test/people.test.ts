@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 
-import type { HouseHistory, HousePersonEvent, HousePersonView, HouseSpeechResult, HouseStreamReady } from "@penelope/contract";
+import type { HouseHistory, HousePersonEvent, HousePersonView, HouseSpeechResult, HouseStreamReady, HouseView } from "@penelope/contract";
 import type { SenderCheck } from "@penelope/service-account-auth";
 
 import { parseConfig } from "../src/config.ts";
@@ -175,7 +175,7 @@ test("a configured GitHub login stays bound to the first GitHub account after re
   assert.equal((await after.login("LEE")).status, 302);
 });
 
-test("the same cookie can reconnect to the room after a house restart", async (t) => {
+test("a house restart preserves room membership without recording a departure", async (t) => {
   const database = databaseFile(t);
   const before = await open(t, database);
   const lee = await before.signIn();
@@ -184,10 +184,11 @@ test("the same cookie can reconnect to the room after a house restart", async (t
   await before.close();
 
   const after = await open(t, database);
-  const returned = await after.withCookie(lee.cookie).stream();
-  assert.deepEqual(returned.ready.house.rooms[0]?.occupants.map(({ id }) => id), ["lee"]);
-  const history = await (await after.withCookie(lee.cookie).call("/api/rooms/living/history")).json() as HouseHistory;
-  assert.deepEqual(history.events.map(({ kind }) => kind), ["enter", "leave", "enter"]);
+  const offline = after.withCookie(lee.cookie);
+  const view = await offline.view();
+  assert.deepEqual(view.rooms[0]?.occupants.map(({ id, connected }) => [id, connected]), [["lee", false]]);
+  const history = await (await offline.call("/api/rooms/living/history")).json() as HouseHistory;
+  assert.deepEqual(history.events.map(({ kind }) => kind), ["enter"]);
 });
 
 test("a persisted session cannot authenticate after its resident is removed from the allowlist", async (t) => {
@@ -291,6 +292,20 @@ test("logout revokes the current session and closes its stream", async (t) => {
   assert.equal((await lee.call("/api/house")).status, 401);
 });
 
+test("logout leaves the person in the room", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const house = await open(t);
+  const lee = await house.signIn();
+  const tab = await lee.stream();
+  await tab.enter("living");
+  assert.equal((await house.request("/auth/logout", { cookie: lee.cookie, origin }, "POST")).status, 204);
+  house.advance(31_000);
+  t.mock.timers.tick(1_000);
+
+  const sam = await house.signIn("sam");
+  assert.deepEqual((await sam.view()).rooms[0]?.occupants.map(({ id, connected }) => [id, connected]), [["lee", false]]);
+});
+
 test("the same tab receives entries and speech in every room without asking for a room", async (t) => {
   const house = await open(t);
   const lee = await house.signIn();
@@ -318,7 +333,7 @@ test("speaking without a tab connection is rejected even while the resident is i
   assert.deepEqual(await response.json(), { error: "connection-required" });
 });
 
-test("speaking on a closed tab is rejected during the grace period", async (t) => {
+test("speaking on a closed tab is rejected even while the resident is in the room", async (t) => {
   const house = await open(t);
   const lee = await house.signIn();
   const tab = await lee.stream();
@@ -401,7 +416,7 @@ test("closing one tab does not vacate the room while another stays connected", a
   assert.deepEqual((await lee.view()).rooms[0]?.occupants.map(({ id, connected }) => [id, connected]), [["lee", true]]);
 });
 
-test("reconnecting during grace does not record a departure or a new entry", async (t) => {
+test("the agent still sees a disconnected person in the room after the former grace period", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const house = await open(t);
   const lee = await house.signIn();
@@ -410,58 +425,17 @@ test("reconnecting during grace does not record a departure or a new entry", asy
   const sam = await house.signIn("sam");
   const observer = await sam.stream();
   await tab.close();
-  const grace = await observer.next<HousePersonView>("house");
-  assert.deepEqual(grace.rooms[0]?.occupants.map(({ id, connected }) => [id, connected]), [["lee", false]]);
-
-  house.advance(29_000);
-  t.mock.timers.tick(1_000);
-  await lee.stream();
-  house.advance(31_000);
-  t.mock.timers.tick(1_000);
-  const history = await (await lee.call("/api/rooms/living/history")).json() as HouseHistory;
-  assert.deepEqual(history.events.map(({ kind }) => kind), ["enter"]);
-});
-
-test("reconnecting after grace returns the resident to their previous room", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const house = await open(t);
-  const lee = await house.signIn();
-  const tab = await lee.stream();
-  await tab.enter("living");
-  const sam = await house.signIn("sam");
-  const observer = await sam.stream();
-  await tab.close();
-  await observer.next("house");
+  const disconnected = await observer.next<HousePersonView>("house");
+  assert.deepEqual(disconnected.rooms[0]?.occupants.map(({ id, connected }) => [id, connected]), [["lee", false]]);
 
   house.advance(31_000);
   t.mock.timers.tick(1_000);
-  assert.equal((await observer.next<{ kind: string }>("room")).kind, "leave");
-  const returned = await lee.stream();
-  assert.deepEqual(returned.ready.house.rooms[0]?.occupants.map(({ id }) => id), ["lee"]);
+
+  const view = await (await house.agent("/house")).json() as HouseView;
+  assert.deepEqual(view.rooms[0]?.occupants.map(({ id }) => id), ["lee"]);
 });
 
-test("a full previous room prevents auto-return", async (t) => {
-  t.mock.timers.enable({ apis: ["setInterval"] });
-  const house = await open(t);
-  const lee = await house.signIn();
-  const sam = await house.signIn("sam");
-  const observer = await sam.stream();
-  const tab = await lee.stream();
-  await tab.enter("bath");
-  await observer.next("room");
-  await observer.next("house");
-  await tab.close();
-  await observer.next("house");
-  house.advance(31_000);
-  t.mock.timers.tick(1_000);
-  assert.equal((await observer.next<{ kind: string }>("room")).kind, "leave");
-  await observer.enter("bath");
-  const blocked = await lee.stream();
-  assert.equal(blocked.ready.return_failed, "bath");
-  assert.ok(blocked.ready.house.away.some(({ id }) => id === "lee"));
-});
-
-test("an explicit leave clears the room to return to on reconnect", async (t) => {
+test("an explicit leave ends room membership even after reconnecting", async (t) => {
   const house = await open(t);
   const lee = await house.signIn();
   const tab = await lee.stream();
@@ -470,5 +444,4 @@ test("an explicit leave clears the room to return to on reconnect", async (t) =>
   await tab.close();
   const reopened = await lee.stream();
   assert.ok(reopened.ready.house.away.some(({ id }) => id === "lee"));
-  assert.equal(reopened.ready.return_failed, undefined);
 });

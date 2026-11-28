@@ -144,7 +144,6 @@ export function House({ session, snapshot, house }: { session: Session; snapshot
   const noticeInRoom = entryFailed && notice.room === selected?.id;
   const noticeTitle =
     notice === undefined ? undefined
-    : notice.kind === "return-failed" ? words.returnFailed(nameOf(notice.room))
     : notice.kind === "full" ? words.enterFull(nameOf(notice.room))
     : notice.kind === "enter-failed" ? words.enterFailed(nameOf(notice.room))
     : notice.kind === "failed" ? words.failed

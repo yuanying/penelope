@@ -76,6 +76,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0072 | [backend は数だけの metrics を別の待ち受けに出し、backup は眠りが済んだ時刻と比べて始める](0072-number-only-metrics-and-backups-after-sleep.md) | Accepted |
 | 0073 | [receivers のプラグインは本体の status を読み、heartbeat に載せる様子を預けられる](0073-let-receiver-plugins-read-status-and-leave-heartbeat-notes.md) | Accepted |
 | 0074 | [家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) | Accepted |
-| 0075 | [家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md) | Accepted |
+| 0075 | [家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md) | Accepted（一部を [ADR-0090](0090-keep-people-in-rooms-until-they-leave.md) で置き換え） |
 | 0076 | [人への配信は表示中の部屋で絞らず、入退室の応答で画面を移さない](0076-keep-house-stream-and-navigation-independent.md) | Accepted |
 | 0077 | [畳んだターンのツール呼び出しを、呼び出しと結果の組で残す](0077-keep-folded-tool-calls-as-tool-messages.md) | Accepted |
+| 0090 | [人の居場所はブラウザの接続で変えない](0090-keep-people-in-rooms-until-they-leave.md) | Accepted |

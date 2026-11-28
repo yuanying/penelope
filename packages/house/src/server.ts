@@ -163,7 +163,7 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     const id = typeof connection === "string" ? connection : undefined;
     people.requireConnection(session, id);
     if (leave) {
-      people.publish(house.leave(person, now(), true));
+      people.publish(house.leave(person, now()));
       return send(response, 204);
     }
     if (room![2] === "enter") {

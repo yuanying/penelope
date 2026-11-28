@@ -202,11 +202,6 @@ export class House {
     return { events, before: rows.length > HISTORY_LIMIT ? events.at(-1)?.id : undefined };
   }
 
-  returnRoom(person: Person): string | undefined {
-    const room = this.db.prepare("SELECT return_room FROM person_profile WHERE subject = ?").get(person.subject)?.return_room;
-    return typeof room === "string" ? room : undefined;
-  }
-
   enter(resident: Resident, roomId: string, now: number): HousePersonEvent[] {
     const room = this.room(roomId);
     return this.transaction(() => {
@@ -217,20 +212,13 @@ export class House {
       const events: HousePersonEvent[] = [];
       if (current !== undefined) events.push(this.exit(resident, this.room(current), now));
       this.db.prepare("INSERT INTO room_members (subject, room) VALUES (?, ?)").run(resident.subject, roomId);
-      if (resident.actor.kind === "person") {
-        this.db.prepare(`
-          INSERT INTO person_profile (subject, return_room) VALUES (?, ?)
-          ON CONFLICT (subject) DO UPDATE SET return_room = excluded.return_room
-        `).run(resident.subject, roomId);
-      }
       events.push(this.record(room, resident, { kind: "enter" }, before, now));
       return events;
     });
   }
 
-  leave(resident: Resident, now: number, forget = false): HousePersonEvent[] {
+  leave(resident: Resident, now: number): HousePersonEvent[] {
     return this.transaction(() => {
-      if (forget) this.db.prepare("UPDATE person_profile SET return_room = NULL WHERE subject = ?").run(resident.subject);
       const roomId = this.roomOf(resident);
       return roomId === undefined ? [] : [this.exit(resident, this.room(roomId), now)];
     });
@@ -280,17 +268,10 @@ export class House {
     for (const { subject, room } of members) {
       if (!this.residents.has(subject as string) || !this.rooms.has(room as string)) removeMember.run(subject!);
     }
-    for (const { subject, room } of members) {
-      const person = this.people.get(subject as string);
-      const location = this.rooms.get(room as string);
-      if (person && location) this.exit(person, location, now);
-    }
-    for (const { subject, return_room } of this.db.prepare("SELECT subject, return_room FROM person_profile").all()) {
+    for (const { subject } of this.db.prepare("SELECT subject FROM person_profile").all()) {
       if (!this.people.has(subject as string)) {
         this.db.prepare("DELETE FROM person_sessions WHERE subject = ?").run(subject!);
-        this.db.prepare("UPDATE person_profile SET avatar_url = NULL, return_room = NULL WHERE subject = ?").run(subject!);
-      } else if (return_room !== null && !this.hasRoom(return_room as string)) {
-        this.db.prepare("UPDATE person_profile SET return_room = NULL WHERE subject = ?").run(subject!);
+        this.db.prepare("UPDATE person_profile SET avatar_url = NULL WHERE subject = ?").run(subject!);
       }
     }
     this.db.prepare("DELETE FROM person_sessions WHERE expires_ms <= ?").run(now);

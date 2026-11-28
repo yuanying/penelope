@@ -6,7 +6,6 @@ import type { HousePersonEvent, HousePersonFloor, HousePersonView, HouseStreamEv
 import type { Person } from "./config.ts";
 import { Conflict, House, type PersonSession } from "./house.ts";
 
-const GRACE_MS = 30_000;
 const KEEPALIVE_MS = 25_000;
 
 type Stream = {
@@ -20,7 +19,6 @@ export class People {
   private readonly now: () => number;
   private readonly log: (line: string) => void;
   private readonly streams = new Map<string, Stream>();
-  private readonly departures = new Map<Person, number>();
   private readonly timer: NodeJS.Timeout;
   private keepaliveAt: number;
   private closed = false;
@@ -47,21 +45,6 @@ export class People {
   connect(session: PersonSession, response: ServerResponse): void {
     if (this.closed) throw new Conflict("house is closing");
     const { person } = session;
-    const now = this.now();
-    const events = this.expireDepartures(now);
-    const stillPresent = this.departures.delete(person) || this.connected(person);
-    let return_failed: string | undefined;
-    const previous = stillPresent ? undefined : this.house.returnRoom(person);
-    if (previous !== undefined) {
-      try {
-        events.push(...this.house.enter(person, previous, now));
-      } catch (error) {
-        if (!(error instanceof Conflict)) throw error;
-        this.house.leave(person, now, true);
-        return_failed = previous;
-      }
-    }
-
     const connection = randomUUID();
     const stream = { session, response, snapshot: "" };
     this.streams.set(connection, stream);
@@ -73,8 +56,8 @@ export class People {
     });
     const house = this.view(person);
     stream.snapshot = JSON.stringify(house);
-    this.send(stream, "ready", { connection, house, return_failed });
-    this.publish(events);
+    this.send(stream, "ready", { connection, house });
+    this.publish();
   }
 
   requireConnection(session: PersonSession, connection: string | undefined): void {
@@ -88,7 +71,6 @@ export class People {
       stream.response.destroy();
       this.disconnect(id);
     }
-    this.publish();
   }
 
   publish(events: HousePersonEvent[] = []): void {
@@ -106,25 +88,11 @@ export class People {
   }
 
   private disconnect(connection: string): void {
-    const stream = this.streams.get(connection);
-    if (!stream) return;
-    this.streams.delete(connection);
-    const { person } = stream.session;
-    if (!this.connected(person)) {
-      if (!this.departures.has(person)) this.departures.set(person, this.now() + GRACE_MS);
-      this.publish();
-    }
+    if (this.streams.delete(connection)) this.publish();
   }
 
   private active({ response, session }: Stream): boolean {
     return !response.destroyed && !response.writableEnded && session.expires > this.now();
-  }
-
-  private connected(person: Person): boolean {
-    for (const stream of this.streams.values()) {
-      if (stream.session.person === person && this.active(stream)) return true;
-    }
-    return false;
   }
 
   private floor(): HousePersonFloor {
@@ -135,16 +103,6 @@ export class People {
     return this.house.personFloor(this.now(), connected);
   }
 
-  private expireDepartures(now: number): HousePersonEvent[] {
-    const events: HousePersonEvent[] = [];
-    for (const [person, at] of this.departures) {
-      if (now < at) continue;
-      events.push(...this.house.leave(person, now));
-      this.departures.delete(person);
-    }
-    return events;
-  }
-
   private tick(): void {
     const now = this.now();
     for (const [id, stream] of this.streams) {
@@ -152,7 +110,7 @@ export class People {
       stream.response.destroy();
       this.disconnect(id);
     }
-    this.publish(this.expireDepartures(now));
+    this.publish();
     if (now < this.keepaliveAt) return;
     this.keepaliveAt = now + KEEPALIVE_MS;
     for (const stream of this.streams.values()) this.write(stream, ": keepalive\n\n");

@@ -19,7 +19,7 @@ export type Line =
   /** The house refused the stream, or could not be asked: tried again after a while. */
   | { kind: "refused" };
 
-export type Notice = { kind: "full" | "return-failed" | "enter-failed"; room: string } | { kind: "failed" | "logout-unconfirmed" };
+export type Notice = { kind: "full" | "enter-failed"; room: string } | { kind: "failed" | "logout-unconfirmed" };
 
 export type Snapshot = {
   /** Unknown until the house answered once. */
@@ -231,11 +231,7 @@ export class Session {
       if (source !== this.source) return;
       const ready = JSON.parse((message as MessageEvent<string>).data) as HouseStreamReady;
       this.refusals = 0;
-      this.set({
-        signedIn: true,
-        line: { kind: "open", connection: ready.connection },
-        ...(ready.return_failed === undefined ? {} : { notice: { kind: "return-failed" as const, room: ready.return_failed } }),
-      });
+      this.set({ signedIn: true, line: { kind: "open", connection: ready.connection } });
       this.floors += 1;
       this.setHouse(ready.house);
     });
