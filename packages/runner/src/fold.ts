@@ -110,30 +110,36 @@ function jsonLength(value: ToolCall["arguments"] | string): number {
 }
 
 function foldArguments(args: ToolCall["arguments"]): ToolCall["arguments"] {
-  const entries = Object.entries(args);
-  const short = Object.fromEntries(entries.map(([key, value]) => [key, typeof value === "string" ? "" : value]));
-  let remaining = CALL_MAX_CHARS - jsonLength(short);
-  if (remaining < 0) return {};
-  for (const key of new Set(["command", "pattern", "path", ...Object.keys(args)])) {
+  const nonStrings = Object.entries(args).filter(([, value]) => typeof value !== "string");
+  let short: ToolCall["arguments"] = Object.fromEntries(nonStrings.map(([key, value]) => [
+    key, value === null || typeof value !== "object" ? value : Array.isArray(value) ? [] : {},
+  ]));
+  if (jsonLength(short) > CALL_MAX_CHARS) return {};
+  const keys = new Set(["command", "pattern", "path", ...nonStrings.map(([key]) => key), ...Object.keys(args)]);
+  for (const key of keys) {
     const value = args[key];
-    if (typeof value !== "string") continue;
-    const length = jsonLength(value) - 2;
-    if (length <= remaining) {
-      short[key] = value;
-      remaining -= length;
-    } else if (remaining > 0) {
-      let prefix = "";
-      for (const char of value) {
-        const width = jsonLength(char) - 2;
-        if (width >= remaining) break;
-        prefix += char;
-        remaining -= width;
-      }
-      short[key] = `${prefix}…`;
-      remaining--;
+    if (typeof value === "string") {
+      const budget = CALL_MAX_CHARS - jsonLength({ ...short, [key]: "" });
+      const text = fitString(value, budget);
+      if (text !== undefined) short = { ...short, [key]: text };
+    } else if (value !== undefined && value !== short[key]) {
+      const candidate = { ...short, [key]: value };
+      if (jsonLength(candidate) <= CALL_MAX_CHARS) short = candidate;
     }
   }
   return short;
+}
+
+function fitString(value: string, budget: number): string | undefined {
+  if (jsonLength(value) - 2 <= budget) return value;
+  let prefix = "";
+  for (const char of value) {
+    const width = jsonLength(char) - 2;
+    if (width >= budget) break;
+    prefix += char;
+    budget -= width;
+  }
+  return prefix ? `${prefix}…` : undefined;
 }
 
 /** On one line, and no longer than the limit, with a mark where it was cut. */

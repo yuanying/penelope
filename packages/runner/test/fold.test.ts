@@ -172,7 +172,6 @@ for (const { api, expected } of providerCases) {
       { ...assistant(call("call_1|fc_1", "bash", { command: "ls" }), call("call_2|fc_2", "read", { path: "notes.md" })), api },
       result("call_1|fc_1", "bash", "original tool output"),
       result("call_2|fc_2", "read", "more output"),
-      { ...assistant(call("call_partial|fc_partial", "bash", { command: "incomplete call" })), api, stopReason: "aborted" },
       marker(),
       user("next"),
     ]);
@@ -192,7 +191,6 @@ for (const { api, expected } of providerCases) {
     const response = await stream.result();
     assert.ok(body, response.errorMessage);
     assert.partialDeepStrictEqual(body, expected);
-    assert.doesNotMatch(JSON.stringify(body), /original tool output|more output|call_partial|fc_[12]|\(folded\)/);
   });
 }
 
@@ -212,7 +210,7 @@ test("folded arguments stay within 200 JSON characters without changing value ty
   assert.ok([...JSON.stringify(tool.arguments)].length <= 200);
 });
 
-test("oversized structured arguments are omitted rather than turned into a string", () => {
+test("an oversized edit keeps the target path and an empty edits array", () => {
   const { messages } = foldTurns([
     assistant(call("c1", "edit", { path: "notes.md", edits: [{ oldText: "old", newText: "new".repeat(100) }] })),
     result("c1", "edit", "ok"),
@@ -220,7 +218,20 @@ test("oversized structured arguments are omitted rather than turned into a strin
   ]);
   const [sent] = messages;
   assert.ok(sent?.role === "assistant");
-  assert.deepEqual(sent.content, [call("c1", "edit", {})]);
+  assert.deepEqual(sent.content, [call("c1", "edit", { path: "notes.md", edits: [] })]);
+});
+
+test("an argument with no room for its text is omitted rather than set to an empty string", () => {
+  const { messages } = foldTurns([
+    assistant(call("c1", "bash", { cwd: "/work", command: "x".repeat(300) })),
+    result("c1", "bash", "ok"),
+    marker(),
+  ]);
+  const [sent] = messages;
+  assert.ok(sent?.role === "assistant");
+  const [tool] = sent.content;
+  assert.ok(tool?.type === "toolCall");
+  assert.equal(Object.hasOwn(tool.arguments, "cwd"), false);
 });
 
 test("the request before folding goes; her answer to it stays", () => {

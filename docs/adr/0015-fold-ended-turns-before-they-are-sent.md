@@ -66,7 +66,7 @@ Pi には、モデルに送る直前にメッセージの列を差し替える `
 ### 本 ADR で決定しないこと
 
 - システムプロンプトの 1 文と頼みの文の文面（委譲先: プロンプトのファイル `packages/runner/src/prompts.ts`。ADR-0008 の方針に従う）
-- 1 行に残す呼び出しの書き方、ターンの区切りの記録の形、設定の名前と既定（委譲先: runner のコード `packages/runner/src/fold.ts` と `packages/runner/src/config.ts`）
+- 1 行に残す呼び出しの書き方（呼び出しと結果の表現は後に [ADR-0077](0077-keep-folded-tool-calls-as-tool-messages.md) で置き換え）、ターンの区切りの記録の形、設定の名前と既定（委譲先: runner のコード `packages/runner/src/fold.ts` と `packages/runner/src/config.ts`）
 - ログに残した数をどう集めて比べるか（委譲先: 配置の運用。最初は runner のログを読む）
 - compaction の設定（委譲先: ADR-0007 の「本 ADR で決定しないこと」）
 
