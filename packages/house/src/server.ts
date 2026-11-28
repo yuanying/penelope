@@ -6,14 +6,18 @@ import { GatedAssertion, identify, TokenReview, type SenderCheck } from "@penelo
 
 import type { HouseConfig } from "./config.ts";
 import { Conflict, House, NotFound } from "./house.ts";
-import { InvalidInput, speechOf, syncOf } from "./input.ts";
+import { InvalidInput, messageOf, speechOf, syncOf } from "./input.ts";
 import { PeopleLogin } from "./login.ts";
 import { People } from "./people.ts";
 import { serveWeb } from "./web.ts";
 
 const ROOM = /^\/v1\/agent\/rooms\/([^/]+)\/(enter|say)$/;
 const PERSON_ROOM = /^\/api\/rooms\/([^/]+)\/(enter|say|history)$/;
+const PERSON_DIRECT = /^\/api\/dms\/([^/]+)\/(say|history)$/;
+const AGENT_IMAGE = /^\/v1\/agent\/images\/([^/]+)$/;
+const PERSON_IMAGE = /^\/api\/images\/([^/]+)$/;
 const BODY_LIMIT = 32 * 1024;
+const SPEECH_BODY_LIMIT = 54 * 1024 * 1024;
 
 class BodyTooLarge extends Error {}
 class WrongMediaType extends Error {}
@@ -85,7 +89,9 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     const view = path === "/v1/agent/house" && method === "GET";
     const leave = path === "/v1/agent/room" && method === "DELETE";
     const sync = path === "/v1/agent/sync" && method === "POST";
-    if (!view && !leave && !sync && !(room && method === "POST")) return send(response, 404, { error: "not found" });
+    const reply = path === "/v1/agent/reply" && method === "POST";
+    const image = method === "GET" ? AGENT_IMAGE.exec(path) : null;
+    if (!view && !leave && !sync && !reply && !image && !(room && method === "POST")) return send(response, 404, { error: "not found" });
 
     const identity = await identify(checks, request.headers);
     if (identity.kind === "unavailable") return send(response, 503, { error: "authentication is unavailable" });
@@ -93,14 +99,21 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     if (!agent) return send(response, 401, { error: "unauthorized" });
 
     if (view) return send(response, 200, house.view(agent, now()));
+    if (image) return sendImage(response, house.agentImage(agent, image[1]!, now()));
+    if (reply) {
+      const message = speechOf(await readJson(request, SPEECH_BODY_LIMIT));
+      const { result, event } = house.reply(agent, message, now());
+      people.publish([event]);
+      return send(response, 200, result);
+    }
     if (leave) {
       people.publish(house.leave(agent, now()));
       return send(response, 204);
     }
     if (sync) {
       const update = syncOf(await readJson(request));
-      const result = house.sync(agent, update, now());
-      people.publish();
+      const { result, updates } = house.sync(agent, update, now());
+      people.publish(updates);
       return send(response, 200, result);
     }
     const roomId = room![1]!;
@@ -108,8 +121,8 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
       people.publish(house.enter(agent, roomId, now()));
       return send(response, 200, { occupants: house.visibleIn(roomId, now()) });
     }
-    const speech = speechOf(await readJson(request));
-    const { result, event } = house.say(agent, roomId, speech, now());
+    const speech = speechOf(await readJson(request), true);
+    const { result, event } = house.say(agent, roomId, speech, now(), true);
     people.publish([event]);
     return send(response, 200, result);
   }
@@ -140,9 +153,11 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
     }
 
     const room = PERSON_ROOM.exec(path);
-    const read = method === "GET" && (path === "/api/house" || path === "/api/stream" || room?.[2] === "history");
+    const direct = PERSON_DIRECT.exec(path);
+    const image = method === "GET" ? PERSON_IMAGE.exec(path) : null;
+    const read = method === "GET" && (path === "/api/house" || path === "/api/stream" || image || room?.[2] === "history" || direct?.[2] === "history");
     const leave = method === "DELETE" && path === "/api/room";
-    const post = method === "POST" && (room?.[2] === "enter" || room?.[2] === "say");
+    const post = method === "POST" && (room?.[2] === "enter" || room?.[2] === "say" || direct?.[2] === "say");
     if (!read && !leave && !post) return send(response, 404, { error: "not found" });
     const session = login.session(request);
     if (!session) return send(response, 401, { error: "unauthorized" });
@@ -158,6 +173,8 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
       return people.connect(session, response);
     }
     if (room?.[2] === "history") return send(response, 200, house.history(room[1]!, query.get("before")));
+    if (direct?.[2] === "history") return send(response, 200, house.directHistory(person, direct[1]!, query.get("before"), now()));
+    if (image) return sendImage(response, house.personImage(person, image[1]!));
 
     const connection = request.headers["x-house-connection"];
     const id = typeof connection === "string" ? connection : undefined;
@@ -166,13 +183,18 @@ export async function startHouse(config: HouseConfig, { now = Date.now, log = co
       people.publish(house.leave(person, now()));
       return send(response, 204);
     }
-    if (room![2] === "enter") {
-      people.publish(house.enter(person, room![1]!, now()));
+    if (room?.[2] === "enter") {
+      people.publish(house.enter(person, room[1]!, now()));
       return send(response, 200, people.view(person));
     }
-    const speech = speechOf(await readJson(request));
+    const body = await readJson(request, SPEECH_BODY_LIMIT);
     people.requireConnection(session, id);
-    const { result, event } = house.say(person, room![1]!, speech, now());
+    if (direct) {
+      const event = house.sayDirect(person, direct[1]!, messageOf(body), now());
+      people.publish([event]);
+      return send(response, 200, { id: event.id, not_delivered: [] });
+    }
+    const { result, event } = house.say(person, room![1]!, speechOf(body), now());
     people.publish([event]);
     return send(response, 200, result);
   }
@@ -191,14 +213,14 @@ function checksOf(config: HouseConfig, now: () => number, log: (line: string) =>
   return checks;
 }
 
-async function readJson(request: http.IncomingMessage): Promise<unknown> {
+async function readJson(request: http.IncomingMessage, limit = BODY_LIMIT): Promise<unknown> {
   if (request.headers["content-type"]?.split(";", 1)[0]?.trim().toLowerCase() !== "application/json") throw new WrongMediaType();
-  if (Number(request.headers["content-length"]) > BODY_LIMIT) throw new BodyTooLarge();
+  if (Number(request.headers["content-length"]) > limit) throw new BodyTooLarge();
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of request.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>) {
     size += chunk.length;
-    if (size > BODY_LIMIT) throw new BodyTooLarge();
+    if (size > limit) throw new BodyTooLarge();
     chunks.push(chunk);
   }
   try {
@@ -206,6 +228,13 @@ async function readJson(request: http.IncomingMessage): Promise<unknown> {
   } catch {
     throw new InvalidInput("expected valid JSON");
   }
+}
+
+function sendImage(response: http.ServerResponse, image: { mime_type: string; bytes: Uint8Array }): void {
+  response.writeHead(200, {
+    "cache-control": "no-store", "content-type": image.mime_type, "content-length": image.bytes.byteLength,
+    "x-content-type-options": "nosniff",
+  }).end(image.bytes);
 }
 
 function send(response: http.ServerResponse, status: number, body?: unknown): void {

@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 
-import type { HouseHistory, HousePersonEvent, HousePersonView, HouseSpeechResult, HouseStreamReady, HouseView } from "@penelope/contract";
+import type {
+  HouseAgentStatus, HouseConversationSyncResult, HouseDirectHistory, HouseHistory, HousePersonDirectEvent, HousePersonEvent, HousePersonView,
+  HouseReplyResult, HouseSpeechResult, HouseStreamReady, HouseSyncResult, HouseView,
+} from "@penelope/contract";
 import type { SenderCheck } from "@penelope/service-account-auth";
 
 import { parseConfig } from "../src/config.ts";
@@ -24,7 +28,7 @@ function databaseFile(t: TestContext): string {
   return join(dir, "house.sqlite");
 }
 
-async function open(t: TestContext, database = ":memory:", people = [{ login: "Lee", name: "Lee at home" }, { login: "sam", name: "Sam" }]) {
+async function open(t: TestContext, database = ":memory:", people = [{ login: "Lee", name: "Lee at home" }, { login: "sam", name: "Sam" }], agentSettings: { owner_login?: string; personal_url?: string } = {}) {
   let now = Date.parse("2026-11-27T10:00:00Z");
   const config = parseConfig({
     name: "Example house", database, listen: { host: "127.0.0.1", port: 0 },
@@ -32,7 +36,10 @@ async function open(t: TestContext, database = ":memory:", people = [{ login: "L
       { id: "living", name: "Living", description: "A place to talk", capacity: null },
       { id: "bath", name: "Bath", description: "One at a time", capacity: 1 },
     ],
-    agents: [{ id: "fern", name: "Fern", service_account: "example/fern", avatar_url: "https://agent.example.com/avatar.png", chat_url: "https://agent.example.com/" }],
+    agents: [{
+      id: "fern", name: "Fern", service_account: "example/fern", avatar_url: "https://agent.example.com/avatar.png", chat_url: "https://agent.example.com/",
+      ...agentSettings,
+    }],
     people,
     web_dir: new URL("./web/", import.meta.url).pathname,
     auth: {
@@ -85,7 +92,7 @@ async function open(t: TestContext, database = ":memory:", people = [{ login: "L
         assert.equal(response.status, 200);
         const reader = response.body!.pipeThrough(new TextDecoderStream()).getReader();
         let buffer = "";
-        async function next<T>(name: string): Promise<T> {
+        async function next<T>(name: string, forbidden?: string): Promise<T> {
           while (true) {
             const end = buffer.indexOf("\n\n");
             if (end === -1) {
@@ -96,6 +103,7 @@ async function open(t: TestContext, database = ":memory:", people = [{ login: "L
             }
             const frame = buffer.slice(0, end);
             buffer = buffer.slice(end + 2);
+            if (forbidden !== undefined) assert.ok(!frame.startsWith(`event: ${forbidden}\n`), `unexpected ${forbidden} frame`);
             if (frame.startsWith(`event: ${name}\n`)) return JSON.parse(frame.split("\ndata: ")[1]!) as T;
           }
         }
@@ -444,4 +452,207 @@ test("an explicit leave ends room membership even after reconnecting", async (t)
   await tab.close();
   const reopened = await lee.stream();
   assert.ok(reopened.ready.house.away.some(({ id }) => id === "lee"));
+});
+
+const awake: HouseAgentStatus = { mood: null, sleepiness: 0, sleep: { state: "awake" } };
+const asleep: HouseAgentStatus = { mood: "private", sleepiness: 100, sleep: { state: "asleep", wake_at: "2026-11-27T12:00:00Z" } };
+const owned = { owner_login: "Lee" };
+const directPath = "/api/dms/fern";
+const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jW2kAAAAASUVORK5CYII=";
+
+async function conversationSync(house: Awaited<ReturnType<typeof open>>, status: HouseAgentStatus = awake, ack?: string[]): Promise<HouseConversationSyncResult> {
+  const response = await house.agent("/sync", "POST", { protocol: 2, status, ack });
+  assert.equal(response.status, 200);
+  return await response.json() as HouseConversationSyncResult;
+}
+
+test("an away reply goes only to the configured owner's history and SSE", { timeout: 5_000 }, async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  const lee = await house.signIn();
+  const sam = await house.signIn("sam");
+  const owner = await lee.stream();
+  const visitor = await sam.stream();
+
+  const response = await house.agent("/reply", "POST", { text: "For Lee", to: ["unlisted"] });
+  assert.equal(response.status, 200);
+  const { id, destination, ignored_to } = await response.json() as HouseReplyResult;
+  assert.deepEqual(destination, { kind: "dm", dm: { agent_id: "fern", owner_id: "lee" } });
+  assert.deepEqual(ignored_to, ["unlisted"]);
+  const event = await owner.next<HousePersonDirectEvent>("dm", "room");
+  assert.equal(event.id, id);
+  assert.equal(event.text, "For Lee");
+
+  await house.agent("/rooms/living/enter", "POST");
+  await visitor.next("room", "dm");
+  const history = await (await lee.call(`${directPath}/history`)).json() as HouseDirectHistory;
+  assert.deepEqual(history.events, [event]);
+  assert.equal((await sam.call(`${directPath}/history`)).status, 404);
+});
+
+test("sending a direct message after the recipient enters a room fails without recording it", async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  await conversationSync(house);
+  const lee = await house.signIn();
+  const { ready } = await lee.stream();
+  assert.equal(ready.house.direct?.[0]?.send, "ready");
+  await house.agent("/rooms/living/enter", "POST");
+
+  const refused = await lee.call(`${directPath}/say`, "POST", ready.connection, { text: "Not for the room" });
+  assert.equal(refused.status, 409);
+  assert.deepEqual(await refused.json(), { error: "agent-in-room" });
+  const direct = await (await lee.call(`${directPath}/history`)).json() as HouseDirectHistory;
+  const room = await (await lee.call("/api/rooms/living/history")).json() as HouseHistory;
+  assert.deepEqual(direct.events, []);
+  assert.equal(room.events.some(({ kind }) => kind === "speech"), false);
+});
+
+test("the owner can send while the recipient sleeps and receives no private status beyond the sleeping flag", async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  await conversationSync(house, asleep);
+  const lee = await house.signIn();
+  const sam = await house.signIn("sam");
+  const { ready } = await lee.stream();
+  assert.deepEqual(ready.house.direct, [{ agent_id: "fern", send: "ready", sleeping: true }]);
+  assert.deepEqual((await sam.view()).direct, []);
+  assert.equal((await sam.call(`${directPath}/say`, "POST", (await sam.stream()).ready.connection, { text: "Not the owner" })).status, 404);
+
+  const response = await lee.call(`${directPath}/say`, "POST", ready.connection, { text: "For when you wake" });
+  assert.equal(response.status, 200);
+  const { id } = await response.json() as HouseSpeechResult;
+  assert.deepEqual((await conversationSync(house, asleep)).pending, []);
+  const [delivery] = (await conversationSync(house)).pending;
+  assert.equal(delivery?.event.id, id);
+  assert.match(delivery?.stream ?? "", /^dm\./);
+  assert.equal(delivery?.delivery, "now");
+  assert.equal(delivery?.owner, true);
+  assert.deepEqual(delivery?.answer_via, { tool: "reply" });
+  assert.deepEqual((await conversationSync(house, awake, [id])).pending, []);
+});
+
+test("a legacy sync cannot receive or acknowledge a direct message already queued for the same deployment", async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  const lee = await house.signIn();
+  const { ready } = await lee.stream();
+  const send = () => lee.call(`${directPath}/say`, "POST", ready.connection, { text: "For Fern" });
+  assert.equal(ready.house.direct?.[0]?.send, "deployment-unsupported");
+  assert.equal((await send()).status, 409);
+  await conversationSync(house);
+  const response = await send();
+  assert.equal(response.status, 200);
+  const { id } = await response.json() as HouseSpeechResult;
+
+  const legacy = await house.agent("/sync", "POST", { status: awake, ack: [id] });
+  assert.equal(legacy.status, 200);
+  assert.deepEqual((await legacy.json() as HouseSyncResult).pending, []);
+  const refused = await send();
+  assert.equal(refused.status, 409);
+  assert.deepEqual(await refused.json(), { error: "deployment-unsupported" });
+  assert.equal((await conversationSync(house)).pending[0]?.event.id, id);
+});
+
+test("a direct image copy is readable only by its owner and the pending recipient", async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  await conversationSync(house);
+  const lee = await house.signIn();
+  const sam = await house.signIn("sam");
+  const { ready } = await lee.stream();
+  const response = await lee.call(`${directPath}/say`, "POST", ready.connection, {
+    text: "See attached", expression: "happy", images: [{ name: "photo.bin", data: png }],
+  });
+  assert.equal(response.status, 200);
+  const [delivery] = (await conversationSync(house)).pending;
+  assert.ok(delivery?.event.kind === "speech");
+  assert.equal(delivery.event.expression, "happy");
+  const [image] = delivery.event.images ?? [];
+  assert.ok(image);
+  assert.deepEqual({ ...image, id: null }, { id: null, name: "photo.bin", mime_type: "image/png", size: Buffer.from(png, "base64").length });
+
+  const path = `/images/${image.id}`;
+  const copy = await lee.call(`/api${path}`);
+  assert.equal(copy.status, 200);
+  assert.equal(copy.headers.get("content-type"), "image/png");
+  assert.deepEqual(Buffer.from(await copy.arrayBuffer()), Buffer.from(png, "base64"));
+  assert.equal((await sam.call(`/api${path}`)).status, 404);
+  assert.equal((await house.agent(path)).status, 200);
+  await conversationSync(house, awake, [delivery.event.id]);
+  assert.equal((await house.agent(path)).status, 404);
+  assert.equal((await lee.call(`/api${path}`)).status, 200);
+});
+
+test("an unsupported image refuses the whole room speech even if another image is valid", async (t) => {
+  const house = await open(t);
+  const lee = await house.signIn();
+  const stream = await lee.stream();
+  await stream.enter("living");
+  const response = await lee.call("/api/rooms/living/say", "POST", stream.ready.connection, {
+    text: "Do not record", images: [{ name: "valid.png", data: png }, { name: "fake.png", data: "JVBERg==" }],
+  });
+  assert.equal(response.status, 400);
+  const history = await (await lee.call("/api/rooms/living/history")).json() as HouseHistory;
+  assert.equal(history.events.some(({ kind }) => kind === "speech"), false);
+});
+
+test("ack changes an owner's direct message to delivered without creating another history entry", { timeout: 5_000 }, async (t) => {
+  const house = await open(t, undefined, undefined, owned);
+  await conversationSync(house);
+  const lee = await house.signIn();
+  const tab = await lee.stream();
+  assert.equal((await lee.call(`${directPath}/say`, "POST", tab.ready.connection, { text: "One message" })).status, 200);
+  const pending = await tab.next<HousePersonDirectEvent>("dm");
+  assert.equal(pending.delivery_status, "pending");
+
+  await conversationSync(house, awake, [pending.id]);
+  const delivered = await tab.next<HousePersonDirectEvent>("dm");
+  assert.deepEqual(delivered, { ...pending, delivery_status: "delivered" });
+  house.advance(24 * 60 * 60 * 1000);
+  const history = await (await lee.call(`${directPath}/history`)).json() as HouseDirectHistory;
+  assert.deepEqual(history.events, [delivered]);
+});
+
+test("an unacknowledged direct message expires even while the agent is disconnected", { timeout: 5_000 }, async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const house = await open(t, undefined, undefined, owned);
+  await conversationSync(house);
+  const lee = await house.signIn();
+  const tab = await lee.stream();
+  assert.equal((await lee.call(`${directPath}/say`, "POST", tab.ready.connection, { text: "Do not deliver tomorrow" })).status, 200);
+  const pending = await tab.next<HousePersonDirectEvent>("dm");
+
+  house.advance(24 * 60 * 60 * 1000);
+  t.mock.timers.tick(1_000);
+  const expired = await tab.next<HousePersonDirectEvent>("dm");
+  assert.deepEqual(expired, { ...pending, delivery_status: "expired" });
+  assert.deepEqual((await conversationSync(house, awake, [pending.id])).pending, []);
+  const history = await (await lee.call(`${directPath}/history`)).json() as HouseDirectHistory;
+  assert.deepEqual(history.events, [expired]);
+});
+
+test("the house publishes an HTTPS personal page without carrying a house credential", async (t) => {
+  const house = await open(t, undefined, undefined, { personal_url: "https://agent.example.com/settings" });
+  const lee = await house.signIn();
+  const fern = (await lee.view()).away.find(({ id }) => id === "fern");
+  assert.equal(fern?.kind === "agent" && fern.personal_url, "https://agent.example.com/settings");
+});
+
+test("a non-HTTPS personal page has no link in the house view", async (t) => {
+  const house = await open(t, undefined, undefined, { personal_url: "http://agent.example.com/settings" });
+  const lee = await house.signIn();
+  const fern = (await lee.view()).away.find(({ id }) => id === "fern");
+  assert.equal(fern?.kind === "agent" && fern.personal_url, undefined);
+});
+
+test("opening a version 3 house preserves room speech and its unacknowledged delivery", async (t) => {
+  const database = databaseFile(t);
+  const sqlite = new DatabaseSync(database);
+  sqlite.exec(readFileSync(new URL("./house-v3.sql", import.meta.url), "utf8"));
+  sqlite.close();
+
+  const house = await open(t, database);
+  const lee = await house.signIn();
+  const history = await (await lee.call("/api/rooms/living/history")).json() as HouseHistory;
+  const [speech] = history.events;
+  assert.ok(speech?.kind === "speech");
+  assert.equal(speech.text, "Saved before the upgrade");
+  const sync = await (await house.agent("/sync", "POST", { status: awake })).json() as HouseSyncResult;
+  assert.equal(sync.pending[0]?.event.id, speech.id);
 });

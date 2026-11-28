@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ServerResponse } from "node:http";
 
-import type { HousePersonEvent, HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
+import type { HousePersonFloor, HousePersonView, HouseStreamEvents } from "@penelope/contract";
 
 import type { Person } from "./config.ts";
-import { Conflict, House, type PersonSession } from "./house.ts";
+import { Conflict, House, type PersonEvent, type PersonSession } from "./house.ts";
 
 const KEEPALIVE_MS = 25_000;
 
@@ -38,8 +38,8 @@ export class People {
     this.streams.clear();
   }
 
-  view(person: Person): HousePersonView {
-    return { ...this.floor(), you: this.house.identity(person) };
+  view(person: Person, floor = this.floor()): HousePersonView {
+    return { ...floor, you: this.house.identity(person), direct: this.house.directAvailability(person, this.now()) };
   }
 
   connect(session: PersonSession, response: ServerResponse): void {
@@ -73,14 +73,17 @@ export class People {
     }
   }
 
-  publish(events: HousePersonEvent[] = []): void {
+  publish(events: PersonEvent[] = []): void {
     if (this.streams.size === 0) return;
     const floor = this.floor();
     for (const stream of this.streams.values()) {
       if (!this.active(stream)) continue;
       const { person } = stream.session;
-      for (const event of events) this.send(stream, "room", event);
-      const snapshot = JSON.stringify({ ...floor, you: this.house.identity(person) } satisfies HousePersonView);
+      for (const event of events) {
+        if (!("dm" in event)) this.send(stream, "room", event);
+        else if (event.dm.owner_id === person.actor.id) this.send(stream, "dm", event);
+      }
+      const snapshot = JSON.stringify(this.view(person, floor));
       if (stream.snapshot === snapshot) continue;
       stream.snapshot = snapshot;
       this.write(stream, `event: house\ndata: ${snapshot}\n\n`);
@@ -110,7 +113,7 @@ export class People {
       stream.response.destroy();
       this.disconnect(id);
     }
-    this.publish();
+    this.publish(this.house.expire(now));
     if (now < this.keepaliveAt) return;
     this.keepaliveAt = now + KEEPALIVE_MS;
     for (const stream of this.streams.values()) this.write(stream, ": keepalive\n\n");

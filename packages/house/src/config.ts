@@ -1,14 +1,17 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { EVENT_PATH_SEGMENT, type HouseActor, type HouseRoom } from "@penelope/contract";
+import { EVENT_PATH_SEGMENT, HOUSE_EXPRESSIONS, type HouseActor, type HouseAgentIdentity, type HouseRoom } from "@penelope/contract";
 import { CALLBACK_PATH, type GitHubOAuthSettings } from "@penelope/github-oauth";
 import { audienceOf, type GatedSettings, type KubernetesSettings } from "@penelope/service-account-auth";
 
 import { array, InvalidInput, object, residentId, string } from "./input.ts";
 
-export type Agent = { subject: string; actor: HouseActor & { kind: "agent" }; avatar_url?: string; chat_url?: string };
 export type Person = { subject: string; actor: HouseActor & { kind: "person" } };
+export type Agent = { subject: string; actor: HouseActor & { kind: "agent" }; owner?: Person } &
+  Pick<HouseAgentIdentity, "avatar_url" | "avatar_urls" | "personal_url" | "chat_url">;
+
+export const DIRECT_STREAM_PREFIX = "dm.";
 export type Resident = Agent | Person;
 type Auth = {
   gated?: GatedSettings;
@@ -52,6 +55,17 @@ function httpUrl(value: unknown, label: string): string {
     throw new InvalidInput(`${label} must be an HTTP or HTTPS URL without credentials or a fragment`);
   }
   return raw;
+}
+
+function personalUrl(value: unknown): string | undefined {
+  const url = typeof value === "string" ? URL.parse(value) : null;
+  if (url?.protocol === "https:" && !url.username && !url.password && !url.hash) return url.href;
+}
+
+function loginOf(value: unknown, label: string): string {
+  const login = string(value, label, 39).toLowerCase();
+  if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(login)) throw new InvalidInput(`${label} must be a GitHub login`);
+  return login;
 }
 
 function authOf(value: unknown, hasAgents: boolean, hasPeople: boolean): Auth {
@@ -124,7 +138,7 @@ export function parseConfig(value: unknown): HouseConfig {
     const label = `rooms[${i}]`;
     const room = object(item, label, ["id", "name", "description", "capacity"]);
     const id = string(room.id, `${label}.id`);
-    if (!EVENT_PATH_SEGMENT.test(id)) throw new InvalidInput(`${label}.id is not an event stream ID`);
+    if (!EVENT_PATH_SEGMENT.test(id) || id.startsWith(DIRECT_STREAM_PREFIX)) throw new InvalidInput(`${label}.id is not a room stream ID`);
     const capacity = room.capacity;
     if (capacity !== null && (typeof capacity !== "number" || !Number.isSafeInteger(capacity) || capacity <= 0)) {
       throw new InvalidInput(`${label}.capacity must be null or a positive integer`);
@@ -132,22 +146,30 @@ export function parseConfig(value: unknown): HouseConfig {
     return { id, name: string(room.name, `${label}.name`, 128), description: string(room.description, `${label}.description`, 1024), capacity };
   });
   unique(parsedRooms.map(({ id }) => id), "rooms");
-  const parsedAgents = array(agents, "agents").map((item, i): Agent => {
-    const label = `agents[${i}]`;
-    const agent = object(item, label, ["id", "name", "service_account", "avatar_url", "chat_url"]);
-    return {
-      subject: subjectOf(agent.service_account, `${label}.service_account`),
-      actor: { kind: "agent", id: residentId(agent.id, `${label}.id`), name: string(agent.name, `${label}.name`, 128) },
-      ...(agent.avatar_url === undefined ? {} : { avatar_url: httpUrl(agent.avatar_url, `${label}.avatar_url`) }),
-      ...(agent.chat_url === undefined ? {} : { chat_url: httpUrl(agent.chat_url, `${label}.chat_url`) }),
-    };
-  });
   const parsedPeople = array(people === undefined ? [] : people, "people").map((item, i): Person => {
     const label = `people[${i}]`;
     const { login, name } = object(item, label, ["login", "name"]);
-    const id = string(login, `${label}.login`, 39).toLowerCase();
-    if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(id)) throw new InvalidInput(`${label}.login must be a GitHub login`);
+    const id = loginOf(login, `${label}.login`);
     return { subject: `github:${id}`, actor: { kind: "person", id, name: string(name, `${label}.name`, 128) } };
+  });
+  const peopleById = new Map(parsedPeople.map((person) => [person.actor.id, person]));
+  const parsedAgents = array(agents, "agents").map((item, i): Agent => {
+    const label = `agents[${i}]`;
+    const agent = object(item, label, ["id", "name", "service_account", "avatar_url", "avatar_urls", "chat_url", "owner_login", "personal_url"]);
+    const owner = agent.owner_login === undefined ? undefined : peopleById.get(loginOf(agent.owner_login, `${label}.owner_login`));
+    if (agent.owner_login !== undefined && !owner) throw new InvalidInput(`${label}.owner_login must name a registered person`);
+    const personal_url = personalUrl(agent.personal_url);
+    const urls = agent.avatar_urls === undefined ? undefined : object(agent.avatar_urls, `${label}.avatar_urls`, HOUSE_EXPRESSIONS);
+    const avatar_urls = urls === undefined ? undefined : Object.fromEntries(Object.entries(urls).map(([face, url]) => [face, httpUrl(url, `${label}.avatar_urls.${face}`)]));
+    return {
+      subject: subjectOf(agent.service_account, `${label}.service_account`),
+      actor: { kind: "agent", id: residentId(agent.id, `${label}.id`), name: string(agent.name, `${label}.name`, 128) },
+      ...(owner ? { owner } : {}),
+      ...(personal_url ? { personal_url } : {}),
+      ...(avatar_urls ? { avatar_urls } : {}),
+      ...(agent.avatar_url === undefined ? {} : { avatar_url: httpUrl(agent.avatar_url, `${label}.avatar_url`) }),
+      ...(agent.chat_url === undefined ? {} : { chat_url: httpUrl(agent.chat_url, `${label}.chat_url`) }),
+    };
   });
   unique([...parsedAgents, ...parsedPeople].map(({ actor }) => actor.id), "resident IDs");
   unique(parsedAgents.map(({ subject }) => subject), "agent ServiceAccounts");
