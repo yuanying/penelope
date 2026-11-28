@@ -85,7 +85,8 @@ export type HouseDirectAvailability = {
 export type HousePersonView = HousePersonFloor & { you: HousePersonIdentity; direct?: HouseDirectAvailability[] };
 /** An event as people are given it. `seq` is its place in the house's record: a later event has a greater one. */
 export type HousePersonEvent = HouseEvent & { seq: number };
-export type HousePersonDirectEvent = HouseDirectEvent & { seq: number };
+export type HouseDirectDeliveryStatus = "pending" | "delivered" | "expired";
+export type HousePersonDirectEvent = HouseDirectEvent & { seq: number; delivery_status?: HouseDirectDeliveryStatus };
 export type HouseHistory = { events: HousePersonEvent[]; before?: string };
 export type HouseDirectHistory = { events: HousePersonDirectEvent[]; before?: string };
 export type HouseStreamReady = { connection: string; house: HousePersonView };
