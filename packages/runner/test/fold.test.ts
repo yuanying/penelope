@@ -1,9 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import type { ContextEvent } from "@earendil-works/pi-coding-agent";
+import { normalizeContext, type JsonObject, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { streamSimple as anthropic } from "@earendil-works/pi-ai/api/anthropic-messages";
+import { streamSimple as completions } from "@earendil-works/pi-ai/api/openai-completions";
+import { streamSimple as responses } from "@earendil-works/pi-ai/api/openai-responses";
+import { convertToLlm, type ContextEvent } from "@earendil-works/pi-coding-agent";
 
-import { CALL_MAX_CHARS, FOLD_ASK, foldTurns, TURN_END } from "../src/fold.ts";
+import { FOLD_ASK, foldTurns, TURN_END } from "../src/fold.ts";
 
 type AgentMessage = ContextEvent["messages"][number];
 
@@ -24,9 +28,9 @@ const ask = (): AgentMessage => ({
 type Block =
   | { type: "text"; text: string; textSignature?: string }
   | { type: "thinking"; thinking: string; thinkingSignature?: string }
-  | { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
+  | { type: "toolCall"; id: string; name: string; arguments: JsonObject };
 
-const assistant = (...content: Block[]): AgentMessage =>
+const assistant = (...content: Block[]): Extract<AgentMessage, { role: "assistant" }> =>
   ({
     role: "assistant",
     content,
@@ -43,7 +47,7 @@ const assistant = (...content: Block[]): AgentMessage =>
       totalTokens: 0,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
     },
-  }) as AgentMessage;
+  });
 
 const result = (id: string, name: string, text: string, isError = false): AgentMessage => ({
   role: "toolResult",
@@ -54,7 +58,7 @@ const result = (id: string, name: string, text: string, isError = false): AgentM
   timestamp: clock++,
 });
 
-const call = (id: string, name: string, args: Record<string, unknown>): Block => ({ type: "toolCall", id, name, arguments: args });
+const call = (id: string, name: string, args: JsonObject): Block => ({ type: "toolCall", id, name, arguments: args });
 
 /** A turn with thinking, the shell, a read, a reply and her text. */
 function workingTurn(): AgentMessage[] {
@@ -96,68 +100,127 @@ test("an ended turn keeps the events, her text and her replies; thinking and too
   const next = user("[seq 2] ui, 2026-11-14T10:00:00Z\nありがとう");
   const { messages, folded } = foldTurns([...turn, marker(), next]);
   assert.equal(folded, 1);
-  assert.deepEqual(roles(messages), ["user", "assistant", "assistant", "toolResult", "assistant", "user"]);
+  assert.deepEqual(roles(messages), ["user", "assistant", "toolResult", "toolResult", "assistant", "toolResult", "assistant", "user"]);
 
   assert.deepEqual(messages[0], turn[0], "the event stays as it is");
-  const calls = foldedText(messages[1]);
-  assert.ok(!calls.includes("\n"), "the calls are one line");
-  for (const part of ["bash", "kubectl get pods -n monitoring", "read", "/memory/cluster.md"]) assert.ok(calls.includes(part), part);
-  assert.deepEqual((messages[2] as { content: unknown }).content, [
+  assert.deepEqual((messages[4] as { content: unknown }).content, [
     { type: "text", text: "All pods are up." },
     { type: "toolCall", id: "call_3", name: "reply", arguments: { text: "元気です", in_reply_to: 1 } },
   ]);
-  const reply = messages[3] as { toolCallId: string; content: unknown };
-  // `call_3|fc_3` is how Pi's openai-responses API pairs a call with its reasoning; a provider refuses half a pair.
-  assert.equal(reply.toolCallId, "call_3", "the half of the ID paired with the thinking is gone");
+  const reply = messages[5] as { toolCallId: string; content: unknown };
+  assert.equal(reply.toolCallId, "call_3");
   assert.deepEqual(reply.content, [{ type: "text", text: "Sent (id r-1)." }]);
-  assert.deepEqual((messages[4] as { content: unknown }).content, [{ type: "text", text: "Replied." }]);
-  assert.deepEqual(messages[5], next, "the turn now running is not folded");
+  assert.deepEqual((messages[6] as { content: unknown }).content, [{ type: "text", text: "Replied." }]);
+  assert.deepEqual(messages[7], next, "the turn now running is not folded");
 
   const text = JSON.stringify(messages);
   assert.ok(!text.includes("prometheus-0"), "no tool output is left");
   assert.ok(!text.includes("look at the pods"), "no thinking is left");
 });
 
-test("the limit of a call is the ADR's", () => {
-  // Guards against: the 200 characters of ADR-0015 changed in the code alone.
-  assert.equal(CALL_MAX_CHARS, 200);
-});
+const providerCases = [
+  {
+    api: "openai-completions",
+    expected: {
+      messages: [
+        { role: "assistant", tool_calls: [
+          { type: "function", id: "call_1", function: { name: "bash", arguments: '{"command":"ls"}' } },
+          { type: "function", id: "call_2", function: { name: "read", arguments: '{"path":"notes.md"}' } },
+        ] },
+        { role: "tool", tool_call_id: "call_1", content: "(output folded)" },
+        { role: "tool", tool_call_id: "call_2", content: "(output folded)" },
+      ],
+    },
+  },
+  {
+    api: "openai-responses",
+    expected: {
+      input: [
+        { type: "function_call", call_id: "call_1", name: "bash", arguments: '{"command":"ls"}' },
+        { type: "function_call", call_id: "call_2", name: "read", arguments: '{"path":"notes.md"}' },
+        { type: "function_call_output", call_id: "call_1", output: "(output folded)" },
+        { type: "function_call_output", call_id: "call_2", output: "(output folded)" },
+      ],
+    },
+  },
+  {
+    api: "anthropic-messages",
+    expected: {
+      messages: [
+        { role: "assistant", content: [
+          { type: "tool_use", id: "call_1", name: "bash", input: { command: "ls" } },
+          { type: "tool_use", id: "call_2", name: "read", input: { path: "notes.md" } },
+        ] },
+        { role: "user", content: [
+          { type: "tool_result", tool_use_id: "call_1", content: [{ type: "text", text: "(output folded)" }] },
+          { type: "tool_result", tool_use_id: "call_2", content: [{ type: "text", text: "(output folded)" }] },
+        ] },
+      ],
+    },
+  },
+] as const;
 
-/** The one text block a folded assistant message is left with. */
-const foldedText = (message: AgentMessage | undefined): string => {
-  const content = (message as { content: { type: string; text?: string }[] }).content;
-  assert.equal(content.length, 1);
-  assert.equal(content[0]!.type, "text");
-  return content[0]!.text!;
-};
+for (const { api, expected } of providerCases) {
+  test(`${api} receives folded calls and their matching results as tool messages`, async () => {
+    const model = {
+      provider: "example", id: "example", name: "Example", baseUrl: "https://example.com",
+      reasoning: false, input: ["text"], contextWindow: 8000, maxTokens: 1000,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    } satisfies Omit<Model<typeof api>, "api">;
+    const { messages } = foldTurns([
+      user("go"),
+      { ...assistant(call("call_1|fc_1", "bash", { command: "ls" }), call("call_2|fc_2", "read", { path: "notes.md" })), api },
+      result("call_1|fc_1", "bash", "original tool output"),
+      result("call_2|fc_2", "read", "more output"),
+      { ...assistant(call("call_partial|fc_partial", "bash", { command: "incomplete call" })), api, stopReason: "aborted" },
+      marker(),
+      user("next"),
+    ]);
+    let body: unknown;
+    const context = normalizeContext({ messages: convertToLlm(messages) });
+    const options: SimpleStreamOptions = {
+      apiKey: "test",
+      maxRetries: 0,
+      fetch: async (input, init) => {
+        body = await new Request(input, init).json();
+        return Response.json({ error: { message: "end of test" } }, { status: 400 });
+      },
+    };
+    const stream = api === "openai-completions" ? completions({ ...model, api }, context, options)
+      : api === "openai-responses" ? responses({ ...model, api }, context, options)
+      : anthropic({ ...model, api }, context, options);
+    const response = await stream.result();
+    assert.ok(body, response.errorMessage);
+    assert.partialDeepStrictEqual(body, expected);
+    assert.doesNotMatch(JSON.stringify(body), /original tool output|more output|call_partial|fc_[12]|\(folded\)/);
+  });
+}
 
-test("a tool call is cut to its limit", () => {
-  const long = "x".repeat(500);
-  const { messages } = foldTurns([user("go"), assistant(call("c1", "bash", { command: long })), result("c1", "bash", "ok"), marker()]);
-  // How the line marks itself as folded is the code's; the call in it is cut at the limit.
-  const line = foldedText(messages[1]);
-  assert.ok(line.includes("bash"));
-  assert.ok(line.includes("x".repeat(100)));
-  assert.ok(!line.includes(long), "the command is cut");
-  assert.ok([...line].length <= CALL_MAX_CHARS + 20, "to about the limit");
-});
-
-test("a call without a command or a path is shown by its arguments, on one line", () => {
+test("folded arguments stay within 200 JSON characters without changing value types", () => {
+  const long = "🌱\\\n".repeat(100);
   const { messages } = foldTurns([
-    user("go"),
-    assistant(
-      call("c1", "schedule_add", { reason: "check\nCI", at: "2026-11-15T09:00:00Z" }),
-      call("c2", "grep", { pattern: "error", path: "/var/log" }),
-    ),
-    result("c1", "schedule_add", "{}"),
-    result("c2", "grep", "lots"),
+    assistant(call("c1", "bash", { timeout: 30, command: long })),
+    result("c1", "bash", "ok"),
     marker(),
   ]);
-  // Guards against: a call that leaves nothing of what was tried, or that breaks the line.
-  const line = foldedText(messages[1]);
-  assert.ok(!line.includes("\n"), "one line");
-  for (const part of ["schedule_add", "check", "CI", "2026-11-15T09:00:00Z", "grep", "error", "/var/log"]) assert.ok(line.includes(part), part);
-  assert.ok(!line.includes("lots"), "no output");
+  const [sent] = messages;
+  assert.ok(sent?.role === "assistant");
+  const [tool] = sent.content;
+  assert.ok(tool?.type === "toolCall");
+  assert.equal(tool.arguments.timeout, 30);
+  assert.match(tool.arguments.command as string, /^🌱\\\n.*…$/s);
+  assert.ok([...JSON.stringify(tool.arguments)].length <= 200);
+});
+
+test("oversized structured arguments are omitted rather than turned into a string", () => {
+  const { messages } = foldTurns([
+    assistant(call("c1", "edit", { path: "notes.md", edits: [{ oldText: "old", newText: "new".repeat(100) }] })),
+    result("c1", "edit", "ok"),
+    marker(),
+  ]);
+  const [sent] = messages;
+  assert.ok(sent?.role === "assistant");
+  assert.deepEqual(sent.content, [call("c1", "edit", {})]);
 });
 
 test("the request before folding goes; her answer to it stays", () => {
@@ -170,15 +233,15 @@ test("the request before folding goes; her answer to it stays", () => {
     assistant({ type: "text", text: "ls shows a and b." }),
     marker(),
   ]);
-  assert.deepEqual(roles(messages), ["user", "assistant", "assistant"]);
-  assert.deepEqual((messages[2] as { content: unknown }).content, [{ type: "text", text: "ls shows a and b." }]);
+  assert.deepEqual(roles(messages), ["user", "assistant", "toolResult", "assistant"]);
+  assert.deepEqual((messages[3] as { content: unknown }).content, [{ type: "text", text: "ls shows a and b." }]);
 });
 
 test("a compaction summary passes as it is", () => {
   const summary: AgentMessage = { role: "compactionSummary", summary: "Earlier: pods checked.", tokensBefore: 1000, timestamp: clock++ };
   const { messages } = foldTurns([summary, assistant(call("c1", "bash", { command: "ls" })), result("c1", "bash", "a"), marker(), user("next")]);
   assert.deepEqual(messages[0], summary);
-  assert.deepEqual(roles(messages), ["compactionSummary", "assistant", "user"]);
+  assert.deepEqual(roles(messages), ["compactionSummary", "assistant", "toolResult", "user"]);
 });
 
 test("an ended turn keeps her answers to other agents whole, as it keeps her replies", () => {
@@ -191,9 +254,10 @@ test("an ended turn keeps her answers to other agents whole, as it keeps her rep
 
 test("a reply that has no result is folded like any other call", () => {
   const { messages } = foldTurns([user("go"), assistant(call("c1", "reply", { text: "hi" })), marker()]);
-  // Guards against: a tool call left without its result, which a provider refuses.
-  const line = foldedText(messages[1]);
-  assert.ok(line.includes("reply") && line.includes("hi"));
+  assert.partialDeepStrictEqual(messages.slice(1), [
+    { role: "assistant", content: [call("c1", "reply", { text: "hi" })] },
+    { role: "toolResult", toolCallId: "c1", content: [{ type: "text", text: "(output folded)" }], isError: true },
+  ]);
 });
 
 test("folding the next turn leaves what was folded before as it was", () => {
