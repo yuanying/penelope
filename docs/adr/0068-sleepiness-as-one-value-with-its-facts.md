@@ -88,6 +88,7 @@
 - Related: ADR-0043 モデルと思考の深さはオーナーが設定画面で選ぶ（モデルを替えるとコンテキストの上限が変わる）
 - Related: [ADR-0055 残っている仕事は heartbeat の出来事にだけ載せる](0055-show-unfinished-work-in-heartbeats.md)
 - Related: ADR-0066 一覧は配置ごとの要約の流れを読み、未読は backend が持つ（状態を出す先）
+- Related: [ADR-0074 家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md)（家に置くのは status の写し。眠気の正は引き続き backend）。
 
 ## References
 

@@ -61,6 +61,7 @@ penelope の A2A の受け口は、メッセージに文章以外の部品があ
 - Supersedes（一部）: [ADR-0018 A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) の Decision「受け口は backend の外向きの待ち受けに置き、A2A 1.0 で受ける」のうち「受けるのは文章だけ」を置き換える。送り手の確かめ方と Task の持ち主の扱いは変えない。
 - Related: [ADR-0032 返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md)。返事の時点で写すのは同じにし、オーナーへの返事と A2A の成果は別のままにする。
 - Related: [ADR-0034 オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md)。オーナーの画像と同じ種類を受けるが、会話の履歴用の写しは作らない。
+- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（家の発言の画像。A2A の画像とその上限は変えない）。
 - Related: [ADR-0046 モデル要求では接続先の上限に合わせて古い画像を省き、失敗を次のターンに伝える](0046-budget-images-before-model-requests.md)。A2A で受けた画像も接続先ごとの画像上限の対象にする。
 
 ## References

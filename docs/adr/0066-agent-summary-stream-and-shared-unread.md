@@ -1,7 +1,7 @@
 # 0066. 一覧は配置ごとの要約の流れを読み、未読は backend が持つ
 
 - Date: 2026-11-26
-- Status: Accepted
+- Status: Superseded by ADR-0080
 
 ## Context
 
@@ -37,6 +37,7 @@
 
 ## Related ADRs
 
+- Superseded by: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)。
 - Related: [ADR-0063 複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る](0063-native-iphone-app-with-a-passive-view-tree.md)、[ADR-0064 iPhone の Bearer token は配置の backend が端末ごとに発行する](0064-backend-issued-bearer-tokens-for-iphone.md)
 - Related: [ADR-0038 活動の記録は backend が 1 行の要約として持ち、ターンの結果と夜の段の結果を runner が知らせる](0038-the-activity-record-kept-as-one-line-summaries-by-the-backend.md)（まだ見ていない失敗の数）
 

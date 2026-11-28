@@ -1,7 +1,7 @@
 # 0034. オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける
 
 - Date: 2026-11-17
-- Status: Accepted
+- Status: Superseded by ADR-0079
 
 ## Context
 
@@ -70,6 +70,7 @@
 
 ## Related ADRs
 
+- Superseded by: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)。
 - Related: ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す
 - Related: ADR-0032 返事に sandbox の画像を添え、backend が写して Web UI で見せる（同じ置き場と確かめ方を、オーナーの画像に広げる）

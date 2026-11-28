@@ -1,7 +1,7 @@
 # 0009. 最初の UI は Web だけにし、新しい API と Astryx で作る
 
 - Date: 2026-11-14
-- Status: Accepted（Decision「Astryx と React 19」の、最初の Web UI にアバターを出さない点は ADR-0016 で置き換え）
+- Status: Accepted（Decision「Astryx と React 19」の、最初の Web UI にアバターを出さない点は ADR-0016 で置き換え。一部を ADR-0079 で置き換え）
 
 ## Context
 
@@ -58,6 +58,7 @@ penelope の UI は backend と分けて作る（オーナーの求め）。UI �
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの会話と、アプリがその会話 API を使う方針）。
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0002 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する

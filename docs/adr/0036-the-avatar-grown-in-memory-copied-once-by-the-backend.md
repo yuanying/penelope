@@ -90,6 +90,7 @@ backend は表情のアイコンを、ログインなしで外へ配る（Slack 
 - Related: ADR-0022 サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする
 - Related: ADR-0026 なつみ・ミャオ・アキも 1 人 1 つの配置で penelope に移し、記憶は履歴ごと写して、戻し道は持たない
 - Related: ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ
+- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（家の発言の表情。アバターの置き場は変えない）。
 - Related: ADR-0033 Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す
 
 ## References

@@ -122,6 +122,7 @@ Web UI に「活動の記録」の場所を作る。オーナーが後から、P
 - Related: ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す（きっかけの要約）
 - Related: ADR-0022 サブエージェントは runner が非同期に回し、本体とだけツールと自分宛ての出来事でやりとりする
 - Related: ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ（失敗は知らせない）
+- Related: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの Web Push は廃止。活動の記録と失敗の「見た」は残る）。
 - Related: ADR-0030 裏の仕事は runner が道具で起こし、終わったら出力の末尾を持つ出来事を本体に入れる
 - Related: [ADR-0050 夜は記憶の見取り図を渡し、棚卸しで中身と構成を分けて見直す](0050-organize-memory-with-a-map-and-a-weekly-review.md) と [ADR-0051 照合と整理の基準は別々に持ち、成功したときだけ進める](0051-carry-unfinished-night-work-forward.md)（Decision 項 2（夜の切り替えは、runner が段ごとの結果をまとめて知らせる）の記録に、毎回読む層の目安を超えた夜と、対象から落とした未照合の記録を加える）。
 

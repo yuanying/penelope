@@ -1,7 +1,7 @@
 # 0063. 複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る
 
 - Date: 2026-11-26
-- Status: Accepted
+- Status: Accepted（一部を ADR-0080 で置き換え）
 
 ## Context
 
@@ -41,10 +41,12 @@ natsumi の Mac アプリでは、共有モデルをどの View も直接参照�
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)（配置ごとの一覧、会話、接続先。Passive View と Core は残す）。
 - Related: [ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る](0009-web-ui-first-with-a-new-api-and-astryx.md)
 - Related: [ADR-0005 承認待ちは Sentinel が持ち、オーナーは Web UI で答える](0005-approvals-held-by-the-sentinel-answered-in-the-web-ui.md)
 - Related: [ADR-0016 最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる](0016-show-the-avatar-and-expression-from-the-first-web-ui.md)
 - Related: [ADR-0032 返事に sandbox の画像を添え、backend が写して Web UI で見せる](0032-images-attached-to-a-reply-copied-by-the-backend.md) と [ADR-0034 オーナーが送った画像も backend が写し、会話の履歴の行に結び付ける](0034-images-the-owner-sends-copied-by-the-backend.md)
+- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（家の発言の画像と表情）。
 - Related: [ADR-0064 iPhone の Bearer token は配置の backend が端末ごとに発行する](0064-backend-issued-bearer-tokens-for-iphone.md)、[ADR-0065 iPhone へは各 backend が本文を暗号化して APNs で知らせる](0065-encrypted-reply-notifications-over-apns.md)、[ADR-0066 一覧は配置ごとの要約の流れを読み、未読は backend が持つ](0066-agent-summary-stream-and-shared-unread.md)
 - Related（natsumi）: ADR 0015「Mac の UI は、一本の木の Passive View にする」、ADR 0028「iPhone のクライアント」
 

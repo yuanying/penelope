@@ -1,7 +1,7 @@
 # 0060. 答える口は出来事が持ち、送信を試みなければ一度だけ知らせる
 
 - Date: 2026-11-24
-- Status: Accepted
+- Status: Accepted（一部を ADR-0078 で置き換え）
 
 ## Context
 
@@ -71,6 +71,7 @@ runner は inline かどうかにかかわらず、該当する出来事の JSON
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（Decision 項 1（出来事を作る側が答える口を付ける）の `ui` への付与）。
 - Related: [ADR-0008 プロンプトは事実と環境だけを伝え、やり方は任せる](0008-prompts-state-facts-and-leave-the-how.md)（出来事ごとの手順は足さず、答える口の欄の意味を知らせる）
 - Related: [ADR-0013 出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md)（`payload` の扱いは変えず、共通の封筒の欄を加える。念押しは新しい出来事にしない）
 - Related: [ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md)（畳む前の聞き取りと念押しは別）

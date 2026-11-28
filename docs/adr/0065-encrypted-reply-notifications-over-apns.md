@@ -1,7 +1,7 @@
 # 0065. iPhone へは各 backend が本文を暗号化して APNs で知らせる
 
 - Date: 2026-11-26
-- Status: Accepted
+- Status: Superseded by ADR-0080
 
 ## Context
 
@@ -39,7 +39,9 @@ penelope は、オーナーへの返事を配置ごとの Web Push 購読に送�
 
 ## Related ADRs
 
+- Superseded by: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)。
 - Related: [ADR-0027 本人への返事はすべて Web Push で知らせ、購読は配置ごとに backend が持つ](0027-every-reply-sent-by-web-push-with-subscriptions-per-deployment.md)（送り先を追加し、Web Push は変更しない）
+- Related: [ADR-0079 会話は家で行い、個人のページは家から開く](0079-open-resident-pages-from-the-house.md)（配置ごとの Web Push は廃止）。
 - Related: [ADR-0064 iPhone の Bearer token は配置の backend が端末ごとに発行する](0064-backend-issued-bearer-tokens-for-iphone.md)、[ADR-0067 iPhone アプリは CI で署名し、TestFlight の内部テストだけに配る](0067-distribute-iphone-builds-through-internal-testflight.md)
 - Related（natsumi）: ADR 0029「iPhone に通知を届ける」
 

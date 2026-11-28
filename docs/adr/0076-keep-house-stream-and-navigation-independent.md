@@ -35,6 +35,7 @@
 
 - Related: [ADR-0082 人の居場所はブラウザの接続で変えない](0082-keep-people-in-rooms-until-they-leave.md)（人が切断しても居場所を変えない。配信範囲と画面遷移の決まりは変えない）
 - Related: [ADR-0075 家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md)
+- Related: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（部屋の配信は変えず、1 対 1 はオーナーの権限で分ける）。
 
 ## References
 

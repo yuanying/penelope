@@ -1,7 +1,7 @@
 # 0002. 出来事は取り込み口 1 つの待ち行列に入れ、sandbox の runner が取りにいく
 
 - Date: 2026-11-14
-- Status: Accepted（Decision「runner が取りにいく」の loopback を塞ぐ点は ADR-0014 で置き換え）
+- Status: Accepted（Decision「runner が取りにいく」の loopback を塞ぐ点は ADR-0014 で置き換え。一部を ADR-0078 で置き換え）
 
 ## Context
 
@@ -76,6 +76,7 @@ penelope では Pi が sandbox の中で動く（ADR-0001）。出来事を sand
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（Decision 項 3（配送の約束）のうち、会話の履歴を置く先）。
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0003 sandbox の外向きはすべて Sentinel を通し、既定は素通しで記録する
 - Related: ADR-0004 本物の鍵は Sentinel が持ち、鍵の出どころは差し替えられる口にする

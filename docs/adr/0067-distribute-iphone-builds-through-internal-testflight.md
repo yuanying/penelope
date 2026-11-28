@@ -1,7 +1,7 @@
 # 0067. iPhone アプリは CI で署名し、TestFlight の内部テストだけに配る
 
 - Date: 2026-11-26
-- Status: Accepted
+- Status: Accepted（一部を ADR-0080 で置き換え）
 
 ## Context
 
@@ -35,6 +35,7 @@
 ## Related ADRs
 
 - Related: [ADR-0063 複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る](0063-native-iphone-app-with-a-passive-view-tree.md)、[ADR-0065 iPhone へは各 backend が本文を暗号化して APNs で知らせる](0065-encrypted-reply-notifications-over-apns.md)
+- Superseded by（一部）: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)（APNs の送信元のみ。TestFlight 版が production を使う点と、署名・配布の決定は変えない）。
 - Related（natsumi）: ADR 0031「iPhone のアプリを GitHub Actions でビルドし、TestFlight で配る」
 
 ## References

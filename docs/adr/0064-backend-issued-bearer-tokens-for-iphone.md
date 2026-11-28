@@ -1,7 +1,7 @@
 # 0064. iPhone の Bearer token は配置の backend が端末ごとに発行する
 
 - Date: 2026-11-26
-- Status: Accepted
+- Status: Superseded by ADR-0080
 
 ## Context
 
@@ -37,6 +37,7 @@ Web UI では、各配置の backend が GitHub OAuth でオーナーを確認�
 
 ## Related ADRs
 
+- Superseded by: [ADR-0080 iPhone アプリは家に接続し、家から通知する](0080-connect-the-iphone-app-to-the-house.md)。
 - Related: [ADR-0010 人は GitHub OAuth で、A2A の送り手は ServiceAccount の token で確かめる](0010-github-oauth-for-people-tokenreview-for-a2a.md)（iPhone 向け token の発行の委譲元）
 - Related: [ADR-0063 複数の配置をまとめる iPhone アプリを、一本の Passive View の木で作る](0063-native-iphone-app-with-a-passive-view-tree.md)、[ADR-0065 iPhone へは各 backend が本文を暗号化して APNs で知らせる](0065-encrypted-reply-notifications-over-apns.md)
 

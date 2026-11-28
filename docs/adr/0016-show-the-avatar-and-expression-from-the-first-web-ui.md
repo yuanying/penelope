@@ -1,7 +1,7 @@
 # 0016. 最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる
 
 - Date: 2026-11-14
-- Status: Accepted
+- Status: Accepted（一部を ADR-0078 で置き換え）
 
 ## Context
 
@@ -39,6 +39,7 @@ ADR-0009 の Decision「Astryx と React 19」は、最初の Web UI にアバ�
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0078 `reply` は今いる部屋か、出かけているときはオーナーに届ける](0078-route-replies-through-the-house.md)（会話の表情を表示する画面。表情の語彙は引き継ぐ）。
 - Supersedes（一部）: ADR-0009 最初の UI は Web だけにし、新しい API と Astryx で作る（Decision「Astryx と React 19」の、最初の Web UI にアバターを出さない点）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 
