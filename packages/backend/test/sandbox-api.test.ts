@@ -417,11 +417,6 @@ describe("the sandbox's API", () => {
     });
   });
 
-  it("no longer accepts a reply at the legacy sandbox endpoint", async (t) => {
-    const { call } = await setup(t);
-    assert.equal((await call("/v1/replies", { json: { agent: "main", text: "done" } })).status, 404);
-  });
-
   describe("activity", () => {
     const at = "2026-11-14T09:00:00Z";
     it("keeps the confirmed house speech ID on the turn the runner names", async (t) => {

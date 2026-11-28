@@ -345,6 +345,18 @@ describe("the activity record", () => {
       assert.deepEqual([flow, expired, summary.id], [[], true, "t-1"]);
     });
 
+    it("keeps the house speech ID with its turn after the flow expires", async (t) => {
+      const { record, turn, clock } = setup(t);
+      turn("main", "t-1", "2026-11-14T10:00:00.000Z", "2026-11-14T10:00:05.000Z", [
+        { kind: "house_reply", at: "2026-11-14T10:00:02.000Z", turn_id: "t-1", speech_id: "speech-1" },
+      ]);
+      clock.set("2026-12-15T10:00:06Z");
+      await record.prune();
+      const detail = record.turn("t-1");
+      assert.deepEqual(detail.house_reply_ids, ["speech-1"]);
+      assert.equal(detail.turn.replies, 1);
+    });
+
     it("removes the summaries after a year", async (t) => {
       const { record, turn, clock } = setup(t);
       turn("main", "t-1", "2026-11-14T10:00:00.000Z", "2026-11-14T10:00:05.000Z");

@@ -94,6 +94,24 @@ test("reply does not resend a speech whose confirmation could not be read", asyn
   assert.deepEqual(fake.sent("POST", "/v1/agent/reply"), [{ text: "done" }]);
 });
 
+test("reply treats a house server error as an unconfirmed delivery", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(null, { status: 503 }));
+  await assert.rejects(call("reply", { text: "done" }), /may already have been recorded/);
+});
+
+test("reply treats a transport error as an unconfirmed delivery", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => { throw new TypeError("connection closed"); });
+  await assert.rejects(call("reply", { text: "done" }), /may already have been recorded/);
+});
+
+test("reply accepts a confirmed room delivery with an extra field", async () => {
+  fake.houseReplyResult = {
+    id: "s-one", destination: { kind: "room", room: { id: "living", name: "居間" } },
+    absent_to: [], not_delivered: [], ignored_to: ["fern"],
+  };
+  assert.equal(await call("reply", { text: "done" }), "Sent to 居間 (living), id s-one.");
+});
+
 test("reply without a configured house fails without sending to the backend", async () => {
   const backend = new Backend({ url: await fake.url, token: TOKEN, agent: "main" });
   tools = new Map(backendTools(backend, { home }).map((tool) => [tool.name, tool]));

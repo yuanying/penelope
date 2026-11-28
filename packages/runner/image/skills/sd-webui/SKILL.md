@@ -18,4 +18,4 @@ of the same name.
   for one picture is chosen in the call that draws it (`--model` and the like).
 - The GPU may be shared as well. A few pictures at a time, without raising `--batch-size`, leave it to the others.
 - When the WebUI is down, the answer is `502` or `504`.
-- A picture is shown to your owner by giving its path in `reply`'s `images`, and posted to Slack with `slackctl post --image`.
+- `reply` sends a picture to your current room or directly to your owner when you are away. Give its path in `images`. `slackctl post --image` sends a picture to Slack.

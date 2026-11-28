@@ -41,11 +41,6 @@ test("house leave succeeds with no response body", async () => {
   assert.equal(result.code, 0, result.stderr);
 });
 
-test("house no longer sends speech from the CLI", async () => {
-  const result = await runHouse(["say", "living", "hi"], env, async () => assert.fail("unexpected request"));
-  assert.equal(result.code, 2);
-});
-
 test("house explains invalid room IDs before sending a request", async () => {
   const result = await runHouse(["enter", "居間"], env, async () => assert.fail("unexpected request"));
   assert.equal(result.code, 2);

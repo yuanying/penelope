@@ -48,6 +48,9 @@ async function serve(env: Readonly<Record<string, string | undefined>>): Promise
     modelsPath,
   });
   const house = houseConnection(env);
+  if (!house && (env.HOUSE_URL !== undefined || env.HOUSE_TOKEN !== undefined)) {
+    process.stderr.write("runner: invalid house settings; set HOUSE_URL and HOUSE_TOKEN together to enable house replies\n");
+  }
   const runner = new Runner({
     config,
     ...(house ? { house } : {}),

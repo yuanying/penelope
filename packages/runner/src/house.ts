@@ -64,7 +64,7 @@ function refusal(status: number, kind: Command["kind"]): string {
 }
 
 export async function postHouseReply(connection: HouseConnection, speech: HouseReply, signal?: AbortSignal): Promise<HouseReplyResult> {
-  const timeout = AbortSignal.timeout(10_000);
+  const timeout = AbortSignal.timeout(speech.images?.length ? 60_000 : 10_000);
   const unconfirmed = "the speech may already have been recorded";
   const response = await fetch(new URL("/v1/agent/reply", connection.origin), {
     method: "POST",
@@ -88,9 +88,8 @@ export async function postHouseReply(connection: HouseConnection, speech: HouseR
   const destination = result?.destination;
   const validDestination = destination?.kind === "room"
     ? typeof destination.room?.id === "string" && typeof destination.room?.name === "string" &&
-      Array.isArray(result?.absent_to) && result.absent_to.every((id) => typeof id === "string") && result.ignored_to === undefined
-    : destination?.kind === "dm" && typeof destination.dm?.owner_id === "string" && typeof destination.dm?.agent_id === "string" &&
-      result?.absent_to === undefined;
+      Array.isArray(result?.absent_to) && result.absent_to.every((id) => typeof id === "string")
+    : destination?.kind === "dm" && typeof destination.dm?.owner_id === "string" && typeof destination.dm?.agent_id === "string";
   if (!result || typeof result.id !== "string" || !result.id || !validDestination ||
     !Array.isArray(result.not_delivered) || !result.not_delivered.every((actor) => typeof actor?.id === "string" && typeof actor.name === "string")) {
     throw new Error(`The house returned an invalid reply confirmation; ${unconfirmed}.`);
@@ -103,8 +102,8 @@ export function describeHouseReply({ id, destination, absent_to, ignored_to, not
     `your owner (${line(destination.dm.owner_id)}) in a direct conversation`;
   return [
     `Sent to ${where}, id ${line(id)}.`,
-    ...(absent_to?.length ? [`Not in the room: ${absent_to.map(line).join(", ")}`] : []),
-    ...(ignored_to === undefined ? [] : [`Ignored to: ${JSON.stringify(ignored_to)}`]),
+    ...(destination.kind === "room" && absent_to?.length ? [`Not in the room: ${absent_to.map(line).join(", ")}`] : []),
+    ...(destination.kind === "dm" && ignored_to !== undefined ? [`Ignored to: ${JSON.stringify(ignored_to)}`] : []),
     ...(not_delivered.length ? [`Not delivered (not awake): ${not_delivered.map(residentLabel).join(", ")}`] : []),
   ].join("\n");
 }

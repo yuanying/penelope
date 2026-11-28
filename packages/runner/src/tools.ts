@@ -61,7 +61,7 @@ export function backendTools(backend: Backend, { home, house, recordHouseReply }
       })),
       images: Type.Optional(
         Type.Array(Type.String(), {
-          description: `Paths of image files to show with the message, relative to your home or absolute: PNG, JPEG, GIF or WebP, at most ${REPLY_IMAGES_MAX}, each at most ${REPLY_IMAGE_MAX_BYTES} bytes. The owner sees copies taken when it is sent; changing a file later does not change them. If one of them cannot be sent, nothing of the message is sent, and the error says why.`,
+          description: `Paths of image files to show with the message, relative to your home or absolute: PNG, JPEG, GIF or WebP, at most ${REPLY_IMAGES_MAX}, each at most ${REPLY_IMAGE_MAX_BYTES} bytes. Recipients see copies made when the message is sent. Changing a file later does not change the copy. If one of them cannot be sent, nothing of the message is sent, and the error says why.`,
         }),
       ),
     }),

@@ -18,13 +18,13 @@ const speech = {
   answer_via: { tool: "reply" },
 } satisfies HouseConversationDelivery;
 
-function connect(t: TestContext, io: Partial<ConnectionIO>, sync: (body: HouseSync) => Response, image?: (url: URL, authorization: string | null) => Response) {
-  t.mock.timers.enable({ apis: ["setTimeout"] });
+function connect(t: TestContext, io: Partial<ConnectionIO>, sync: (body: HouseSync) => Response, image?: (url: URL, authorization: string | null, signal: AbortSignal) => Response | Promise<Response>) {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const requests: { url: string; authorization: string | null; body: HouseSync }[] = [];
   let token = "fake-service-account-first\n";
   t.mock.method(globalThis, "fetch", async (input: URL, init: RequestInit) => {
     const authorization = new Headers(init.headers).get("authorization");
-    if (init.method === "GET" && image) return image(input, authorization);
+    if (init.method === "GET" && image) return image(input, authorization, init.signal!);
     const body = JSON.parse(String(init.body)) as HouseSync;
     requests.push({ url: String(input), authorization, body });
     return sync(body);
@@ -42,7 +42,7 @@ function connect(t: TestContext, io: Partial<ConnectionIO>, sync: (body: HouseSy
   return {
     requests,
     replaceToken: (value: string) => { token = value; },
-    async next() { t.mock.timers.tick(60_000); await setImmediate(); },
+    async next(ms = 60_000) { t.mock.timers.tick(ms); await setImmediate(); },
     stop: handle.stop,
   };
 }
@@ -130,6 +130,119 @@ test("house acknowledges image speech only after the image reaches intake under 
   await connection.next();
   assert.deepEqual(seen, [[{ name: "figure-1", type: "image/png", data: png }]]);
   assert.deepEqual(connection.requests.map(({ body }) => body.ack), [[], [], ["one"]]);
+});
+
+test("house backs off a failed image download without slowing sync", async (t) => {
+  const attached: HouseConversationDelivery = {
+    ...speech, event: { ...speech.event, images: [{ id: "figure-1", name: "figure.png", mime_type: "image/png", size: 1 }] },
+  };
+  let attempts = 0;
+  const connection = connect(t, {}, () => ok(attached), () => {
+    attempts++;
+    return new Response(null, { status: 503 });
+  });
+  await setImmediate();
+  for (const ms of [2_000, 4_000, 8_000, 16_000, 30_000, 30_000]) {
+    const before = attempts;
+    for (let waited = 2_000; waited < ms; waited += 2_000) {
+      const syncs = connection.requests.length;
+      await connection.next(2_000);
+      assert.equal(connection.requests.length, syncs + 1);
+      assert.equal(attempts, before, `after ${waited} ms of the ${ms} ms delay`);
+    }
+    await connection.next(2_000);
+    assert.equal(attempts, before + 1);
+  }
+});
+
+test("house delivers and acknowledges another event before retrying the missing image", async (t) => {
+  const attached: HouseConversationDelivery = {
+    ...speech, event: { ...speech.event, images: [{ id: "figure-1", name: "figure.png", mime_type: "image/png", size: 1 }] },
+  };
+  const later = { ...speech, event: { ...speech.event, id: "later" } };
+  const accepted: string[] = [];
+  let available = false;
+  const connection = connect(t, {
+    deliver: async ([event]) => { accepted.push(event!.id); return true; },
+  }, (body) => body.ack?.includes("later") ? ok(attached) : ok(attached, later), () => available
+    ? new Response(Uint8Array.of(1), { headers: { "content-type": "image/png" } })
+    : new Response(null, { status: 503 }));
+  await setImmediate();
+  assert.deepEqual(accepted, ["later"]);
+  available = true;
+  await connection.next(2_000);
+  assert.deepEqual(connection.requests[1]?.body.ack, ["later"]);
+  assert.deepEqual(accepted, ["later", "one"]);
+});
+
+test("house keeps a full window unacknowledged until a recovered image opens a slot for the next event", async (t) => {
+  const backlog: HouseConversationDelivery[] = Array.from({ length: 50 }, (_, i) => ({
+    ...speech, event: { ...speech.event, id: `image-speech-${i}`,
+      images: [{ id: `figure-${i}`, name: "figure.png", mime_type: "image/png", size: 1 }] },
+  }));
+  backlog.push({ ...speech, event: { ...speech.event, id: "newer" } });
+  const acked = new Set<string>();
+  const accepted: string[] = [];
+  const logs: string[] = [];
+  let firstAvailable = false;
+  const connection = connect(t, {
+    deliver: async ([event]) => { accepted.push(event!.id); return true; },
+    log: (line) => logs.push(line),
+  }, ({ ack }) => {
+    for (const id of ack ?? []) acked.add(id);
+    return ok(...backlog.filter(({ event }) => !acked.has(event.id)).slice(0, 50));
+  }, (url) => firstAvailable && url.pathname.endsWith("/figure-0")
+    ? new Response(Uint8Array.of(1), { headers: { "content-type": "image/png" } })
+    : new Response(null, { status: 503 }));
+  await setImmediate();
+  assert.deepEqual(accepted, []);
+  assert.ok(logs.some((line) => line.includes("all 50 delivery slots")));
+  firstAvailable = true;
+  await connection.next(2_000);
+  assert.deepEqual([...acked], []);
+  assert.deepEqual(accepted, ["image-speech-0"]);
+  await connection.next(2_000);
+  assert.deepEqual([...acked], ["image-speech-0"]);
+  assert.deepEqual(accepted, ["image-speech-0", "newer"]);
+  await connection.next(2_000);
+  assert.deepEqual([...acked], ["image-speech-0", "newer"]);
+});
+
+test("house logs an image download failure once and logs recovery when delivery resumes", async (t) => {
+  const attached: HouseConversationDelivery = {
+    ...speech, event: { ...speech.event, images: [{ id: "figure-1", name: "figure.png", mime_type: "image/png", size: 1 }] },
+  };
+  const logs: string[] = [];
+  let available = false;
+  const connection = connect(t, { log: (line) => logs.push(line) }, () => ok(attached), () => available
+    ? new Response(Uint8Array.of(1), { headers: { "content-type": "image/png" } })
+    : new Response(null, { status: 503 }));
+  await setImmediate();
+  await connection.next();
+  assert.equal(logs.filter((line) => line.includes("cannot download a house attachment")).length, 1);
+  available = true;
+  await connection.next();
+  assert.ok(logs.includes("house attachment downloads resumed"));
+});
+
+test("house allows an image body to take longer than the header deadline but still times out a stall", async (t) => {
+  const attached: HouseConversationDelivery = {
+    ...speech, event: { ...speech.event, images: [{ id: "figure-1", name: "figure.png", mime_type: "image/png", size: 1024 * 1024 + 1 }] },
+  };
+  let download: AbortSignal | undefined;
+  const connection = connect(t, {}, () => ok(attached), (_url, _auth, signal) => {
+    download = signal;
+    const stream = new ReadableStream({
+      start(controller) { signal.addEventListener("abort", () => controller.error(signal.reason), { once: true }); },
+    });
+    return new Response(stream, { headers: { "content-type": "image/png" } });
+  });
+  await setImmediate();
+  assert.ok(download);
+  await connection.next(6_999);
+  assert.equal(download.aborted, false);
+  await connection.next(1);
+  assert.equal(download.aborted, true);
 });
 
 test("house describes a departure as leaving the room", async (t) => {
