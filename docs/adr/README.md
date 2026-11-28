@@ -18,7 +18,7 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0012 | [なつみベースのペネロペからは、並べて立ち上げてから切り替え、戻せる形を保つ](0012-move-penelope-side-by-side-and-keep-a-way-back.md) | Accepted |
 | 0013 | [出来事の中身は backend が `/sources` に追記し、ターンには要約と場所だけを渡す](0013-event-contents-in-sources-and-summaries-in-turns.md) | Accepted（一部を [ADR-0055](0055-show-unfinished-work-in-heartbeats.md) と [ADR-0069](0069-sleep-by-her-own-call-until-a-wake-time.md) で置き換え） |
 | 0014 | [sandbox の loopback は sandbox に任せ、Pod の中の口は Unix socket だけで待ち受ける](0014-sandbox-loopback-left-open-and-pod-ports-on-unix-sockets.md) | Accepted |
-| 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 と [ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md) で置き換え） |
+| 0015 | [終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) | Accepted（一部を ADR-0031 と [ADR-0071](0071-skip-the-fold-request-after-turns-without-tools.md)、[ADR-0077](0077-keep-folded-tool-calls-as-tool-messages.md) で置き換え） |
 | 0016 | [最初の Web UI からアバターを表情ごとの絵で出し、アバターは 1 つの部品に閉じる](0016-show-the-avatar-and-expression-from-the-first-web-ui.md) | Accepted |
 | 0017 | [ターンの入力は 1 行 1 件の JSON を `<events>` で囲み、1 件の型を契約にする](0017-turn-input-as-json-lines-in-events.md) | Accepted |
 | 0018 | [A2A の依頼は backend が Task として持って出来事にし、送り手は差し替えられる確かめ方で確かめる](0018-a2a-tasks-in-the-backend-and-replaceable-sender-checks.md) | Accepted（一部を ADR-0047 で置き換え） |
@@ -78,3 +78,4 @@ penelope の設計の判断の記録です。1 つの ADR に 1 つの判断を�
 | 0074 | [家は居場所と会話を持つ 1 つのサーバーにし、receivers のプラグインと CLI で差し込む](0074-a-house-server-plugged-in-through-receivers-and-a-cli.md) | Accepted |
 | 0075 | [家では住人は多くても 1 つの部屋にいて、部屋の発言は同じ部屋の起きている住人のターンを始める](0075-rooms-where-speech-starts-turns-of-awake-residents.md) | Accepted |
 | 0076 | [人への配信は表示中の部屋で絞らず、入退室の応答で画面を移さない](0076-keep-house-stream-and-navigation-independent.md) | Accepted |
+| 0077 | [畳んだターンのツール呼び出しを、呼び出しと結果の組で残す](0077-keep-folded-tool-calls-as-tool-messages.md) | Accepted |

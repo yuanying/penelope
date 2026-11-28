@@ -122,7 +122,7 @@ export class Stream {
 }
 
 /** One message of a request the fake model received, as far as the test reads it. */
-export type ChatMessage = { role: string; content?: unknown; tool_calls?: { function: { name: string; arguments: string } }[] };
+export type ChatMessage = { role: string; content?: unknown; tool_calls?: { id: string; function: { name: string; arguments: string } }[]; tool_call_id?: string };
 export type ModelCall = { at: string; credential: string; stream: boolean; messages: ChatMessage[]; tools: string[] };
 export type Seen = { at: string; scheme: string; host: string; method: string; path: string; credential: string };
 

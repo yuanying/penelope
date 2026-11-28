@@ -1,7 +1,7 @@
 # 0015. 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない
 
 - Date: 2026-11-14
-- Status: Accepted（Decision「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンに ADR-0031 で 1 つ足した。その一覧を [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md) で一部置き換え）
+- Status: Accepted（Decision「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンに ADR-0031 で 1 つ足した。その一覧を [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md) で一部置き換え。Decision「終わったターンを、送る直前に畳む」のうち、ツール呼び出しと結果の表現を [ADR-0077](0077-keep-folded-tool-calls-as-tool-messages.md) で置き換え）
 
 ## Context
 
@@ -35,7 +35,7 @@ Pi には、モデルに送る直前にメッセージの列を差し替える `
   - 届いた出来事。オーナーのメッセージも、要約と場所だけの出来事も、受け取ったときの形のままである。
   - `reply` の呼び出しと、その短い結果。
   - エージェントの地の文。
-- 畳むもの:
+- 畳むもの（ツール呼び出しと結果の表現は [ADR-0077](0077-keep-folded-tool-calls-as-tool-messages.md) で置き換え）:
   - 思考。
   - ほかのツールの結果。
   - ほかのツールの呼び出しは、コマンドやパスを 1 行に短く残す。1 つの呼び出しは 200 字までとし、出力は残さない。何を試したかは残るが、何が返ったかは残らない。
@@ -91,6 +91,7 @@ Pi には、モデルに送る直前にメッセージの列を差し替える `
 
 ## Related ADRs
 
+- Superseded by（一部）: [ADR-0077 畳んだターンのツール呼び出しを、呼び出しと結果の組で残す](0077-keep-folded-tool-calls-as-tool-messages.md)（Decision 項 1（終わったターンを、送る直前に畳む）の、返事以外のツール呼び出しと結果の表現）
 - Superseded by（一部）: [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md)（Decision 項 3「地の文の無いターンにだけ、畳む前に一度だけ頼む」の、頼まないターンの一覧）
 - Related: ADR-0001 1 つの Pod に backend・Sentinel・sandbox・receivers を置き、Pi ごと sandbox の中で動かす
 - Related: ADR-0007 セッションは 1 本にし、夜に振り返り・整理係・新しいセッションの 3 段で切り替える（本体のセッションと日中の compaction）

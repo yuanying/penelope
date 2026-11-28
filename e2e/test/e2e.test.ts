@@ -255,13 +255,17 @@ describe("the Pod end to end", () => {
     const [first] = await callsFor("E2E-TURN-2", 0);
     assert.ok(first, "the model was called for the second turn");
     const sent = JSON.stringify(first.messages);
-    // The event and the reply stay, her text stays, the other calls are one line each, and no tool output is left.
     assert.ok(sent.includes("E2E-TURN-1 こんにちは"));
     assert.ok(sent.includes("E2E-TEXT-1"));
-    // A folded call is read by its mark and its tool's name only; how the rest of the line looks is not the contract.
-    const folded = first.messages.map((message) => textOf(message.content)).filter((text) => text.includes("(folded)"));
-    assert.ok(folded.some((text) => /\bwrite\b/.test(text)), `write, folded: ${sent}`);
-    assert.ok(folded.some((text) => /\bbash\b/.test(text)), `bash, folded: ${sent}`);
+    const toolCalls = first.messages.flatMap((message) => message.tool_calls ?? []);
+    for (const name of ["write", "bash"]) {
+      const call = toolCalls.find((call) => call.function.name === name);
+      assert.ok(call, `missing folded ${name} call`);
+      const output: string[] = first.messages.flatMap((message) =>
+        message.role === "tool" && message.tool_call_id === call.id ? [textOf(message.content)] : [],
+      );
+      assert.deepEqual(output, ["(output folded)"]);
+    }
     assert.ok(!sent.includes("E2E-BASH-42"), "the output of bash is folded away");
     assert.ok(!sent.includes("Successfully wrote"), "the output of write is folded away");
     const kept = first.messages.filter((message) => message.tool_calls?.some((call) => call.function.name === "reply"));

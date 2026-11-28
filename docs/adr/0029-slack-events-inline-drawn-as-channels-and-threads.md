@@ -88,9 +88,10 @@ ADR-0013 は、受信元のプラグインが `/sources` の中身を読むた�
 - Related: ADR-0023 receivers のプラグインはリポジトリの中に持って配置の設定で有効にし、最初に Alertmanager の webhook を受ける（`source` は配置が決める）
 - Related: ADR-0028 Slack は receivers のプラグインが Socket Mode で受け、つなぎ直しのたびに最近の発言を取り直す
 - Related: ADR-0033 Slack への投稿は読み取りの CLI に足し、鍵はサロゲートのまま Sentinel を通す（読み取り用の CLI に投稿を足した）
+- Related: [ADR-0077 畳んだターンのツール呼び出しを、呼び出しと結果の組で残す](0077-keep-folded-tool-calls-as-tool-messages.md)（CLI の元の出力は引き続き省く）
 
 ## References
 
 - [出来事の仕様書](../events.md) の「`inline`」と「ターンに入る形」（2026-11-16 確認）: inline の出来事は 1 件 1 行で `text` を持つ、`batch` のまとめは inline でない出来事を受信元と `stream` ごとにまとめる
 - [backend の仕様書](../backend.md) の「設定」の `PENELOPE_INLINE_SOURCES`（2026-11-16 確認）
-- penelope `packages/runner/src/fold.ts` の `foldTurns`（2026-11-16 確認）: 畳むときに残すツールは `reply` と `reply_to_agent` だけで、ほかの呼び出しは 200 文字の 1 行に短くし、出力は残さない
+- penelope `packages/runner/src/fold.ts` の `foldTurns`（2026-11-16 確認）: 畳むときに残すツールは `reply` と `reply_to_agent` だけで、ほかの呼び出しは 200 文字の 1 行に短くし、出力は残さない（呼び出しと結果の表現は後に [ADR-0077](0077-keep-folded-tool-calls-as-tool-messages.md) で置き換え）

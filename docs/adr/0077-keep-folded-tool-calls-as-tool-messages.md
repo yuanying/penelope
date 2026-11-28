@@ -1,0 +1,42 @@
+# 0077. 畳んだターンのツール呼び出しを、呼び出しと結果の組で残す
+
+- Date: 2026-11-28
+- Status: Accepted
+
+## Context
+
+runner は、終わったターンの履歴をモデルへ送り直す前に短くする。これを「畳む」と呼ぶ。これまで、返事以外のツール呼び出しは、呼び出しのブロックではなく `(folded)` で始まる地の文に置き換え、結果は省いていた。
+
+本番で、小型モデルが履歴にある `(folded)` の行をまねて地の文を書き、ツールを呼ばずにターンを終えた。runner は地の文をツール呼び出しとして実行しない。
+
+## Decision
+
+日中の本体セッションで終わったターンを畳むとき、ツール呼び出しを地の文に変えず、ツール呼び出しのブロックとして残す。引数は短くし、各呼び出しに対応するツール結果を一つ付ける。元の出力は送らず、結果には出力を畳んだことを示す短い定型文を入れる。結果のない呼び出しにも定型文の結果を付ける。
+
+`reply` と `reply_to_agent` は、実行結果があれば、引数と短い結果を従来どおり残す。思考は省く。出来事、地の文、ターンを畳む時点、元のセッション記録は変えない。
+
+### 本 ADR で決定しないこと
+
+- 引数を短くする規則と定型文の文面（委譲先: [sandbox API の「終わったターンの畳み込み」](../sandbox-api.md#終わったターンの畳み込み)）
+- 畳む前の頼みを送る条件（委譲先: [ADR-0071 の Decision](0071-skip-the-fold-request-after-turns-without-tools.md#decision)）
+
+## Consequences
+
+- モデルは畳んだ呼び出しを、まねる対象の地の文ではなく、過去のツール呼び出しとして受け取る。
+- 呼び出しごとに結果と識別子を送る分、地の文にまとめるより入力が増える。元のツール出力と長い引数は引き続き省く。
+
+## Alternatives Considered
+
+- **畳んだ行を別の種類のメッセージへ移す**: 地の文とは区別できても、ツール呼び出しがあったことを API 上の呼び出しと結果の組で表せない。
+- **`(folded)` の行を検知して知らせる**: 地の文を出力した後にしか対処できず、モデルにまねさせる履歴が残る。
+
+## Related ADRs
+
+- Supersedes（一部）: [ADR-0015 終わったターンは、モデルに送る直前に機械的に畳み、セッションの記録は書き換えない](0015-fold-ended-turns-before-they-are-sent.md) の Decision 項 1（終わったターンを、送る直前に畳む）のうち、返事以外のツール呼び出しと結果の表現。
+- Related: [ADR-0071 ツールを呼ばず地の文も無く終わったターンには、畳む前の頼みを送らない](0071-skip-the-fold-request-after-turns-without-tools.md)
+
+## References
+
+- 本番のセッション記録（2026-11-28、運用担当者が確認、非公開）: 畳んだ呼び出しをまねた地の文が出て、ツールを呼ばずにターンが終わった。
+- [変更前の `packages/runner/src/fold.ts` の `foldTurn` と `callLine`](https://github.com/yuanying/penelope/blob/19aa8619760417f52237dfdaad4d966456c1d59c/packages/runner/src/fold.ts)（2026-11-28 確認）: `(folded)` の行は assistant のテキストブロックに入る。
+- [実際のプロバイダー変換を通す `packages/runner/test/fold.test.ts` の `receives folded calls and their matching results as tool messages`](../../packages/runner/test/fold.test.ts)（2026-11-28 確認）: OpenAI Chat Completions、Responses、Anthropic Messages のリクエストに入る呼び出しと結果の組。

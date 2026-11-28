@@ -1263,7 +1263,7 @@ test("a turn that ends without her own text is asked once; then it is folded", a
     [[1, "pods?"]],
   );
   assert.ok(sent.includes("The pods were all up."), "her answer stays");
-  assert.ok(sent.includes("echo pods-output"), "the call stays as a line");
+  assert.ok(sent.includes("echo pods-output"), "the call stays");
   assert.ok(!sent.includes("pods-output\\n"), "the output goes");
   assert.ok(!isAsk(next.userTexts.join("\n")), "the request goes");
   assert.ok(!sent.includes('"check"'), "the thinking goes");

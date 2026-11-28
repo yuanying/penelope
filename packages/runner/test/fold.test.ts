@@ -152,8 +152,8 @@ const providerCases = [
           { type: "tool_use", id: "call_2", name: "read", input: { path: "notes.md" } },
         ] },
         { role: "user", content: [
-          { type: "tool_result", tool_use_id: "call_1", content: [{ type: "text", text: "(output folded)" }] },
-          { type: "tool_result", tool_use_id: "call_2", content: [{ type: "text", text: "(output folded)" }] },
+          { type: "tool_result", tool_use_id: "call_1", content: "(output folded)" },
+          { type: "tool_result", tool_use_id: "call_2", content: "(output folded)" },
         ] },
       ],
     },

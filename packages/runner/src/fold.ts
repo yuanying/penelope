@@ -1,9 +1,9 @@
 // Folding the turns that have ended (ADR-0015). The session records every turn
 // whole; what the model is sent has each ended turn cut down to the events,
-// her own text and her replies, with every other tool call left as one short
-// line and no thinking or tool output. The fold is made afresh before every
-// model call from the messages alone, so the same messages always fold the
-// same way, and the part before the turn just ended stays as it was sent.
+// her own text and her replies, with other tool calls paired with placeholder
+// results. The fold is made afresh before every model call from the messages
+// alone, so the same messages always fold the same way, and the part before
+// the turn just ended stays as it was sent.
 //
 // Where a turn ends is marked in the session by a custom message the runner
 // appends when the turn is over. The markers never reach the model, folding
@@ -11,13 +11,13 @@
 
 import type { ContextEvent, ExtensionFactory } from "@earendil-works/pi-coding-agent";
 
+import { ANSWER_REMINDER } from "./answer-reminder.ts";
+
 type AgentMessage = ContextEvent["messages"][number];
 type Assistant = Extract<AgentMessage, { role: "assistant" }>;
 type Block = Assistant["content"][number];
 type ToolCall = Extract<Block, { type: "toolCall" }>;
 type ToolResult = Extract<AgentMessage, { role: "toolResult" }>;
-
-import { ANSWER_REMINDER } from "./answer-reminder.ts";
 
 /** The custom message that marks the end of a turn. It has no content. */
 export const TURN_END = "penelope.turn_end";
@@ -25,10 +25,8 @@ export const TURN_END = "penelope.turn_end";
 export const FOLD_ASK = "penelope.fold_ask";
 /** The calls kept whole, with their results: what reached her owner, or an agent she answered over A2A. */
 export const KEPT_TOOLS = new Set(["reply", "reply_to_agent"]);
-/** The longest a folded call, or a kept call's result, is in characters. */
-export const CALL_MAX_CHARS = 200;
-/** Stands before the folded calls of one answer. */
-export const FOLDED = "(folded) ";
+const CALL_MAX_CHARS = 200;
+const FOLDED_OUTPUT = "(output folded)";
 /** What a call refused while the fold request is answered gets back. */
 export const NO_TOOLS = "No tool runs while the turn is being folded.";
 
@@ -72,42 +70,70 @@ function foldTurn(turn: AgentMessage[]): AgentMessage[] {
       out.push(message);
       continue;
     }
-    const text: Block[] = [];
-    const lines: string[] = [];
-    const kept: ToolCall[] = [];
+    // Pi drops incomplete assistant messages on replay, so their results must not be sent either.
+    if (message.stopReason === "error" || message.stopReason === "aborted") continue;
+    const content: Block[] = [];
+    const toolResults: ToolResult[] = [];
     for (const block of message.content) {
-      if (block.type === "text" && block.text.trim()) text.push({ type: "text", text: block.text });
+      if (block.type === "text" && block.text.trim()) content.push({ type: "text", text: block.text });
       if (block.type !== "toolCall") continue;
-      if (KEPT_TOOLS.has(block.name) && results.has(block.id)) kept.push(block);
-      else lines.push(callLine(block));
+      const result = results.get(block.id);
+      const id = callId(block.id);
+      const keep = result !== undefined && KEPT_TOOLS.has(block.name);
+      content.push({
+        type: "toolCall", id, name: block.name,
+        arguments: keep ? block.arguments : foldArguments(block.arguments ?? {}),
+        ...(block.namespace === undefined ? {} : { namespace: block.namespace }),
+      });
+      if (keep) {
+        toolResults.push({ ...result, toolCallId: id, content: [{ type: "text", text: cut(textOf(result.content)) }] });
+      } else {
+        toolResults.push({
+          role: "toolResult", toolCallId: id, toolName: block.name,
+          content: [{ type: "text", text: FOLDED_OUTPUT }],
+          timestamp: result?.timestamp ?? message.timestamp,
+          isError: result?.isError ?? true,
+        });
+      }
     }
-    const content: Block[] = [...text];
-    if (lines.length > 0) content.push({ type: "text", text: `${FOLDED}${lines.join(" | ")}` });
-    // The thinking a call was paired with is gone; an ID that names the pairing keeps only the call's own part.
-    content.push(...kept.map((block) => ({ ...block, id: callId(block.id) })));
-    if (content.length === 0) continue;
-    out.push({ ...message, content });
-    for (const block of kept) {
-      const result = results.get(block.id)!;
-      out.push({ ...result, toolCallId: callId(result.toolCallId), content: [{ type: "text", text: cut(textOf(result.content)) }] });
-    }
+    if (content.length > 0) out.push({ ...message, content }, ...toolResults);
   }
   return out;
 }
 
-/** One call as a short line: its command, or what it searched and where, or its path, or its arguments. */
-function callLine(call: ToolCall): string {
-  const args = (call.arguments ?? {}) as Record<string, unknown>;
-  const str = (key: string) => (typeof args[key] === "string" ? (args[key] as string) : undefined);
-  const command = str("command");
-  const pattern = str("pattern");
-  const path = str("path");
-  let what: string;
-  if (command !== undefined) what = command;
-  else if (pattern !== undefined) what = path !== undefined ? `${pattern} in ${path}` : pattern;
-  else if (path !== undefined) what = path;
-  else what = JSON.stringify(args);
-  return cut(`${call.name}: ${what}`);
+function jsonLength(value: ToolCall["arguments"] | string): number {
+  let length = 0;
+  for (const _ of JSON.stringify(value)) {
+    if (++length > CALL_MAX_CHARS + 2) break;
+  }
+  return length;
+}
+
+function foldArguments(args: ToolCall["arguments"]): ToolCall["arguments"] {
+  const entries = Object.entries(args);
+  const short = Object.fromEntries(entries.map(([key, value]) => [key, typeof value === "string" ? "" : value]));
+  let remaining = CALL_MAX_CHARS - jsonLength(short);
+  if (remaining < 0) return {};
+  for (const key of new Set(["command", "pattern", "path", ...Object.keys(args)])) {
+    const value = args[key];
+    if (typeof value !== "string") continue;
+    const length = jsonLength(value) - 2;
+    if (length <= remaining) {
+      short[key] = value;
+      remaining -= length;
+    } else if (remaining > 0) {
+      let prefix = "";
+      for (const char of value) {
+        const width = jsonLength(char) - 2;
+        if (width >= remaining) break;
+        prefix += char;
+        remaining -= width;
+      }
+      short[key] = `${prefix}…`;
+      remaining--;
+    }
+  }
+  return short;
 }
 
 /** On one line, and no longer than the limit, with a mark where it was cut. */
